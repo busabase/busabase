@@ -31,7 +31,7 @@ import { seedScenario } from "./helpers/seed-scenario";
  * Hiding a component cannot be the only thing in the way.
  */
 describe("embed visitor procedure surface", () => {
-  it("binds prompt snapshot validation to the trusted request origin while keeping Agent RPC forbidden", async () => {
+  it("accepts prompt source aliases while keeping Embed Agent RPC forbidden", async () => {
     await seedScenario("embed-prompt-origin-guard");
     const client = createRouterClient(busabaseRouter);
     const doc = await client.docs.create({
@@ -74,14 +74,13 @@ describe("embed visitor procedure surface", () => {
     );
     if (!context) throw new Error("expected the same-origin Desktop clipboard context to decode");
 
-    // Reproduce the former transport failure without replacing the real resolver:
-    // a valid capability alone lacks the trusted host attribution the validator needs.
+    // Background execution may lack an HTTP origin; prompt metadata grants no authority.
     const { embedOrigin: _origin, ...contextBeforeOriginBinding } = auth.context;
-    await expect(
-      runWithEmbedContext(contextBeforeOriginBinding, async () =>
+    expect(
+      await runWithEmbedContext(contextBeforeOriginBinding, async () =>
         validateAgentPromptResourceContext([context]),
       ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    ).toEqual([context]);
 
     await runWithEmbedContext(auth.context, async () => {
       await expect(client.nodes.get({ nodeId: doc.node.id })).resolves.toMatchObject({
@@ -94,16 +93,15 @@ describe("embed visitor procedure surface", () => {
       };
       expect(
         decodeAgentPromptClipboard(JSON.stringify(forgedEnvelope), text, source, "forged-paste"),
-      ).toBeNull();
+      ).toEqual(createPromptResourceContext(forgedEnvelope, "forged-paste"));
       const forged = createPromptResourceContext(forgedEnvelope, "forged-rpc");
-      await expect(
-        Promise.resolve().then(() => validateAgentPromptResourceContext([forged])),
-      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      expect(validateAgentPromptResourceContext([forged])).toEqual([forged]);
 
-      // Matching context origin is attribution, never permission to use an Agent.
+      // Source metadata is attribution, never permission to use an Agent.
       // Exercise the complete router so the public surface guard remains authoritative.
       for (const input of [
         { sessionId: "unavailable-to-embed", text: "", resourceContext: [context] },
+        { sessionId: "unavailable-to-embed", text: "", resourceContext: [forged] },
         { sessionId: "unavailable-to-embed", text: "Read this document." },
       ]) {
         await expect(client.agents.sessions.prompt(input)).rejects.toMatchObject({

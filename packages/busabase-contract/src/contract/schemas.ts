@@ -13,6 +13,7 @@ import {
   type NodeType,
   OPERATION_KINDS,
 } from "../domains/registry";
+import { NodeSlugSchema } from "../node-slug";
 import { type NodeIcon, NodeIconSchema } from "../types/node-icon";
 import { AgentClientVOSchema } from "./agent-client";
 import { destructiveAutoMerge } from "./auto-merge";
@@ -691,17 +692,70 @@ const changeRequestSchema = z.object({
  */
 const pendingChangeRequestSchema = changeRequestSchema.extend({ materialized: z.literal(false) });
 
-// A unit of work for an external agent (poll via /agent/tasks). Self-describing:
-// the full change request (operations + diffs), why it is queued, the requested-
-// changes summary, and the agent-mentioning comments directing the revision.
-// Each of those comments carries its `mentions`, so a poller can finally see
-// WHICH agent was asked instead of only that "some agent" was.
+// A unit of work for an external agent (poll via /agent/tasks): the change
+// request, why it is queued, the requested-changes summary, and the
+// agent-mentioning comments directing the revision. Each of those comments
+// carries its `mentions`, so a poller can see WHICH agent was asked.
+//
+// The embedded change request is a list-sized preview, like an inbox row: at
+// most 20 operations, and any field value over 4 KB replaced by a marker that
+// says so. A queue that agents poll used to carry every operation with full
+// field values — 3.5 MB for eight tasks in one workspace. `truncated` says
+// when something was left out and `changeRequestPath` is where to read it.
+//
+// The new fields are optional in the schema only so a newer client still
+// parses an older server's response; this server always sends them.
 const agentTaskSchema = z.object({
+  id: z
+    .string()
+    .optional()
+    .describe(
+      "The change request id (same as `changeRequest.id`). Pass the last task's `id` as `cursor` to read the next page.",
+    ),
   changeRequest: changeRequestSchema,
   trigger: z.enum(["changes_requested", "ai_mention"]),
   reviewReason: z.string().nullable(),
   aiComments: z.array(commentSchema),
+  truncated: z
+    .boolean()
+    .optional()
+    .describe(
+      "True when `changeRequest` leaves something out: operations beyond the first 20 (see `omittedOperationCount`), or field values over 4 KB, which read as `[long text omitted from the list view - open the change request to view]`. Read `changeRequestPath` for every operation with full values before revising — never send a placeholder back as a field value.",
+    ),
+  omittedOperationCount: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe(
+      "How many of the change request's operations are not in `changeRequest.operations` (`changeRequest.operationCount` is the true total).",
+    ),
+  changeRequestPath: z
+    .string()
+    .optional()
+    .describe(
+      "API path of the complete change request, e.g. `/api/v1/change-requests/cr_…` (`GET`, every operation with full field values).",
+    ),
 });
+
+const listAgentTasksInputSchema = z
+  .object({
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe(
+        "Page size, 1-100. Omit for at most 100 tasks (the historical call, now bounded) — page with `cursor` for the rest.",
+      ),
+    cursor: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("`id` of the last task on the previous page. Tasks come oldest first."),
+  })
+  .optional();
 
 const searchResultSchema = z.object({
   id: z.string(),
@@ -898,10 +952,7 @@ const nodeOperationInputSchema = z.discriminatedUnion("kind", [
         "Parent this node under a node an EARLIER operation in the same change request created (matched by its ref). Mutually exclusive with parentNodeId.",
       ),
     nodeType: z.enum(CREATABLE_NODE_TYPES),
-    slug: z
-      .string()
-      .min(1)
-      .regex(/^[a-z0-9-]+$/),
+    slug: NodeSlugSchema,
     name: z.string().min(1),
     description: z.string().optional().default(""),
     metadata: z.record(z.string(), z.unknown()).optional().default({}),
@@ -1457,6 +1508,7 @@ export {
   changeRequestCountsSchema,
   inboxSnapshotResponseSchema,
   agentTaskSchema,
+  listAgentTasksInputSchema,
   searchResultSchema,
   searchResponseSchema,
   searchInteractionInputSchema,

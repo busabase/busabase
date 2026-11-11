@@ -31,7 +31,7 @@ import {
   sliceDocLinesRange,
   splitDocLines as splitTextLines,
 } from "../domains/doc/handlers";
-import { folderReadmeKey } from "../domains/folder/handlers";
+import { folderReadmeKey, resolveFolderReadme } from "../domains/folder/handlers";
 import { richNodeDocumentKey } from "../domains/rich-node/handlers";
 import {
   extractWhiteboardSearchableText,
@@ -53,8 +53,8 @@ export interface NodeContentAdapter {
    * scanned as-is — which is the better case in two ways: it can be streamed
    * line by line without ever holding the whole object in memory, and every
    * reported line number is a REAL source line the user can open the file at.
-   * `doc` and `folder` (markdown) and `html` (raw source, stored unwrapped on
-   * purpose) are in that camp.
+   * `doc` and `folder` (markdown, or a folder's raw HTML) and `html` (raw
+   * source, stored unwrapped on purpose) are in that camp.
    *
    * When present, the whole object must be read and converted first, so the
    * scan is not streamed and the resulting line numbers are SYNTHETIC — they
@@ -74,6 +74,9 @@ export const NODE_CONTENT_ADAPTERS = {
   // OTHER node type working (the rich types were already arrows). Calling
   // through an arrow defers the lookup to call time, when the cycle has settled.
   doc: { storageKey: (nodeId: string) => docBodyKey(nodeId) },
+  // The Markdown object. An HTML readme lives at `readme.html` instead, which
+  // `openNodeContentSource` resolves before reading — this key alone is not
+  // the whole story for a folder.
   folder: { storageKey: (nodeId: string) => folderReadmeKey(nodeId) },
   html: { storageKey: (nodeId: string) => richNodeDocumentKey(nodeId, "html") },
   whiteboard: {
@@ -122,17 +125,27 @@ export const openNodeContentSource = async (
   type: SearchableNodeType,
   nodeId: string,
 ): Promise<MutableTextSource> => {
-  const storageKey = NODE_CONTENT_ADAPTERS[type].storageKey(nodeId);
-  // A folder readme is optional. GET treats a missing object as `""`, and grep
-  // must do the same — otherwise every folder that never had a readme is
-  // reported as a failed scan. Docs and rich nodes always materialize an
-  // object, so a missing object there stays an error.
-  if (type === "folder" && !(await storage.objectExists(storageKey))) {
-    return emptyMutableTextSource();
+  if (type === "folder") {
+    // A folder readme is optional and may be either `readme.md` or
+    // `readme.html` — resolved the same way GET resolves it. A missing object
+    // is `""` there, and grep must do the same — otherwise every folder that
+    // never had a readme is reported as a failed scan. Docs and rich nodes
+    // always materialize an object, so a missing object there stays an error.
+    const readme = await resolveFolderReadme(nodeId);
+    // An HTML result already proved its object exists.
+    if (readme.format === "markdown" && !(await storage.objectExists(readme.key))) {
+      return emptyMutableTextSource();
+    }
+    return openMutableTextSource({
+      // The HTML object gets its own entry rather than sharing the Markdown
+      // one's name across a format switch.
+      cacheKey: readme.format === "html" ? `${type}:${nodeId}:html` : `${type}:${nodeId}`,
+      storageKey: readme.key,
+    });
   }
   return openMutableTextSource({
     cacheKey: `${type}:${nodeId}`,
-    storageKey,
+    storageKey: NODE_CONTENT_ADAPTERS[type].storageKey(nodeId),
   });
 };
 

@@ -4,145 +4,102 @@ import type { BaseFieldVO } from "busabase-contract/types";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "kui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import { Check, ChevronDown, Search, X } from "lucide-react";
-import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { fmt, useCoreLocale } from "../../../i18n";
 import { choiceFieldMessages } from "../../../i18n/choice-field";
-import { getChoiceBadgeClass } from "../helpers/field";
+import {
+  getChoiceBadgeClass,
+  getChoiceRawValues,
+  type ResolvedChoice,
+  resolveChoiceValue,
+} from "../helpers/field";
 
 type Choice = NonNullable<BaseFieldVO["options"]["choices"]>[number];
-type SelectedChoice = { raw: string; choice?: Choice; issue?: "unavailable" | "ambiguous" };
 
-// IDs are authoritative. A historical name resolves only if it identifies one option.
-function resolveChoice(raw: string, choices: readonly Choice[]): SelectedChoice {
-  const byId = choices.find((choice) => choice.id === raw);
-  if (byId) return { raw, choice: byId };
-  const byName = choices.filter((choice) => choice.name === raw);
-  return byName.length === 1
-    ? { raw, choice: byName[0] }
-    : { raw, issue: byName.length > 1 ? "ambiguous" : "unavailable" };
-}
+/**
+ * Popover sizing for an option picker anchored to its trigger: as wide as the
+ * trigger up to 480px, never narrower than 280px. Used by the record form's
+ * picker and by the grid cell's picker, so both open the same panel.
+ */
+export const choicePopoverClassName =
+  "flex max-h-[var(--radix-popover-content-available-height)] w-[min(480px,var(--radix-popover-trigger-width))] min-w-[min(280px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0";
 
-/** Controlled record draft editor: closing/searching never writes or clears a record. */
-export function ChoiceFieldEditor({
-  ariaDescribedBy,
+/**
+ * The searchable option list of a select / multiselect field: search box,
+ * listbox, empty state and the "N selected · Clear" footer, with the keyboard
+ * model (arrows, Home/End, Enter, Space on the list, IME-safe). Mount it only
+ * while its popover is open: each mount starts a fresh search on the current
+ * selection.
+ *
+ * Shared by the record form (`ChoiceFieldEditor`, in its popover or phone
+ * sheet) and the grid's in-cell editor, so an option is picked the same way in
+ * both. It never decides what a pick means: `onChange` reports the next value
+ * and why (an option was chosen, or the selection was cleared), and the host
+ * decides whether that closes, saves, or only updates a draft.
+ */
+export function ChoiceOptionsPanel({
   field,
   fieldName,
+  initialQuery = "",
   inputId,
   onChange,
+  searchInputRef,
   value,
 }: {
-  ariaDescribedBy?: string;
   field: BaseFieldVO;
   fieldName: string;
+  /** Text already typed into the search box (type-to-edit in the grid). */
+  initialQuery?: string;
   inputId: string;
-  onChange: (value: unknown) => void;
+  onChange: (value: unknown, reason: "choose" | "clear") => void;
+  /** The search box, for the host's popover/dialog to focus when it opens. */
+  searchInputRef?: RefObject<HTMLInputElement | null>;
   value: unknown;
 }) {
   const copy = choiceFieldMessages[useCoreLocale()];
   const multiple = field.type === "multiselect";
   const choices = field.options.choices ?? [];
-  const rawValues = Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
-    : typeof value === "string" && value
-      ? [value]
-      : [];
-  const selected = rawValues.map((raw) => resolveChoice(raw, choices));
+  const rawValues = getChoiceRawValues(value);
+  const selected = rawValues.map((raw) => resolveChoiceValue(raw, choices));
   const selectedIds = new Set(selected.flatMap((item) => (item.choice ? [item.choice.id] : [])));
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [expanded, setExpanded] = useState(false);
-  const [mobile, setMobile] = useState(false);
-  const [viewportHeight, setViewportHeight] = useState<number>();
-  const [viewportBottom, setViewportBottom] = useState(0);
-  const [collapse, setCollapse] = useState({ count: rawValues.length, height: 0 });
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-  const chipsRef = useRef<HTMLDivElement>(null);
-  const composing = useRef(false);
+  const [query, setQuery] = useState(initialQuery);
   const search = query.trim().toLocaleLowerCase();
   const candidates = choices.filter((choice) => choice.name.toLocaleLowerCase().includes(search));
+  // Open on the first selected option the opening search still shows.
+  const [activeIndex, setActiveIndex] = useState(() =>
+    Math.max(
+      0,
+      candidates.findIndex((choice) => selectedIds.has(choice.id)),
+    ),
+  );
+  const ownInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = searchInputRef ?? ownInputRef;
+  const listRef = useRef<HTMLDivElement>(null);
+  const composing = useRef(false);
   const activeChoice = candidates[Math.min(activeIndex, candidates.length - 1)];
   const activeId = activeChoice ? `${inputId}-choice-${activeChoice.id}` : undefined;
   const listId = `${inputId}-choices`;
 
   useEffect(() => {
-    const media = window.matchMedia?.("(max-width: 639px)");
-    const update = () => {
-      setMobile(media?.matches ?? false);
-      setViewportHeight(window.visualViewport?.height ?? window.innerHeight);
-      setViewportBottom(
-        Math.max(
-          0,
-          window.innerHeight -
-            (window.visualViewport?.height ?? window.innerHeight) -
-            (window.visualViewport?.offsetTop ?? 0),
-        ),
-      );
-    };
-    update();
-    media?.addEventListener("change", update);
-    window.visualViewport?.addEventListener("resize", update);
-    window.visualViewport?.addEventListener("scroll", update);
-    return () => {
-      media?.removeEventListener("change", update);
-      window.visualViewport?.removeEventListener("resize", update);
-      window.visualViewport?.removeEventListener("scroll", update);
-    };
-  }, []);
+    if (activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeId]);
 
-  // Measure the actual wrapping, rather than hiding an arbitrary number of tags.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: value and options change the measured DOM children.
-  useLayoutEffect(() => {
-    const chips = chipsRef.current;
-    if (!chips || !multiple) return;
-    const measure = () => {
-      const items = Array.from(chips.children) as HTMLElement[];
-      const rows = [...new Set(items.map((item) => item.offsetTop))].sort((a, b) => a - b);
-      const secondRow = rows[1] ?? rows[0] ?? 0;
-      const visible = items.filter((item) => item.offsetTop <= secondRow);
-      setCollapse({
-        count: visible.length,
-        height: Math.max(
-          0,
-          ...visible.map((item) => item.offsetTop - (rows[0] ?? 0) + item.offsetHeight),
-        ),
-      });
-    };
-    measure();
-    const observer =
-      typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
-    observer?.observe(chips);
-    return () => observer?.disconnect();
-  }, [multiple, value, field.options.choices]);
-
-  useEffect(() => {
-    if (open && activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: "nearest" });
-  }, [activeId, open]);
-
-  const changeOpen = (next: boolean) => {
-    setOpen(next);
-    if (next) {
-      setQuery("");
-      const index = choices.findIndex((choice) => selectedIds.has(choice.id));
-      setActiveIndex(Math.max(0, index));
-    }
-  };
   const choose = (choice: Choice) => {
     if (!multiple) {
-      onChange(choice.id);
-      setOpen(false);
+      onChange(choice.id, "choose");
       return;
     }
     const next = selectedIds.has(choice.id)
       ? selected.filter((item) => item.choice?.id !== choice.id)
       : [...selected, { raw: choice.id, choice }];
-    onChange([...new Set(next.map((item) => item.choice?.id ?? item.raw))]);
-  };
-  const remove = (index: number) => {
-    onChange(multiple ? rawValues.filter((_, itemIndex) => itemIndex !== index) : "");
-    triggerRef.current?.focus();
+    onChange([...new Set(next.map((item) => item.choice?.id ?? item.raw))], "choose");
   };
   const navigate = (event: KeyboardEvent<HTMLElement>, fromSearch: boolean) => {
     if (event.nativeEvent.isComposing || event.keyCode === 229 || composing.current) {
@@ -173,44 +130,12 @@ export function ChoiceFieldEditor({
     }
   };
   const clear = () => {
-    onChange(multiple ? [] : "");
+    onChange(multiple ? [] : "", "clear");
     inputRef.current?.focus();
   };
-  const badge = (item: SelectedChoice) => (
-    <span
-      className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-xs ${item.issue ? "border-destructive/50 bg-destructive/5 text-destructive" : getChoiceBadgeClass(item.choice?.color)}`}
-    >
-      <span className="truncate">{item.choice?.name ?? item.raw}</span>
-      {item.issue ? <span className="shrink-0">({copy[item.issue]})</span> : null}
-    </span>
-  );
-  const placeholder = multiple ? copy.selectMultiple : copy.select;
-  const trigger = (
-    <button
-      aria-describedby={[ariaDescribedBy, `${inputId}-selection`].filter(Boolean).join(" ")}
-      aria-label={fieldName}
-      className="absolute inset-0 flex w-full items-center justify-end rounded-md pr-2.5 text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
-      id={inputId}
-      ref={triggerRef}
-      type="button"
-    >
-      <ChevronDown aria-hidden className="size-4" />
-    </button>
-  );
-  const content = (
+
+  return (
     <>
-      {mobile ? (
-        <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
-          <DialogTitle className="text-sm">{fieldName}</DialogTitle>
-          <button
-            className="min-h-11 rounded px-3 text-primary text-sm"
-            onClick={() => setOpen(false)}
-            type="button"
-          >
-            {copy.done}
-          </button>
-        </div>
-      ) : null}
       <div className="flex shrink-0 items-center gap-2 border-b px-3">
         <Search aria-hidden className="size-4 shrink-0 text-muted-foreground" />
         <input
@@ -332,6 +257,142 @@ export function ChoiceFieldEditor({
       </div>
     </>
   );
+}
+
+/** Controlled record draft editor: closing/searching never writes or clears a record. */
+export function ChoiceFieldEditor({
+  ariaDescribedBy,
+  field,
+  fieldName,
+  inputId,
+  onChange,
+  value,
+}: {
+  ariaDescribedBy?: string;
+  field: BaseFieldVO;
+  fieldName: string;
+  inputId: string;
+  onChange: (value: unknown) => void;
+  value: unknown;
+}) {
+  const copy = choiceFieldMessages[useCoreLocale()];
+  const multiple = field.type === "multiselect";
+  const choices = field.options.choices ?? [];
+  const rawValues = getChoiceRawValues(value);
+  const selected = rawValues.map((raw) => resolveChoiceValue(raw, choices));
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [mobile, setMobile] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState<number>();
+  const [viewportBottom, setViewportBottom] = useState(0);
+  const [collapse, setCollapse] = useState({ count: rawValues.length, height: 0 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const chipsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const media = window.matchMedia?.("(max-width: 639px)");
+    const update = () => {
+      setMobile(media?.matches ?? false);
+      setViewportHeight(window.visualViewport?.height ?? window.innerHeight);
+      setViewportBottom(
+        Math.max(
+          0,
+          window.innerHeight -
+            (window.visualViewport?.height ?? window.innerHeight) -
+            (window.visualViewport?.offsetTop ?? 0),
+        ),
+      );
+    };
+    update();
+    media?.addEventListener("change", update);
+    window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
+    return () => {
+      media?.removeEventListener("change", update);
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
+    };
+  }, []);
+
+  // Measure the actual wrapping, rather than hiding an arbitrary number of tags.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: value and options change the measured DOM children.
+  useLayoutEffect(() => {
+    const chips = chipsRef.current;
+    if (!chips || !multiple) return;
+    const measure = () => {
+      const items = Array.from(chips.children) as HTMLElement[];
+      const rows = [...new Set(items.map((item) => item.offsetTop))].sort((a, b) => a - b);
+      const secondRow = rows[1] ?? rows[0] ?? 0;
+      const visible = items.filter((item) => item.offsetTop <= secondRow);
+      setCollapse({
+        count: visible.length,
+        height: Math.max(
+          0,
+          ...visible.map((item) => item.offsetTop - (rows[0] ?? 0) + item.offsetHeight),
+        ),
+      });
+    };
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
+    observer?.observe(chips);
+    return () => observer?.disconnect();
+  }, [multiple, value, field.options.choices]);
+
+  const remove = (index: number) => {
+    onChange(multiple ? rawValues.filter((_, itemIndex) => itemIndex !== index) : "");
+    triggerRef.current?.focus();
+  };
+  const badge = (item: ResolvedChoice) => (
+    <span
+      className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-xs ${item.issue ? "border-destructive/50 bg-destructive/5 text-destructive" : getChoiceBadgeClass(item.choice?.color)}`}
+    >
+      <span className="truncate">{item.choice?.name ?? item.raw}</span>
+      {item.issue ? <span className="shrink-0">({copy[item.issue]})</span> : null}
+    </span>
+  );
+  const placeholder = multiple ? copy.selectMultiple : copy.select;
+  const trigger = (
+    <button
+      aria-describedby={[ariaDescribedBy, `${inputId}-selection`].filter(Boolean).join(" ")}
+      aria-label={fieldName}
+      className="absolute inset-0 flex w-full items-center justify-end rounded-md pr-2.5 text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      id={inputId}
+      ref={triggerRef}
+      type="button"
+    >
+      <ChevronDown aria-hidden className="size-4" />
+    </button>
+  );
+  const content = (
+    <>
+      {mobile ? (
+        <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
+          <DialogTitle className="text-sm">{fieldName}</DialogTitle>
+          <button
+            className="min-h-11 rounded px-3 text-primary text-sm"
+            onClick={() => setOpen(false)}
+            type="button"
+          >
+            {copy.done}
+          </button>
+        </div>
+      ) : null}
+      <ChoiceOptionsPanel
+        field={field}
+        fieldName={fieldName}
+        inputId={inputId}
+        onChange={(next, reason) => {
+          onChange(next);
+          // A single choice is made: close, as a native select does.
+          if (!multiple && reason === "choose") setOpen(false);
+        }}
+        searchInputRef={inputRef}
+        value={value}
+      />
+    </>
+  );
 
   return (
     <div className="min-w-0" data-choice-field-editor={field.slug}>
@@ -382,7 +443,7 @@ export function ChoiceFieldEditor({
           </div>
         )}
         {mobile ? (
-          <Dialog onOpenChange={changeOpen} open={open}>
+          <Dialog onOpenChange={setOpen} open={open}>
             <DialogTrigger asChild>{trigger}</DialogTrigger>
             <DialogContent
               aria-describedby={undefined}
@@ -407,12 +468,12 @@ export function ChoiceFieldEditor({
             </DialogContent>
           </Dialog>
         ) : (
-          <Popover onOpenChange={changeOpen} open={open}>
+          <Popover onOpenChange={setOpen} open={open}>
             <PopoverTrigger asChild>{trigger}</PopoverTrigger>
             <PopoverContent
               align="start"
               aria-label={fieldName}
-              className="flex max-h-[var(--radix-popover-content-available-height)] w-[min(480px,var(--radix-popover-trigger-width))] min-w-[min(280px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
+              className={choicePopoverClassName}
               collisionPadding={16}
               onOpenAutoFocus={(event) => {
                 event.preventDefault();

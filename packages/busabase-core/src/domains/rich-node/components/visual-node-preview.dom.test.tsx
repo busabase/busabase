@@ -277,6 +277,34 @@ describe("visual node preview parity", () => {
     );
   });
 
+  it("keeps the workflow save status out of the step action buttons", async () => {
+    window.history.replaceState(null, "", "/workflow/lead-intake-workflow?demo=node-types");
+    const messages = coreMessagesByLocale.en;
+    const { container } = render(
+      <Providers>
+        <WorkflowDetailView orpc={orpc} slug={workflowDetail.node.id} />
+        <TopbarNodeActionsSlot />
+      </Providers>,
+    );
+    await screen.findByTestId("workflow-editor");
+
+    const status = container.querySelector("[data-rich-node-save-status]");
+    const actions = container.querySelector("[data-rich-node-actions]");
+    const addStep = screen.getByRole("button", { name: messages.richNodes.addStep });
+    const remove = screen.getByRole("button", { name: messages.richNodes.deleteSelection });
+
+    expect(status).not.toBeNull();
+    expect(status?.className).toContain("truncate");
+    expect(status?.className).not.toContain("sm:block");
+    expect(actions?.contains(status)).toBe(false);
+    expect(actions?.contains(addStep)).toBe(true);
+    expect(actions?.contains(remove)).toBe(true);
+    // The label used to be painted inside a fixed square and covered Delete.
+    expect(addStep.textContent ?? "").not.toContain(messages.richNodes.addStep);
+    expect(addStep.className).toContain("overflow-hidden");
+    expect(remove.className).toContain("overflow-hidden");
+  });
+
   it("renders local-fullscreen read-only Side Panel previews without changing the main URL", async () => {
     window.history.replaceState(null, "", "/dashboard/local/home?demo=node-types");
     const messages = coreMessagesByLocale.en;

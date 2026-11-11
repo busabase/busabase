@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_SIDE_PANEL_WIDTH,
   MAX_SIDE_PANEL_WIDTH,
@@ -12,6 +14,23 @@ const airAppTab = {
   title: "Example AirApp",
   payload: { nodeId: "node-1" },
 };
+
+const agentTab = {
+  id: "agent-buda:research",
+  type: "agent-chat",
+  title: "Research",
+  payload: { agentSlug: "buda:research", sessionId: "session-a" },
+};
+
+const storageKey = "busabase-side-panel-prefs";
+const reloadStore = async () => {
+  const saved = localStorage.getItem(storageKey);
+  useSidePanelStore.setState(useSidePanelStore.getInitialState(), true);
+  if (saved !== null) localStorage.setItem(storageKey, saved);
+  await useSidePanelStore.persist.rehydrate();
+};
+
+afterEach(() => localStorage.clear());
 
 describe("side panel display modes", () => {
   beforeEach(() => {
@@ -150,5 +169,118 @@ describe("side panel display modes", () => {
 
     useSidePanelStore.getState().setWidth(MAX_SIDE_PANEL_WIDTH + 100);
     expect(useSidePanelStore.getState().width).toBe(MAX_SIDE_PANEL_WIDTH);
+  });
+
+  it("resumes only scoped agent references, without saving drafts or live preview payloads", async () => {
+    const store = useSidePanelStore.getState();
+    store.setScope("space-a:user-a");
+    store.openTab({
+      ...agentTab,
+      payload: {
+        ...agentTab.payload,
+        draft: { id: "draft-private", text: "Unsent private question" },
+        attachments: ["private.pdf"],
+        transcript: "Private transcript",
+      },
+    });
+    store.openTab(airAppTab);
+    store.setWidth(560);
+
+    const saved = localStorage.getItem(storageKey);
+    expect(saved).not.toContain("Unsent private question");
+    expect(saved).not.toContain("private.pdf");
+    expect(saved).not.toContain("Private transcript");
+    expect(saved).not.toContain("airapp-preview");
+
+    await reloadStore();
+    useSidePanelStore.getState().setScope("space-a:user-a");
+
+    expect(useSidePanelStore.getState()).toMatchObject({
+      scopeKey: "space-a:user-a",
+      isOpen: true,
+      width: 560,
+      tabs: [agentTab],
+      activeTabId: agentTab.id,
+    });
+  });
+
+  it("restores the active agent tab and the session selected after it opened", async () => {
+    const store = useSidePanelStore.getState();
+    store.setScope("space-a:user-a");
+    store.openTab(agentTab);
+    store.openTab({
+      id: "agent-buda:writer",
+      type: "agent-chat",
+      title: "Writer",
+      payload: { agentSlug: "buda:writer", sessionId: "session-writer" },
+    });
+    store.setActiveTab(agentTab.id);
+    store.updateTabPayload(agentTab.id, { ...agentTab.payload, sessionId: "older-session" });
+
+    await reloadStore();
+
+    expect(useSidePanelStore.getState()).toMatchObject({
+      activeTabId: agentTab.id,
+      tabs: [
+        { ...agentTab, payload: { ...agentTab.payload, sessionId: "older-session" } },
+        { id: "agent-buda:writer" },
+      ],
+    });
+  });
+
+  it("restores a collapsed conversation and keeps an explicitly closed conversation closed", async () => {
+    const store = useSidePanelStore.getState();
+    store.setScope("space-a:user-a");
+    store.openTab(agentTab);
+    store.setOpen(false);
+    await reloadStore();
+    expect(useSidePanelStore.getState()).toMatchObject({ isOpen: false, tabs: [agentTab] });
+
+    useSidePanelStore.getState().closeTab(agentTab.id);
+    await reloadStore();
+    expect(useSidePanelStore.getState()).toMatchObject({ tabs: [], activeTabId: null });
+  });
+
+  it.each(["space-b:user-a", "space-a:user-b"])(
+    "does not resurrect saved chats after switching ownership to %s and back",
+    async (scopeKey) => {
+      const store = useSidePanelStore.getState();
+      store.setScope("space-a:user-a");
+      store.openTab(agentTab);
+      await reloadStore();
+
+      useSidePanelStore.getState().setScope(scopeKey);
+      await reloadStore();
+      useSidePanelStore.getState().setScope("space-a:user-a");
+      expect(useSidePanelStore.getState()).toMatchObject({ tabs: [], activeTabId: null });
+    },
+  );
+
+  it.each([
+    { tabs: [agentTab], activeTabId: agentTab.id },
+    { scopeKey: "space-a:user-a", tabs: [airAppTab], activeTabId: airAppTab.id },
+    {
+      scopeKey: "space-a:user-a",
+      tabs: [{ ...agentTab, id: "agent-different" }],
+      activeTabId: "agent-different",
+    },
+    {
+      scopeKey: "space-a:user-a",
+      tabs: [{ ...agentTab, payload: { agentSlug: 42 } }],
+      activeTabId: agentTab.id,
+    },
+  ])("ignores malformed or unscoped saved content: %j", async (content) => {
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ state: { isOpen: true, width: 560, ...content }, version: 0 }),
+    );
+    await reloadStore();
+    expect(useSidePanelStore.getState()).toMatchObject({
+      isOpen: true,
+      width: 560,
+      scopeKey: null,
+      tabs: [],
+      activeTabId: null,
+    });
   });
 });

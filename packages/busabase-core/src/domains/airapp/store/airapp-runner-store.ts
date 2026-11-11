@@ -121,6 +121,12 @@ export interface AirAppRunEntry {
    * at render time, in the viewer's locale, the way `engineUnavailable` does.
    */
   siteBlockers: SiteBundleBlocker[] | null;
+  /** File listing used when this run began; never replaced by a later listing. */
+  filesRevision: string | null;
+  /** Keeps edits made during automatic site recovery pending until checked. */
+  recoveringSite: boolean;
+  /** Recent attempts keep a stale slug/id query from retrying an older listing. */
+  siteCheckedRevisions: string[];
   runner: AirAppRunner | null;
   /** Which engine `runner` was built with — kept alongside `runner` so the
    *  engine picker can show the running/last-used engine even though
@@ -134,6 +140,7 @@ export interface AirAppEngineUnavailable {
 }
 
 const MAX_LOG_LINES = 2000;
+const MAX_SITE_CHECKED_REVISIONS = 32;
 
 export const IDLE_ENTRY: AirAppRunEntry = {
   status: "idle",
@@ -144,6 +151,9 @@ export const IDLE_ENTRY: AirAppRunEntry = {
   engineUnavailable: null,
   engineLock: null,
   siteBlockers: null,
+  filesRevision: null,
+  recoveringSite: false,
+  siteCheckedRevisions: [],
   runner: null,
   runnerKind: DEFAULT_RUNNER_KIND,
 };
@@ -173,7 +183,14 @@ interface AirAppRunnerStoreState {
   getEffectiveRunnerKind: (nodeId: string) => AirAppRunnerKind;
   /** Starts a fresh run for `nodeId`: disposes any existing runner for that
    *  node first, then resets the entry to a clean "loading-files" state. */
-  beginRun: (nodeId: string, runner: AirAppRunner, runnerKind: AirAppRunnerKind) => void;
+  beginRun: (
+    nodeId: string,
+    runner: AirAppRunner,
+    runnerKind: AirAppRunnerKind,
+    filesRevision?: string,
+    recoveringSite?: boolean,
+  ) => void;
+  finishSiteRecovery: (nodeId: string, runner: AirAppRunner) => void;
   /**
    * Advance a running app's status — everything EXCEPT `"error"`.
    *
@@ -233,8 +250,16 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
 
       getEffectiveRunnerKind: (nodeId) => get().lastEffectiveKinds[nodeId] ?? DEFAULT_RUNNER_KIND,
 
-      beginRun: (nodeId, runner, runnerKind) => {
-        get().entries[nodeId]?.runner?.dispose();
+      beginRun: (nodeId, runner, runnerKind, filesRevision, recoveringSite = false) => {
+        const previous = get().entries[nodeId];
+        previous?.runner?.dispose();
+        const siteCheckedRevisions =
+          runnerKind === "site" && filesRevision
+            ? [
+                ...(recoveringSite ? (previous?.siteCheckedRevisions ?? []) : []),
+                filesRevision,
+              ].slice(-MAX_SITE_CHECKED_REVISIONS)
+            : [];
         set((state) => ({
           entries: {
             ...state.entries,
@@ -247,12 +272,27 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
               engineUnavailable: null,
               engineLock: null,
               siteBlockers: null,
+              filesRevision: filesRevision ?? null,
+              recoveringSite,
+              siteCheckedRevisions,
               runner,
               runnerKind,
             },
           },
         }));
       },
+
+      finishSiteRecovery: (nodeId, runner) =>
+        set((state) => {
+          const current = state.entries[nodeId];
+          if (current?.runner !== runner || !current.recoveringSite) return state;
+          return {
+            entries: {
+              ...state.entries,
+              [nodeId]: { ...current, recoveringSite: false },
+            },
+          };
+        }),
 
       setStatus: (nodeId, runner, status) =>
         set((state) => {
@@ -337,6 +377,9 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
               engineUnavailable: engineUnavailable ?? null,
               engineLock: engineLock ?? null,
               siteBlockers: null,
+              filesRevision: null,
+              recoveringSite: false,
+              siteCheckedRevisions: [],
               runner: null,
               runnerKind,
             },

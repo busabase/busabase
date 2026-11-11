@@ -2,6 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSessionScope } from "./agent-session-store";
 import type { AgentSessionSupervisorHost } from "./agent-session-supervisor";
 
+// These unit tests isolate SQL/capacity behavior; durable restore holds have
+// their own real-storage integration coverage.
+vi.mock("../../dump/logic/restore-activity", () => ({
+  isRestoreAutomationBlocked: async () => false,
+}));
+
 const store = vi.hoisted(() => ({
   claimWriterLease: vi.fn(),
   expireSessionCommands: vi.fn(async () => true),

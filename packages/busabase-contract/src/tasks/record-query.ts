@@ -1,3 +1,4 @@
+import { RECORD_PAGE_FIELD_GUIDANCE } from "./record-page-fields";
 import type { BusabaseTaskClient, TaskDefinition } from "./types";
 
 /**
@@ -38,7 +39,8 @@ export const recordQueryTask: TaskDefinition<RecordQueryInput> = {
     "Always keyset-paginated: when `nextCursor` comes back non-null there ARE more records — page with it instead of raising `limit` (capped at 100). " +
     "Pass countOnly to get the total without fetching rows — it is a real, exact SQL count (never an estimate), so it is the right tool for a dashboard total instead of paging through everything and counting client-side. " +
     'countOnly accepts viewId and/or filters to count a scoped subset (e.g. "PRs on the main branch"); both require baseId. ' +
-    "To find records by a field value use `record_find_by_field`; to search content use `search` or `grep`.",
+    "To find records by a field value use `record_find_by_field`; to search content use `search` or `grep`. " +
+    RECORD_PAGE_FIELD_GUIDANCE,
   annotations: { readOnly: true, destructive: false },
   params: [
     { name: "baseId", kind: "string", description: "Restrict to one Base. Omit for the space." },

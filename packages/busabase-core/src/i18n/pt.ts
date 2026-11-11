@@ -724,6 +724,8 @@ export const dashboardPt: CoreI18nMessages = {
     engineFollowAppNamed: "Seguir o app ({engine})",
     engineFollowAppHint:
       "O airapp.json deste app decide. Escolha um mecanismo para substituí-lo neste nó.",
+    engineFollowAppFallback:
+      "O airapp.json deste app prefere {preferred}, que não está disponível aqui. Mecanismo em uso: {engine}.",
     engineRequired: "O app exige {engine}",
     engineRequiredHint:
       "Este requisito é definido por requiredEngine no airapp.json e não pode ser substituído neste nó.",
@@ -768,6 +770,36 @@ export const dashboardPt: CoreI18nMessages = {
     swUnsupportedLinkCopied: "Link copiado",
     swUnsupportedCopyFailed: "Não foi possível copiar o link. Selecione e copie manualmente:",
     site: {
+      publish: {
+        previewStale:
+          "Os arquivos mudaram após esta prévia. Crie ou atualize a prévia do site antes de publicar.",
+        noPreview: "Crie uma prévia do site antes de publicar.",
+        previewUnavailable: "Não foi possível carregar a prévia. Crie novamente antes de publicar.",
+        title: "Publicar como site",
+        description:
+          "Dê a este AirApp um Busabase Site sempre disponível com endereço público fixo. Visitantes não precisam de conta no Busabase.",
+        preserveBrowser: "A prévia no navegador continua funcionando enquanto você prepara o site.",
+        checking: "Verificando se o site está pronto…",
+        checkFailed: "Não foi possível verificar o site. Tente novamente.",
+        planRequired: "A hospedagem de sites está incluída a partir do plano {plan}.",
+        paidPlanRequired: "Este espaço precisa de um plano pago para hospedar um site.",
+        upgradeHint:
+          "Prepare o app e depois faça o upgrade do espaço para visualizar e publicar. Um link de prévia no navegador não é um site sempre disponível.",
+        prepareTitle: "Preparar a versão web",
+        prepareHint:
+          "Peça ao agente para preparar uma versão web. Pode ser necessário alterar o código antes de publicar.",
+        copyPrompt: "Copiar prompt para o agente",
+        copied: "Prompt copiado",
+        agentPrompt:
+          "Use a habilidade busabase-app-creator para preparar este AirApp como Busabase Site. Examine os arquivos e preserve a execução no navegador e as funções existentes. Adicione uma declaração site explícita em airapp.json e recursos estáticos; se necessário, um Worker JavaScript ES empacotado em um único módulo com fetch como exportação padrão. Não publique um servidor Node de desenvolvimento nem apenas mude o motor. Mantenha site.access somente leitura, salvo se precisar escrever; exponha apenas endpoints específicos e seguros, nunca a chave API nem um proxy para requisições arbitrárias. Valide o pacote e explique as alterações necessárias. Eu publicarei após revisar a prévia privada.",
+        previewHint: "Crie primeiro uma prévia privada e revise aqui antes de torná-la pública.",
+        createPreview: "Criar prévia do site",
+        preparingPreview: "Preparando prévia…",
+        refreshPreview: "Atualizar prévia do site",
+        previewTitle: "Prévia privada do site",
+        publishConsent:
+          "A versão revisada será publicada. Qualquer pessoa com o endereço poderá usar o site, incluindo os dados e as ações expostos pelo código.",
+      },
       statusNotLive: "Não publicado",
       statusLive: "Publicado",
       statusLiveWithChanges: "Alterações não publicadas",
@@ -2304,6 +2336,22 @@ export const dashboardPt: CoreI18nMessages = {
     uploadFailed: "Falha no upload",
     uploading: "Enviando...",
     addFile: "Adicionar arquivo",
+    drive: {
+      filePath: "Caminho do arquivo",
+      moveFile: "Renomear ou mover",
+      moveFolder: "Renomear ou mover pasta",
+      moveFolderHint:
+        "Edite o caminho para renomear ou mover a pasta com todo o conteúdo, por ex. contracts/2026. Deixe vazio para mover o conteúdo para a raiz.",
+      folderPath: "Caminho da pasta",
+      movePathHint: "Altere as pastas do caminho para movê-lo, por ex. contracts/2026/main.pdf.",
+      apply: "Aplicar",
+      pathTaken: 'Já existe algo em "{path}". Escolha outro caminho.',
+      invalidPath: "Informe um caminho válido, por ex. contracts/2026/main.pdf.",
+      folderIntoItself: "Uma pasta não pode ser movida para dentro dela mesma.",
+      removeFolderBody:
+        'Isso remove "{folder}" e seus {count} arquivo{plural} deste campo. Nada muda até você salvar o registro.',
+      emptyFolderHint: "Pastas vazias não são salvas. Adicione arquivos para manter esta pasta.",
+    },
     properties: "Propriedades",
     source: "Origem",
     openFullPage: "Abrir página completa",
@@ -2553,6 +2601,7 @@ export const dashboardPt: CoreI18nMessages = {
     member: "Membro",
     lookup: "Consulta",
     attachment: "Arquivo",
+    drive: "Drive",
     ai_summary: "Resumo de IA",
     ai_tags: "Tags de IA",
     created_time: "Criado em",
@@ -2742,6 +2791,13 @@ export const dashboardPt: CoreI18nMessages = {
       "Um POST (JSON ou texto) ou GET para esta URL inicia uma execução. A requisição fica em steps.trigger.payload.request: method, query, headers e body. Se uma etapa de código retornar { response: … } antes de a execução pausar, quem chamou recebe isso; caso contrário, recebe 202 e o ID da execução. Qualquer pessoa com esta URL pode iniciar uma execução: troque-a para que a antiga pare de funcionar. As mudanças valem depois de salvar.",
     hookNeedsEvent:
       "Mude o modo de execução para Evento nas configurações de execução; caso contrário, esta URL responde 404.",
+    webhookSign: "Assinar as requisições",
+    webhookSigningSecret: "Segredo de assinatura",
+    webhookSigningRegenerate: "Trocar o segredo",
+    webhookSigningHint:
+      'Cada requisição leva o cabeçalho X-Busabase-Signature: t=<hora Unix>,v1=<HMAC-SHA256 em hexadecimal de "<t>.<corpo>" com este segredo>. Confira onde a requisição chega e rejeite um t com mais de alguns minutos, para que uma requisição falsificada ou repetida seja recusada. Quem puder abrir este fluxo de trabalho pode ler o segredo: troque-o para o antigo deixar de valer. As alterações valem depois de salvar.',
+    webhookSignOffHint:
+      "Desativado: a requisição não leva assinatura. Ative para o receptor poder conferir que uma requisição veio desta etapa.",
     functionCode: "Código",
     functionCodeHint:
       "JavaScript que roda no servidor quando a execução chega a esta etapa. input traz os dados da execução (payload, steps, record), await fetch(...) chama URLs públicas e o valor retornado é a saída desta etapa (as etapas seguintes leem como steps.<id>.<campo>). Qualquer pessoa que possa abrir este fluxo de trabalho pode ler o código.",
@@ -2823,6 +2879,26 @@ export const dashboardPt: CoreI18nMessages = {
     findRecordsForEach: "Executar as próximas etapas uma vez para cada registro",
     findRecordsForEachHint:
       "Cada registro ganha sua própria execução, sobre esse registro: Atualizar um registro o altera, e as etapas seguintes o leem como record. Esta execução termina aqui, e essas execuções esperam a vez conforme a concorrência.",
+    runIn: "Executar em",
+    runInServer: "Este servidor",
+    runInSandbox: "Uma máquina sandbox",
+    runInServerHint: "Rápido. Só JavaScript, sem pacotes, até o tempo limite do fluxo de trabalho.",
+    runInSandboxHint:
+      "Uma máquina iniciada para esta etapa: JavaScript ou Python, pacotes instalados antes, até 10 minutos. A execução espera por ela como numa etapa de espera, então uma requisição que iniciou a execução recebe 202.",
+    runInSandboxLocked: "Executar código em um sandbox exige o plano {plan}.",
+    runInSandboxNotConfigured:
+      "Este servidor não tem sandbox configurado. Um administrador pode ativá-lo com uma chave de API do Sandock.",
+    sandboxLanguage: "Linguagem",
+    sandboxLanguageJavascript: "JavaScript (Node.js)",
+    sandboxLanguagePython: "Python",
+    sandboxPackages: "Pacotes",
+    sandboxPackagesHintJavascript:
+      'Pacotes npm instalados antes, separados por espaços, como dayjs ou lodash@4. Carregue-os com require("dayjs").',
+    sandboxPackagesHintPython:
+      "Pacotes pip instalados antes, separados por espaços, como requests ou pycryptodome==3.20.0. Importe-os normalmente.",
+    sandboxCode: "Código em um sandbox",
+    sandboxCodeHint:
+      "Executa na máquina sandbox. input tem os dados da execução e o que você retornar é a saída desta etapa. Qualquer pessoa que possa abrir este fluxo de trabalho pode ler o código.",
     customActionHint: "Este nome de ação ainda não faz nada: é apenas registrado.",
     chooseBase: "Escolha uma base",
     targetRecord: "Registro (opcional)",
@@ -2915,6 +2991,8 @@ export const dashboardPt: CoreI18nMessages = {
     triggerSchedule: "Agendamento",
     triggerWebhook: "Requisição",
     triggerForEach: "Por registro",
+    waitingSandbox: "Executando código em um sandbox. A execução continua quando ele terminar.",
+    waitingSandboxDeadline: "É interrompido se não terminar até {time}.",
     runDetails: "Detalhes da execução",
     recordLabel: "Registro: {id}",
     waitingUntil: "Aguardando até {time}. Depois continua sozinha.",
@@ -2923,6 +3001,12 @@ export const dashboardPt: CoreI18nMessages = {
     approve: "Aprovar",
     reject: "Rejeitar",
     errorLabel: "Erro",
+    retryFromStep: "Tentar de novo a partir desta etapa",
+    retryFromStepHint:
+      "Inicia uma nova execução que mantém como estavam todas as etapas anteriores e executa de novo só esta. Uma requisição que esta etapa já enviou é enviada outra vez.",
+    retriedAsLink: "Repetida: abrir a nova execução",
+    retryOfLink: "Nova tentativa de uma execução anterior: abri-la",
+    triggerRetry: "Nova tentativa",
     steps: "Passos",
     noSteps: "Nenhum passo foi concluído ainda.",
     stepData: "Dados",
@@ -2966,6 +3050,16 @@ export const dashboardPt: CoreI18nMessages = {
     rename: "Instalar os itens em conflito com novos nomes",
     renameHint: "Adiciona um sufixo (-2, -3, …). O conteúdo existente não é alterado.",
     warningsTitle: "Vale saber",
+    folderName: "Nome da pasta",
+    folderNameHint: "Nome exibido no espaço de trabalho. Você pode usar qualquer idioma.",
+    folderNameRequired: "Digite um nome de pasta.",
+    installUnavailable: "Não é possível iniciar a instalação agora. Tente novamente mais tarde.",
+    installNoChanges: "Nenhum conteúdo do modelo foi criado. Você pode tentar novamente.",
+    installPartial:
+      "Parte do conteúdo foi criada antes da interrupção. Verifique o espaço antes de tentar novamente.",
+    installUnknown:
+      "Não foi possível confirmar o resultado. Verifique o espaço antes de instalar novamente.",
+    technicalDetails: "Detalhes técnicos",
     targetFolder: "Instalar na pasta",
     targetFolderHint: "Uma nova pasta é criada para o pacote. O padrão é o nome do próprio pacote.",
     requireReview: "Enviar o conteúdo para revisão primeiro",

@@ -64,6 +64,7 @@ import {
 } from "../../dashboard/components/side-panel-sources";
 import { useWorkspacePermissionLevel } from "../../dashboard/components/split-submit-button";
 import { formatDetailTime, formatFullTime } from "../../dashboard/helpers/format";
+import { knownNodeCacheScope } from "../../dashboard/helpers/known-node-cache";
 import { NodeAvatar } from "../../dashboard/helpers/node-icons";
 import type { LoadedNode } from "../../dashboard/node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../../dashboard/side-panel-registry";
@@ -260,6 +261,8 @@ interface AgentDetailViewProps {
    * which would land a question about one node in another node's transcript.
    */
   initialSessionId?: string;
+  /** Reports the visible conversation so its owner can save a resumable reference. */
+  onSessionChange?: (sessionId: string) => void;
   /**
    * A prompt to prefill (never send) into the composer. See `AcpComposerDraft`:
    * re-supplying the same `id` is a no-op, so this is safe to leave hanging in
@@ -312,6 +315,7 @@ function AgentDetailViewContent({
   onBack,
   compactSessionNavigation = false,
   initialSessionId,
+  onSessionChange,
   draft,
   onDraftApplied,
   contextNode = null,
@@ -391,15 +395,6 @@ function AgentDetailViewContent({
    */
   const [statusOverlay, setStatusOverlay] = useState<AgentSessionStatusUpdate | null>(null);
 
-  // Follow the caller's target when it changes. This is what makes a SECOND
-  // Ask Agent — about a different node, in the already-open tab — switch the
-  // conversation instead of prefilling the previous node's transcript. Not
-  // folded into the `activeSessionId` memo below because a manual click in the
-  // session rail must still win afterwards.
-  useEffect(() => {
-    if (initialSessionId) setSelectedSessionId(initialSessionId);
-  }, [initialSessionId]);
-
   const sessionListOptions = useMemo(() => {
     const options = orpc.agents.sessions.listPaged.infiniteOptions({
       input: (pageParam: string | undefined) => ({
@@ -416,6 +411,14 @@ function AgentDetailViewContent({
     ...sessionListOptions,
     refetchInterval: 4000,
   });
+  // A second Ask Agent can name a session that was just created outside this
+  // view. Refresh its paged query too, without letting stale rows replace the
+  // requested conversation while that read is pending.
+  useEffect(() => {
+    if (!initialSessionId) return;
+    setSelectedSessionId(initialSessionId);
+    void queryClient.invalidateQueries({ queryKey: sessionListOptions.queryKey });
+  }, [initialSessionId, queryClient, sessionListOptions.queryKey]);
   const connections = useQuery({
     ...orpc.agents.connections.list.queryOptions({ input: { scope: "space" } }),
     queryKey: [
@@ -490,18 +493,36 @@ function AgentDetailViewContent({
     }
   }, [sessionBridge, sessions.data, sessions.dataUpdatedAt]);
 
-  // Derived, not effect-driven: a manual selection wins only while it still
-  // names one of *this* agent's sessions. Switching agentSlug (or the
-  // selected session ending) naturally falls back to the most recent session
-  // for the current agent — no reset effect needed, and the 4s list refetch
-  // can't clobber a still-valid manual selection.
-  const activeSessionId = useMemo(() => {
-    if (selectedSessionId && agentSessions.some((s) => s.id === selectedSessionId)) {
-      return selectedSessionId;
+  // An explicit selection may be below the first page, or absent from a stale
+  // page while Ask Agent hands off a newly created session. Resolve that exact
+  // conversation before rendering or saving it; never substitute the newest.
+  const selectedSessionMissing =
+    selectedSessionId !== null &&
+    !agentSessions.some((session) => session.id === selectedSessionId);
+  useEffect(() => {
+    if (
+      selectedSessionMissing &&
+      sessions.hasNextPage &&
+      !sessions.isFetching &&
+      !sessions.isFetchNextPageError
+    ) {
+      void sessions.fetchNextPage();
     }
-    return agentSessions[0]?.id ?? null;
-  }, [selectedSessionId, agentSessions]);
+  }, [
+    selectedSessionMissing,
+    sessions.fetchNextPage,
+    sessions.hasNextPage,
+    sessions.isFetching,
+    sessions.isFetchNextPageError,
+  ]);
+  const activeSessionId = useMemo(() => {
+    if (selectedSessionMissing) return null;
+    return selectedSessionId ?? agentSessions[0]?.id ?? null;
+  }, [selectedSessionId, selectedSessionMissing, agentSessions]);
   const active = agentSessions.find((s) => s.id === activeSessionId) ?? null;
+  useEffect(() => {
+    if (activeSessionId) onSessionChange?.(activeSessionId);
+  }, [activeSessionId, onSessionChange]);
   const supervisedPromptBlocked =
     isSupervisedPromptBlocked(active?.reliability) ||
     Boolean(active?.reliability && (sessions.isError || connections.isError));
@@ -1225,11 +1246,32 @@ function AgentDetailViewContent({
   );
   const displayModelOption = active?.modelOption ?? cachedModelPreview;
 
+  const accessFailure = [sessions.error, connections.error].find(isAgentSessionAccessError);
+  if (selectedSessionMissing && !sessions.isPending && !accessFailure) {
+    if (!sessions.isError && (sessions.hasNextPage || sessions.isFetching)) {
+      return <AgentLoadingState />;
+    }
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <AgentQueryErrorState
+          error={sessions.error ?? new Error(messages.agents.continueConversationFailed)}
+          onRetry={() =>
+            void (sessions.isFetchNextPageError ? sessions.fetchNextPage() : sessions.refetch())
+          }
+          title={messages.agents.loadSessionsFailedTitle}
+        />
+        <Button className="mx-auto mb-4" onClick={onBack} type="button" variant="ghost">
+          <ArrowLeft className="size-4" />
+          {messages.agents.backToAgents}
+        </Button>
+      </div>
+    );
+  }
+
   if (sessions.isPending && !sessionBridge) {
     return <AgentLoadingState />;
   }
 
-  const accessFailure = [sessions.error, connections.error].find(isAgentSessionAccessError);
   if (accessFailure || (sessions.isError && !sessions.data && !sessionBridge)) {
     return (
       <AgentQueryErrorState
@@ -2025,6 +2067,19 @@ function AgentChatSidePanelTab({ orpc, payload }: SidePanelTabProps) {
     (id: string) => consumeAgentChatDraft(agentSlug, id),
     [agentSlug],
   );
+  const panelScopeKey = knownNodeCacheScope(scope.workspaceKey, scope.actorId);
+  const onSessionChange = useCallback(
+    (nextSessionId: string) => {
+      const store = useSidePanelStore.getState();
+      if (store.scopeKey !== panelScopeKey) return;
+      const tab = store.tabs.find((item) => item.id === agentChatTabId(agentSlug));
+      if (!tab) return;
+      const current = tab.payload as AgentChatTabPayload;
+      if (current.sessionId === nextSessionId) return;
+      store.updateTabPayload(tab.id, { ...current, sessionId: nextSessionId });
+    },
+    [agentSlug, panelScopeKey],
+  );
   return (
     <AgentDetailView
       agentSlug={agentSlug}
@@ -2034,6 +2089,7 @@ function AgentChatSidePanelTab({ orpc, payload }: SidePanelTabProps) {
       initialSessionId={sessionId}
       onBack={() => useSidePanelStore.getState().closeTab(agentChatTabId(agentSlug))}
       onDraftApplied={onDraftApplied}
+      onSessionChange={onSessionChange}
       orpc={orpc}
     />
   );

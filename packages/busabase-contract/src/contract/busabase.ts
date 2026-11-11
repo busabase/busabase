@@ -86,6 +86,7 @@ import {
   inboxSnapshotResponseSchema,
   isDescendantInputSchema,
   isDescendantOutputSchema,
+  listAgentTasksInputSchema,
   listChangeRequestsPagedInputSchema,
   listChangeRequestsPageInputSchema,
   listChangeRequestsPageResponseSchema,
@@ -419,7 +420,7 @@ export const busabaseContractRoutes = {
         tags: ["Nodes", "Change Requests"],
         summary: "Update node content",
         successDescription:
-          'ChangeRequest carrying the proposed content. Merged immediately when the actor holds write access on the node and `autoMerge` was not explicitly `false`; otherwise left `in_review` for a human. Accepts doc, folder, whiteboard, workflow, and html nodes — the types that own exactly one document. A folder write is `{ kind: "folder", body }` and lands at `busabase/nodes/{id}/folder/readme.md` (missing readme reads as an empty string; it does not change `description` or children). `nodeId` takes an id or a slug (looked up among nodes of `content.kind`), same as `nodes.get`.',
+          'ChangeRequest carrying the proposed content. Merged immediately when the actor holds write access on the node and `autoMerge` was not explicitly `false`; otherwise left `in_review` for a human. Accepts doc, folder, whiteboard, workflow, and html nodes — the types that own exactly one document. A folder write is `{ kind: "folder", body, bodyFormat? }`: Markdown (the default) lands at `busabase/nodes/{id}/folder/readme.md`, `bodyFormat: "html"` at `…/folder/readme.html`, and writing one format removes the other, so a folder keeps one readme (missing readme reads as an empty string; it does not change `description` or children). `nodeId` takes an id or a slug (looked up among nodes of `content.kind`), same as `nodes.get`.',
       })
       .input(updateNodeContentInputSchema)
       .output(changeRequestSchema),
@@ -796,8 +797,9 @@ export const busabaseContractRoutes = {
         tags: ["Agent"],
         summary: "List agent revision tasks",
         successDescription:
-          "Change requests awaiting an external agent (request-changes or @ai mentions).",
+          "Change requests awaiting an external agent (request-changes or @ai mentions), oldest first. At most 100 when `limit` is omitted; otherwise one page, where `cursor` is the previous page's last task `id` and a short page means the end. Each change request is a preview (at most 20 operations, field values over 4 KB replaced by a marker): when `truncated` is true, read `changeRequestPath` before revising.",
       })
+      .input(listAgentTasksInputSchema)
       .output(z.array(agentTaskSchema)),
   },
   spaces: {

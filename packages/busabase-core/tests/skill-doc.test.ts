@@ -112,6 +112,14 @@ describe("buildSkillMarkdown advertises the batch/bulk/temp-ref/assets surface",
     expect(cloud).toMatch(/rejected|400/);
     expect(cloud).not.toContain("silently falls back to the\nuser's default space");
   });
+
+  it("tells agents to read record fields from headCommit.payload, not the page wrapper", () => {
+    for (const doc of [cloud, local]) {
+      expect(doc).toContain("records[].headCommit.payload");
+      expect(doc).toContain("do not invent it from the wrapper");
+      expect(doc).toContain("only propose and wait for a person");
+    }
+  });
 });
 
 describe("generated Cloud onboarding", () => {
@@ -401,8 +409,11 @@ describe("bootstrap edition confirmation", () => {
 
 describe("Cloud setup prefers a connected Busabase MCP integration over CLI login", () => {
   it("keeps the MCP-aware additions within the setup context budget", () => {
-    expect(Buffer.byteLength(cloudBootstrap, "utf8")).toBeLessThan(19_500);
-    expect(Buffer.byteLength(cloudWithoutPreselectedSpace(), "utf8")).toBeLessThan(20_000);
+    // +1,000 for the optional 3d invite-teammates step (agent-member-invitations), then +300:
+    // a fresh agent dry-running 3d guessed a missing address from a colleague's domain and could
+    // not tell how to send an admin invite, so the step now says both outright.
+    expect(Buffer.byteLength(cloudBootstrap, "utf8")).toBeLessThan(20_800);
+    expect(Buffer.byteLength(cloudWithoutPreselectedSpace(), "utf8")).toBeLessThan(21_300);
   });
 
   it("puts the MCP check before any CLI login command, in document order", () => {
@@ -430,6 +441,8 @@ describe("Cloud setup prefers a connected Busabase MCP integration over CLI logi
       "view_change_request",
       "record_query",
       "users_me",
+      "members_invite",
+      "members_create_invite_link",
     ];
     for (const doc of [cloudBootstrap, cloudWithoutPreselectedSpace()]) {
       for (const toolName of hardcodedToolNames) {
@@ -502,7 +515,7 @@ describe("Cloud setup routes the rest of the document by whichever path connecte
 
   it("preflights semantic setup capabilities before the first MCP write", () => {
     expect(cloudBootstrap).toContain(
-      "Before the first write, require write access plus capabilities to inspect, propose, read\nback, and complete bootstrap",
+      "Before the first write, require write access plus capabilities to inspect, propose, check\nresults, and complete bootstrap",
     );
   });
 
@@ -513,7 +526,7 @@ describe("Cloud setup routes the rest of the document by whichever path connecte
       "Require merged structure/records and `materialized: true` views",
     );
     expect(cloudBootstrap).toContain(
-      "otherwise stop for\napproval and resume only after a canonical View read confirms materialization",
+      "otherwise stop for\napproval and resume only after the approval result or a targeted View read confirms materialization",
     );
   });
 
@@ -568,6 +581,68 @@ describe("Cloud setup's final handoff installs skills without changing transport
     expect(localBootstrap).toContain(
       "One step left before everyday use. Install both permanent skills",
     );
+  });
+});
+
+describe("Cloud setup offers to invite teammates once, after initialization", () => {
+  const step = (doc: string) => doc.slice(doc.indexOf("**3d. Offer to invite teammates"));
+
+  it("asks only after bootstrap completion is marked and verified, and never blocks it", () => {
+    for (const doc of [cloudBootstrap, cloudWithoutPreselectedSpace()]) {
+      const offer = doc.indexOf("**3d. Offer to invite teammates — optional, ask once**");
+      expect(offer).toBeGreaterThan(doc.indexOf("/api/v1/onboarding/bootstrap-complete"));
+      expect(offer).toBeGreaterThan(doc.indexOf("no follow-up `whoami` is needed"));
+      expect(offer).toBeLessThan(doc.indexOf("## Step 3 — The last setup step"));
+      expect(step(doc)).toContain("only after completion returned version 1");
+      expect(step(doc)).toContain("Either way, continue to Step 3.");
+      expect(step(doc)).toContain("**C** → skip; never ask again.");
+      expect(step(doc)).toContain("ask for any missing address (never guess one)");
+      expect(step(doc)).toContain("`--role admin` needs a `manage` key");
+    }
+  });
+
+  it("confirms the exact recipients before any email, and defaults to a link", () => {
+    const offer = step(cloudBootstrap);
+    expect(offer).toContain("repeat the exact addresses and role");
+    expect(offer).toContain("get a yes");
+    expect(offer).toContain("members invite --email <address>");
+    expect(offer).toContain("members create-invite-link`; give them its `url`");
+    expect(offer).toContain(
+      "https://busabase.com/dashboard?settings=space&tab=people (Members settings)",
+    );
+  });
+
+  it("lists the optional step in the journey table without renumbering the setup steps", () => {
+    expect(cloudBootstrap).toContain(
+      "| 4 | 👥 **Invite teammates** (optional) | Step 2 (3d) | offered once after a new Space is verified |",
+    );
+    expect(cloudBootstrap).toContain("| 5 | 🎓 **Skills installed** | Step 3 |");
+    expect(localBootstrap).toContain("| 4 | 🎓 **Skills installed** | Step 4 |");
+  });
+
+  it("never offers invitations on Personal Desktop, which has no members", () => {
+    expect(localBootstrap).not.toContain("invite teammates");
+    expect(localBootstrap).not.toContain("members invite");
+  });
+});
+
+describe("runtime doc — inviting teammates", () => {
+  it("teaches Cloud agents to confirm recipients and prefer a link", () => {
+    expect(cloud).toContain("## Invite teammates");
+    expect(cloud).toContain("**Before sending any invitation email**, list the exact addresses");
+    expect(cloud).toContain("Never send silently, never guess an address.");
+    expect(cloud).toContain("give the user its `url` to share");
+    expect(cloud).toContain("Invite as `admin` only when the user explicitly asks.");
+    expect(cloud).toContain("npx --yes busabase-cli@latest members invite --email ada@example.com");
+    expect(cloud).toContain("curl -X POST https://busabase.com/api/v1/members/invitations");
+    expect(cloud).toContain(
+      "https://busabase.com/dashboard?settings=space&tab=people` (Members settings)",
+    );
+  });
+
+  it("leaves it out of the single-user local edition", () => {
+    expect(local).not.toContain("## Invite teammates");
+    expect(local).not.toContain("/api/v1/members");
   });
 });
 

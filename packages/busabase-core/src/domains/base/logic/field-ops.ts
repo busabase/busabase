@@ -35,7 +35,7 @@ import { isSystemFieldType } from "../field-types";
 import { FormulaError } from "../formula";
 import { isRollupCompatible, rollupPreservesTargetUnit } from "../lookup/rollup";
 import { busabaseFieldValues } from "../schema";
-import { convertFieldValue, isUnconvertibleFieldType } from "../utils/field-conversion";
+import { canConvertFieldType, convertFieldValue } from "../utils/field-conversion";
 import { isPrimaryField, PRIMARY_FIELD_DELETE_MESSAGE } from "../utils/primary-field";
 import { assertValidDateFieldOptionsOrThrow } from "./date-options";
 import { baseNotFound } from "./errors";
@@ -657,10 +657,7 @@ export const previewFieldConversion = async (
   // it was added, so a member→text conversion sailed past this gate and the
   // merge's `catch { converted = null }` nulled every assignment in the column —
   // no error, no undo.
-  if (isUnconvertibleFieldType(field.type)) {
-    throw conversionNotSupported(field.type, newType);
-  }
-  if (isSystemFieldType(newType) || isUnconvertibleFieldType(newType)) {
+  if (!canConvertFieldType(field.type, newType)) {
     throw conversionNotSupported(field.type, newType);
   }
 
@@ -806,10 +803,7 @@ export const createConvertFieldChangeRequest = async (
   // it was added, so a member→text conversion sailed past this gate and the
   // merge's `catch { converted = null }` nulled every assignment in the column —
   // no error, no undo.
-  if (isUnconvertibleFieldType(field.type)) {
-    throw conversionNotSupported(field.type, newType);
-  }
-  if (isSystemFieldType(newType) || isUnconvertibleFieldType(newType)) {
+  if (!canConvertFieldType(field.type, newType)) {
     throw conversionNotSupported(field.type, newType);
   }
 

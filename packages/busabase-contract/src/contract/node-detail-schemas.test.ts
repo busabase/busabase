@@ -39,6 +39,7 @@ describe("NodeDetailVO", () => {
     expect(Object.keys(NODE_DETAIL_VARIANTS.folder.shape).sort()).toEqual([
       "attribution",
       "body",
+      "bodyFormat",
       "children",
       "node",
       "storagePrefix",
@@ -118,6 +119,7 @@ describe("NodeDetailVO", () => {
       children: [],
       storagePrefix: "busabase/nodes/nod_1/folder/",
       body: "",
+      bodyFormat: "markdown",
     });
     expect(parsed.type).toBe("folder");
     if (parsed.type === "folder") expect(parsed.body).toBe("");

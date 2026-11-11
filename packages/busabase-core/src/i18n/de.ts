@@ -735,6 +735,8 @@ export const dashboardDe: CoreI18nMessages = {
     engineFollowAppNamed: "Der App folgen ({engine})",
     engineFollowAppHint:
       "Die airapp.json dieser App entscheidet. Wählen Sie eine Engine, um sie für diesen Knoten zu überschreiben.",
+    engineFollowAppFallback:
+      "Die airapp.json dieser App bevorzugt {preferred}, das hier nicht verfügbar ist. Verwendete Engine: {engine}.",
     engineRequired: "App erfordert {engine}",
     engineRequiredHint:
       "Diese Anforderung wird durch requiredEngine in der airapp.json festgelegt und kann für diesen Knoten nicht überschrieben werden.",
@@ -780,6 +782,39 @@ export const dashboardDe: CoreI18nMessages = {
     swUnsupportedCopyFailed:
       "Der Link konnte nicht kopiert werden. Markieren und kopieren Sie ihn manuell:",
     site: {
+      publish: {
+        previewStale:
+          "Die Dateien wurden seit dieser Vorschau geändert. Erstelle oder aktualisiere die Website-Vorschau und veröffentliche sie dann.",
+        noPreview: "Erstelle vor der Veröffentlichung eine Website-Vorschau.",
+        previewUnavailable:
+          "Die Website-Vorschau konnte nicht geladen werden. Erstelle sie vor der Veröffentlichung erneut.",
+        title: "Als Website veröffentlichen",
+        description:
+          "Gib dieser AirApp eine ständig verfügbare Busabase Site mit fester öffentlicher Adresse. Besucher benötigen kein Busabase-Konto.",
+        preserveBrowser: "Die Browser-Vorschau läuft weiter, während du die Website vorbereitest.",
+        checking: "Website wird geprüft…",
+        checkFailed: "Die Website konnte nicht geprüft werden. Versuche es erneut.",
+        planRequired: "Website-Hosting ist ab {plan} enthalten.",
+        paidPlanRequired:
+          "Dieser Bereich benötigt einen kostenpflichtigen Tarif für Website-Hosting.",
+        upgradeHint:
+          "Bereite die App vor und upgrade dann diesen Bereich, um sie zu prüfen und zu veröffentlichen. Ein Browser-Vorschaulink ist keine ständig verfügbare Website.",
+        prepareTitle: "Webversion vorbereiten",
+        prepareHint:
+          "Bitte deinen Agenten, eine Webversion vorzubereiten. Vor der Veröffentlichung können Codeänderungen nötig sein.",
+        copyPrompt: "Agent-Prompt kopieren",
+        copied: "Prompt kopiert",
+        agentPrompt:
+          "Bereite diese AirApp mit dem Skill busabase-app-creator als Busabase Site vor. Prüfe die Dateien und erhalte die Browser-Ausführung und bestehende Funktionen. Ergänze eine ausdrückliche site-Deklaration in airapp.json und statische Dateien; falls nötig, einen zu einem einzelnen JavaScript-ES-Modul gebündelten Worker mit standardmäßig exportiertem fetch. Veröffentliche keinen Node-Entwicklungsserver und ändere nicht bloß die Engine. Halte site.access schreibgeschützt, sofern keine Schreibzugriffe nötig sind; stelle nur konkrete sichere Endpunkte bereit, niemals den API-Schlüssel oder einen Proxy für beliebige Besucheranfragen. Prüfe das Website-Paket und erkläre erforderliche Änderungen. Ich veröffentliche nach Prüfung der privaten Vorschau.",
+        previewHint:
+          "Erstelle zuerst eine private Website-Vorschau und prüfe sie hier vor der Veröffentlichung.",
+        createPreview: "Website-Vorschau erstellen",
+        preparingPreview: "Vorschau wird vorbereitet…",
+        refreshPreview: "Website-Vorschau aktualisieren",
+        previewTitle: "Private Website-Vorschau",
+        publishConsent:
+          "Die geprüfte Version wird veröffentlicht. Jeder mit der Adresse kann die Website nutzen, einschließlich der Daten und Aktionen, die ihr Code zugänglich macht.",
+      },
       statusNotLive: "Nicht online",
       statusLive: "Online",
       statusLiveWithChanges: "Unveröffentlichte Änderungen",
@@ -2330,6 +2365,24 @@ export const dashboardDe: CoreI18nMessages = {
     uploadFailed: "Upload fehlgeschlagen",
     uploading: "Wird hochgeladen...",
     addFile: "Datei hinzufügen",
+    drive: {
+      filePath: "Dateipfad",
+      moveFile: "Umbenennen oder verschieben",
+      moveFolder: "Ordner umbenennen oder verschieben",
+      moveFolderHint:
+        "Ändern Sie den Pfad, um den Ordner samt Inhalt umzubenennen oder zu verschieben, z. B. contracts/2026. Leer lassen, um den Inhalt in die oberste Ebene zu verschieben.",
+      folderPath: "Ordnerpfad",
+      movePathHint:
+        "Ändern Sie die Ordner im Pfad, um es zu verschieben, z. B. contracts/2026/main.pdf.",
+      apply: "Übernehmen",
+      pathTaken: "Unter „{path}“ liegt bereits etwas. Wählen Sie einen anderen Pfad.",
+      invalidPath: "Geben Sie einen gültigen Pfad ein, z. B. contracts/2026/main.pdf.",
+      folderIntoItself: "Ein Ordner kann nicht in sich selbst verschoben werden.",
+      removeFolderBody:
+        "Dadurch werden „{folder}“ und die darin enthaltenen Dateien ({count}) aus diesem Feld entfernt. Erst beim Speichern des Datensatzes wird etwas geändert.",
+      emptyFolderHint:
+        "Leere Ordner werden nicht gespeichert. Fügen Sie Dateien hinzu, um diesen Ordner zu behalten.",
+    },
     properties: "Eigenschaften",
     source: "Quelle",
     openFullPage: "Vollständige Seite öffnen",
@@ -2585,6 +2638,7 @@ export const dashboardDe: CoreI18nMessages = {
     member: "Mitglied",
     lookup: "Lookup",
     attachment: "Datei",
+    drive: "Drive",
     ai_summary: "KI-Zusammenfassung",
     ai_tags: "KI-Tags",
     created_time: "Erstellt am",
@@ -2775,6 +2829,13 @@ export const dashboardDe: CoreI18nMessages = {
       "Ein POST (JSON oder Text) oder GET an diese URL startet einen Lauf. Die Anfrage steht in steps.trigger.payload.request: method, query, headers und body. Gibt ein Code-Schritt { response: … } zurück, bevor der Lauf pausiert, erhält der Aufrufer das; sonst erhält er 202 und die ID des Laufs. Jeder mit dieser URL kann einen Lauf starten: Ändere sie, damit die alte nicht mehr funktioniert. Änderungen gelten nach dem Speichern.",
     hookNeedsEvent:
       "Stelle in den Ausführungseinstellungen den Ausführungsmodus auf Ereignis, sonst antwortet diese URL mit 404.",
+    webhookSign: "Anfragen signieren",
+    webhookSigningSecret: "Signaturschlüssel",
+    webhookSigningRegenerate: "Schlüssel ändern",
+    webhookSigningHint:
+      'Jede Anfrage trägt den Header X-Busabase-Signature: t=<Unix-Zeit>,v1=<Hex-HMAC-SHA256 von "<t>.<Body>" mit diesem Schlüssel>. Prüfen Sie ihn beim Empfänger und weisen Sie ein t ab, das mehr als einige Minuten alt ist, damit gefälschte oder wiederholte Anfragen abgelehnt werden. Wer diesen Workflow öffnen kann, kann den Schlüssel lesen: Ändern Sie ihn, damit der alte nicht mehr gilt. Änderungen gelten nach dem Speichern.',
+    webhookSignOffHint:
+      "Aus: Die Anfrage trägt keine Signatur. Schalten Sie sie ein, damit der Empfänger prüfen kann, dass eine Anfrage von diesem Schritt kommt.",
     functionCode: "Code",
     functionCodeHint:
       "JavaScript, das auf dem Server läuft, wenn der Lauf diesen Schritt erreicht. input enthält die Daten des Laufs (payload, steps, record), await fetch(...) ruft öffentliche URLs auf, und der zurückgegebene Wert ist die Ausgabe dieses Schritts (spätere Schritte lesen ihn als steps.<ID>.<Feld>). Jeder, der diesen Workflow öffnen kann, kann den Code lesen.",
@@ -2856,6 +2917,26 @@ export const dashboardDe: CoreI18nMessages = {
     findRecordsForEach: "Die nächsten Schritte für jeden Datensatz einzeln ausführen",
     findRecordsForEachHint:
       "Jeder Datensatz bekommt einen eigenen Lauf über diesen Datensatz: Datensatz ändern ändert ihn, und spätere Schritte lesen ihn als record. Dieser Lauf endet hier; die Läufe kommen gemäß Parallelität nacheinander dran.",
+    runIn: "Ausführen auf",
+    runInServer: "Diesem Server",
+    runInSandbox: "Einer Sandbox-Maschine",
+    runInServerHint: "Schnell. Nur JavaScript, keine Pakete, bis zum Timeout des Workflows.",
+    runInSandboxHint:
+      "Eine Maschine, die für diesen Schritt gestartet wird: JavaScript oder Python, Pakete werden vorher installiert, bis zu 10 Minuten. Der Lauf wartet darauf wie bei einem Warten-Schritt, daher erhält eine Anfrage, die den Lauf gestartet hat, 202.",
+    runInSandboxLocked: "Code in einer Sandbox auszuführen erfordert den Plan {plan}.",
+    runInSandboxNotConfigured:
+      "Auf diesem Server ist keine Sandbox eingerichtet. Eine Administratorin kann sie mit einem Sandock-API-Schlüssel einschalten.",
+    sandboxLanguage: "Sprache",
+    sandboxLanguageJavascript: "JavaScript (Node.js)",
+    sandboxLanguagePython: "Python",
+    sandboxPackages: "Pakete",
+    sandboxPackagesHintJavascript:
+      'npm-Pakete, die vorher installiert werden, durch Leerzeichen getrennt, etwa dayjs oder lodash@4. Laden mit require("dayjs").',
+    sandboxPackagesHintPython:
+      "pip-Pakete, die vorher installiert werden, durch Leerzeichen getrennt, etwa requests oder pycryptodome==3.20.0. Wie gewohnt importieren.",
+    sandboxCode: "Code in einer Sandbox",
+    sandboxCodeHint:
+      "Läuft auf der Sandbox-Maschine. input enthält die Daten des Laufs, und was du zurückgibst, ist die Ausgabe dieses Schritts. Wer diesen Workflow öffnen kann, kann den Code lesen.",
     customActionHint: "Dieser Aktionsname bewirkt noch nichts: Er wird nur festgehalten.",
     chooseBase: "Base wählen",
     targetRecord: "Datensatz (optional)",
@@ -2949,6 +3030,8 @@ export const dashboardDe: CoreI18nMessages = {
     triggerSchedule: "Zeitplan",
     triggerWebhook: "Anfrage",
     triggerForEach: "Pro Datensatz",
+    waitingSandbox: "Code läuft in einer Sandbox. Der Lauf geht weiter, sobald er fertig ist.",
+    waitingSandboxDeadline: "Wird angehalten, wenn er bis {time} nicht fertig ist.",
     runDetails: "Laufdetails",
     recordLabel: "Datensatz: {id}",
     waitingUntil: "Wartet bis {time}. Danach geht es von selbst weiter.",
@@ -2957,6 +3040,12 @@ export const dashboardDe: CoreI18nMessages = {
     approve: "Genehmigen",
     reject: "Ablehnen",
     errorLabel: "Fehler",
+    retryFromStep: "Ab diesem Schritt wiederholen",
+    retryFromStepHint:
+      "Startet einen neuen Lauf, der alle Schritte vor diesem unverändert übernimmt und nur diesen Schritt erneut ausführt. Eine Anfrage, die dieser Schritt schon gesendet hat, wird erneut gesendet.",
+    retriedAsLink: "Wiederholt: neuen Lauf öffnen",
+    retryOfLink: "Wiederholung eines früheren Laufs: öffnen",
+    triggerRetry: "Wiederholung",
     steps: "Schritte",
     noSteps: "Noch kein Schritt abgeschlossen.",
     stepData: "Daten",
@@ -3000,6 +3089,17 @@ export const dashboardDe: CoreI18nMessages = {
     rename: "Kollidierende Elemente unter neuen Namen installieren",
     renameHint: "Fügt ein Suffix hinzu (-2, -3, …). Bestehende Inhalte bleiben unberührt.",
     warningsTitle: "Gut zu wissen",
+    folderName: "Ordnername",
+    folderNameHint: "Der im Arbeitsbereich angezeigte Name. Jede Sprache ist möglich.",
+    folderNameRequired: "Gib einen Ordnernamen ein.",
+    installUnavailable:
+      "Die Installation kann gerade nicht gestartet werden. Versuche es später erneut.",
+    installNoChanges: "Es wurden keine Vorlageninhalte erstellt. Du kannst es erneut versuchen.",
+    installPartial:
+      "Vor dem Abbruch wurden einige Inhalte erstellt. Prüfe den Arbeitsbereich vor einem erneuten Versuch.",
+    installUnknown:
+      "Das Installationsergebnis konnte nicht bestätigt werden. Prüfe den Arbeitsbereich vor einer erneuten Installation.",
+    technicalDetails: "Technische Details",
     targetFolder: "In Ordner installieren",
     targetFolderHint:
       "Für das Paket wird ein neuer Ordner erstellt. Standardmäßig trägt er den Namen des Pakets.",

@@ -19,6 +19,7 @@ import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api
 import { subscribeRealtimeMessages } from "openlib/realtime";
 import { describe, expect, it } from "vitest";
 import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
+import { getBase, getBaseWithViewerPermission } from "../src/domains/base/handlers";
 import type { BusabaseLiveEvent } from "../src/logic/live-events";
 import { getEffectiveNodeLevel } from "../src/logic/node-acl";
 import { busabaseRouter } from "../src/router";
@@ -206,13 +207,19 @@ describe("node ACL", () => {
     );
 
     await asManager("alice", async () => {
-      expect((await raw.bases.get({ baseId })).viewerPermissionLevel).toBe("manage");
+      const rpcBase = await raw.bases.get({ baseId });
+      expect(rpcBase.viewerPermissionLevel).toBe("manage");
+      expect(await getBaseWithViewerPermission(baseId)).toEqual(rpcBase);
+      // Internal callers keep the lean Base read, without another ACL lookup.
+      expect(await getBase(baseId)).not.toHaveProperty("viewerPermissionLevel");
       // List stays lean: no per-Base ACL lookup.
       const listed = (await raw.bases.list({})).find((b) => b.id === baseId);
       expect(listed && "viewerPermissionLevel" in listed).toBe(false);
     });
     await asMember("bob", async () => {
-      expect((await raw.bases.get({ baseId })).viewerPermissionLevel).toBe("read");
+      const rpcBase = await raw.bases.get({ baseId });
+      expect(rpcBase.viewerPermissionLevel).toBe("read");
+      expect(await getBaseWithViewerPermission(baseId)).toEqual(rpcBase);
     });
 
     await asManager("alice", () =>
@@ -223,9 +230,24 @@ describe("node ACL", () => {
         role: "changeRequest",
       }),
     );
-    await asMember("carol", async () => {
-      expect((await raw.bases.get({ baseId })).viewerPermissionLevel).toBe("changeRequest");
-    });
+    await asMember(
+      "carol",
+      async () => {
+        const rpcBase = await raw.bases.get({ baseId });
+        expect(rpcBase.viewerPermissionLevel).toBe("changeRequest");
+        expect(await getBaseWithViewerPermission(baseId)).toEqual(rpcBase);
+      },
+      { permissionLevel: "read" },
+    );
+    await asMember(
+      "ungranted",
+      async () => {
+        expect(await getBaseWithViewerPermission(baseId)).toBeNull();
+        expect(await getBaseWithViewerPermission("missing-base")).toBeNull();
+        await expect(raw.bases.get({ baseId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+      },
+      { permissionLevel: "read" },
+    );
   });
 
   it("hides a private base from a non-granted member (list + direct get + search)", async () => {

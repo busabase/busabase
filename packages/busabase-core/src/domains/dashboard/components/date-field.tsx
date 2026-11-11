@@ -12,7 +12,7 @@ import {
   toDateInputValue,
   toDateTimeInputValue,
 } from "../../base/utils/date-value";
-import { DayTimePicker } from "./day-time-picker";
+import { DayTimePicker, type DayTimePickerPopoverControl } from "./day-time-picker";
 
 /**
  * The `date` field type's read display, its editor, and its field settings —
@@ -84,6 +84,8 @@ export function DateFieldInput({
   id,
   onChange,
   options,
+  popover,
+  timeZoneHintPlacement = "below",
   value,
 }: {
   ariaDescribedBy?: string;
@@ -93,6 +95,14 @@ export function DateFieldInput({
   id: string;
   onChange: (value: string) => void;
   options?: DateFieldOptions | null;
+  /** Host-owned calendar popover (the grid's in-cell editor); see `DayTimePicker`. */
+  popover?: DayTimePickerPopoverControl;
+  /**
+   * Where a time-of-day field says which zone its time box is in: under the
+   * control (the record form), or inside the calendar (a grid cell, which has
+   * no room for a second line).
+   */
+  timeZoneHintPlacement?: "below" | "calendar";
   value: unknown;
 }) {
   const messages = useCoreI18n();
@@ -103,6 +113,10 @@ export function DateFieldInput({
   const wallTime = includeTime ? toDateTimeInputValue(value, zone) : "";
   const dayKey = includeTime ? wallTime.slice(0, 10) : toDateInputValue(value);
   const display = describeDateFieldValue(value, { locale, options });
+
+  const zoneHint = includeTime
+    ? fmt(messages.base.timeZoneHint, { zone: formatTimeZoneLabel(zone, locale) })
+    : undefined;
 
   const write = (day: string, time: string) =>
     onChange(includeTime ? (fromDateTimeInputValue(`${day}T${time}`, zone) ?? "") : day);
@@ -116,18 +130,20 @@ export function DateFieldInput({
       day={dayKey}
       id={id}
       includeTime={includeTime}
+      note={timeZoneHintPlacement === "calendar" ? zoneHint : undefined}
       onClear={() => onChange("")}
       onPick={write}
+      popover={popover}
       text={display?.text ?? null}
       time={wallTime.slice(11, 16)}
     />
   );
-  if (!includeTime) return picker;
+  if (!includeTime || timeZoneHintPlacement === "calendar") return picker;
   return (
     <div className="min-w-0">
       {picker}
       <div className="mt-1 text-[11px] text-muted-foreground" suppressHydrationWarning>
-        {fmt(messages.base.timeZoneHint, { zone: formatTimeZoneLabel(zone, locale) })}
+        {zoneHint}
       </div>
     </div>
   );

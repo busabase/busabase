@@ -49,6 +49,7 @@ import {
   healAssetTextProjections,
   incompleteTextAssetIds,
   matchAssetTextAssetIds,
+  matchAssetTextAssetIdsInOrderPage,
   textWithoutSlotAssetIds,
 } from "../domains/assets/logic/asset-text-search-logic";
 import { getPrimaryField } from "../domains/base/utils/primary-field";
@@ -528,6 +529,32 @@ const assetUsageRowSelection = () => ({
 
 type AssetUsageRow = Awaited<ReturnType<typeof queryAssetUsageRows>>[number];
 
+/**
+ * The usage rows this caller may see under these filters, as a condition over
+ * a usage and its asset, attachment and node. Shared by the result rows and
+ * the in-order text match, so both agree on what the page holds.
+ */
+const assetUsageScope = (db: DbInstance, spaceId: string, narrow: SearchNarrowing) =>
+  and(
+    eq(busabaseNodes.spaceId, spaceId),
+    eq(busabaseAssetUsages.spaceId, spaceId),
+    isNull(busabaseNodes.archivedAt),
+    buildNodeVisibilityCondition(db),
+    dateRangeCondition(busabaseAssetUsages.updatedAt, narrow),
+    // The ASSET's creator: whoever uploaded the file. An asset-usage row is
+    // created by whoever attached it, which is a different question.
+    createdByCondition(busabaseAssets.createdBy, narrow),
+    narrow.subtreeIds ? inArray(busabaseAssetUsages.nodeId, narrow.subtreeIds) : undefined,
+  );
+
+/** The usage column and direction `queryAssetUsageRows` orders by; relevance means newest first. */
+const assetUsageOrder = (
+  sort: SearchSort,
+): { column: "createdAt" | "updatedAt"; ascending: boolean } => ({
+  column: sort === "created_desc" || sort === "created_asc" ? "createdAt" : "updatedAt",
+  ascending: sort === "updated_asc" || sort === "created_asc",
+});
+
 const queryAssetUsageRows = (
   db: DbInstance,
   spaceId: string,
@@ -542,20 +569,7 @@ const queryAssetUsageRows = (
     .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
     .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
     .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
-    .where(
-      and(
-        eq(busabaseNodes.spaceId, spaceId),
-        eq(busabaseAssetUsages.spaceId, spaceId),
-        isNull(busabaseNodes.archivedAt),
-        buildNodeVisibilityCondition(db),
-        dateRangeCondition(busabaseAssetUsages.updatedAt, narrow),
-        // The ASSET's creator: whoever uploaded the file. An asset-usage row is
-        // created by whoever attached it, which is a different question.
-        createdByCondition(busabaseAssets.createdBy, narrow),
-        narrow.subtreeIds ? inArray(busabaseAssetUsages.nodeId, narrow.subtreeIds) : undefined,
-        extraCondition,
-      ),
-    )
+    .where(and(assetUsageScope(db, spaceId, narrow), extraCondition))
     .orderBy(
       orderForSort(
         narrow.sort,
@@ -680,6 +694,8 @@ const matchedChunkSnippet = (queryDb: DbInstance, spaceId: string, pattern: stri
 /** The text match gets this much of the request; the rest is for file names and hydration. */
 const CONTENT_MATCH_STATEMENT_MS = 1_500;
 const CONTENT_MATCH_RESERVE_MS = 2_000;
+/** Below this, the in-order match would rarely finish; keep the first match's answer. */
+const CONTENT_MATCH_IN_ORDER_MIN_MS = 300;
 
 /**
  * Whether the caller can see a file whose text is only partly searchable.
@@ -718,7 +734,7 @@ const searchAssetBackedFiles = async (
   narrow: SearchNarrowing,
   scanContent: boolean,
   execution: SearchExecution,
-): Promise<{ results: SortableResult[]; truncated: boolean }> => {
+): Promise<{ results: SortableResult[]; truncated: boolean; timedOut: boolean }> => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const pattern = literalSearchPattern(query);
@@ -733,6 +749,7 @@ const searchAssetBackedFiles = async (
   // still leave the file-name matches to answer with.
   let matchedAssetIds: string[] = [];
   let contentPartial = false;
+  let timedOut = false;
   if (scanContent) {
     try {
       const match = await execution.query(async (queryDb) =>
@@ -751,6 +768,56 @@ const searchAssetBackedFiles = async (
     } catch (error) {
       if (getSearchExecutionOutcome(error) !== "timeout") throw error;
       contentPartial = true;
+      timedOut = true;
+    }
+  }
+  // Capped or out of time, that match holds whichever files it reached first,
+  // not the ones this page shows: the newest file is as likely as any to be
+  // missing. Walk the page's own files in its order instead. A complete walk
+  // makes the page exact, so there is nothing left to disclose; running out of
+  // time keeps what the first match found.
+  const inOrderMs = Math.min(
+    CONTENT_MATCH_STATEMENT_MS,
+    execution.remainingMs() - CONTENT_MATCH_RESERVE_MS,
+  );
+  if (contentPartial && inOrderMs >= CONTENT_MATCH_IN_ORDER_MIN_MS) {
+    const until = Date.now() + inOrderMs;
+    const orderedIds = new Set<string>();
+    let offset = 0;
+    while (Date.now() < until && orderedIds.size < limit) {
+      try {
+        const page = await execution.query(async (queryDb) => {
+          const found = await matchAssetTextAssetIdsInOrderPage(queryDb, spaceId, pattern, {
+            statementMs: Math.max(1, until - Date.now()),
+            limit: limit - orderedIds.size,
+            pageSize: Math.min(32, limit - orderedIds.size),
+            offset,
+            scope: assetUsageScope(queryDb, spaceId, narrow),
+            order: assetUsageOrder(narrow.sort),
+          });
+          // These are completed reads. Keep them even if the transaction's
+          // final deadline checkpoint rejects the page after it has returned.
+          const needed = limit - orderedIds.size;
+          for (const id of found.assetIds) orderedIds.add(id);
+          // A concurrent edit can move a usage between pages. Repeated ids
+          // must not fill the requested window or claim a complete answer.
+          const complete =
+            found.complete && (found.assetIds.length < needed || orderedIds.size >= limit);
+          matchedAssetIds = complete
+            ? [...orderedIds]
+            : [...new Set([...orderedIds, ...matchedAssetIds])];
+          return { ...found, complete };
+        });
+        contentPartial = !page.complete;
+        if (page.complete) timedOut = false;
+        if (page.complete || page.stopped) break;
+        offset += page.checkedAssets;
+      } catch (error) {
+        if (getSearchExecutionOutcome(error) !== "timeout") throw error;
+        contentPartial = true;
+        timedOut = true;
+        break;
+      }
     }
   }
 
@@ -803,6 +870,7 @@ const searchAssetBackedFiles = async (
         ),
       ),
       truncated,
+      timedOut,
     };
   });
 };
@@ -1190,7 +1258,7 @@ const searchWithinBudget = async (
     ),
     wantsFiles
       ? searchAssetBackedFiles(query, candidateWindow, narrowing, parsed.mode === "full", execution)
-      : Promise.resolve({ results: [] as SortableResult[], truncated: false }),
+      : Promise.resolve({ results: [] as SortableResult[], truncated: false, timedOut: false }),
   ]);
   const projectionResults = hydrated.results;
   if (!hydrated.complete) recordsTruncated = true;
@@ -1234,6 +1302,12 @@ const searchWithinBudget = async (
     ...nodeContent.results,
   ]) {
     dedupedResults.set(`${entry.result.kind}:${entry.result.id}`, entry);
+  }
+  // An unfinished content lookup cannot establish that there are no matches.
+  // Preserve other sources' answers, but never present a timed-out first page
+  // with nothing to show as a successful empty search.
+  if (fileSearch.timedOut && dedupedResults.size === 0 && parsed.offset === 0) {
+    execution.giveUp();
   }
   // Rows were found but not one could be built in time, and no other source
   // has anything: there is nothing to answer with, which alone is a timeout.

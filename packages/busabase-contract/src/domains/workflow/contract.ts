@@ -6,17 +6,20 @@ import {
   CancelWorkflowRunInputSchema,
   DecideWorkflowRunInputSchema,
   GetWorkflowRunInputSchema,
+  ListWaitingWorkflowRunsInputSchema,
+  ListWaitingWorkflowRunsOutputSchema,
   ListWorkflowRunsInputSchema,
   ListWorkflowRunsOutputSchema,
   ResumeElapsedWorkflowRunsOutputSchema,
   ResumeWorkflowRunInputSchema,
+  RetryWorkflowRunInputSchema,
   StartWorkflowRunInputSchema,
   WorkflowRunSchema,
 } from "./run";
 
 /**
- * Workflow runs. Five procedures are public (`/api/v1`, MCP, CLI) so agents can
- * see, start, cancel, and, where a step allows it, decide runs. The rest stay
+ * Workflow runs. Six procedures are public (`/api/v1`, MCP, CLI) so agents can
+ * see, start, retry, cancel, and, where a step allows it, decide runs. The rest stay
  * RPC-only for the app: hosts drop them from the public router, because a
  * path-less procedure would otherwise be served at an inferred path.
  *
@@ -55,6 +58,8 @@ export const workflowRuntimeContract = {
     })
     .input(ListWorkflowRunsInputSchema)
     .output(ListWorkflowRunsOutputSchema),
+  // App-only (no route): the phone's "waiting for me" list, across workflows.
+  waiting: oc.input(ListWaitingWorkflowRunsInputSchema).output(ListWaitingWorkflowRunsOutputSchema),
   resume: oc.input(ResumeWorkflowRunInputSchema).output(WorkflowRunSchema),
   decide: oc
     .route({
@@ -77,6 +82,17 @@ export const workflowRuntimeContract = {
         "The cancelled run. A run executing a step answers 409, because a step already sent cannot be taken back.",
     })
     .input(CancelWorkflowRunInputSchema)
+    .output(WorkflowRunSchema),
+  retry: oc
+    .route({
+      method: "POST",
+      path: "/workflow-runs/{runId}/retry",
+      tags: ["Workflows"],
+      summary: "Retry a failed workflow run from the step it stopped at",
+      successDescription:
+        "A new run that carries the failed run's earlier steps unchanged and runs again from the step that failed, with that step's current settings. The step runs again, so a request it already sent is sent again. Needs write on the workflow, with a write-level key; 400 when the run did not fail or stopped on a step that is gone, 409 when it was already retried. The failed run is left as it was and says which run retried it.",
+    })
+    .input(RetryWorkflowRunInputSchema)
     .output(WorkflowRunSchema),
   cancelQueued: oc
     .input(CancelQueuedWorkflowRunsInputSchema)

@@ -6,6 +6,7 @@ import {
   AssetSearchProjectionBuilder,
   createRateLimitedLog,
   queryUsesTrigramIndex,
+  retryDelayMs,
 } from "../src/domains/assets/logic/asset-text-search-logic";
 
 describe("asset text projection boundaries", () => {
@@ -85,5 +86,16 @@ describe("failure logging cannot flood the log", () => {
     clock = 1_000;
     log("f");
     expect(lines).toEqual(["a", "b", "[asset-text-search] 3 similar lines suppressed", "f"]);
+  });
+});
+
+describe("how long a failing asset waits before its next attempt", () => {
+  it("starts at ten minutes, quadruples with each failure, and stops at a day", () => {
+    const minutes = (strikes: number) => retryDelayMs(strikes) / 60_000;
+    expect([1, 2, 3, 4].map(minutes)).toEqual([10, 40, 160, 640]);
+    expect(minutes(5)).toBe(24 * 60);
+    expect(minutes(50)).toBe(24 * 60);
+    // A strike count of zero cannot mean "no wait".
+    expect(minutes(0)).toBe(10);
   });
 });

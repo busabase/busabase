@@ -68,6 +68,7 @@ import {
   getRelationRecordIds,
   getSafeAttachmentUrl,
   isRecordLongField,
+  normalizeEditorFieldValue,
 } from "../helpers/field";
 import {
   fieldValueToString,
@@ -83,7 +84,7 @@ import { emptyLookupValues } from "../helpers/lookup";
 import type { RecordSubmitOptions } from "../helpers/view-types";
 import type { AttachmentUploadOptions } from "../hooks/use-attachment-upload";
 import { useNodeLocator } from "../hooks/use-copy-locator";
-import { assertFileWithinLimit, useUploadLimits } from "../hooks/use-upload-limits";
+import { type FieldFileUploader, useFieldFileUpload } from "../hooks/use-field-file-upload";
 import { useDashboardOrpc } from "../orpc-context";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { dashboardNodeShareUrl } from "../utils/share-url";
@@ -92,6 +93,8 @@ import { ChoiceFieldEditor } from "./choice-field";
 import { renderMentionedText } from "./comments";
 import { CopyLocatorText } from "./copy-locator-button";
 import { DateFieldInput } from "./date-field";
+import { DriveFieldEditor } from "./drive-field-editor";
+import { DriveFieldTree } from "./drive-field-tree";
 import { FieldHelp, hasFieldHelp } from "./field-help";
 import {
   FieldBadgeList,
@@ -1303,6 +1306,15 @@ export function RecordFieldInput({
           onUploadAttachment={onUploadAttachment}
           value={value}
         />
+      ) : kind === "drive" ? (
+        <DriveFieldEditor
+          ariaDescribedBy={helpId}
+          field={field}
+          inputId={inputId}
+          onChange={onChange}
+          onUploadAttachment={onUploadAttachment}
+          value={value}
+        />
       ) : kind === "relation" ? (
         <div className="min-w-0" data-reverse-relation-field={isReverse ? field.slug : undefined}>
           <RelationFieldEditor
@@ -1783,61 +1795,19 @@ function AttachmentFieldEditor({
   field: BaseFieldVO;
   inputId: string;
   onChange: (value: unknown) => void;
-  onUploadAttachment?: (
-    file: File,
-    options?: AttachmentUploadOptions,
-  ) => Promise<AssetAttachmentRef>;
+  onUploadAttachment?: FieldFileUploader;
   value: unknown;
 }) {
   const messages = useCoreI18n();
   const resolveIString = useIString();
   const fieldName = resolveIString(field.name);
-  const locale = useCoreLocale();
   const attachments = getAttachmentRefs(value);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const uploadLimits = useUploadLimits();
-  const options = field.options.attachment ?? {};
-  const multiple = options.maxFiles !== 1;
-  const accept = options.allowedMimeTypes?.join(",");
-  // A field's own `maxFileSize` can only TIGHTEN the host/plan limit. When the
-  // field is the binding one, upgrading would not help, so the refusal stays
-  // inline and never reaches the host's upgrade prompt (the upload hook below
-  // reports host-limit refusals itself).
-  const fieldMaxFileSize =
-    typeof options.maxFileSize === "number" && options.maxFileSize < uploadLimits.maxFileSize
-      ? options.maxFileSize
-      : null;
+  const upload = useFieldFileUpload(field, onUploadAttachment);
 
-  const handleFiles = async (fileList: FileList | null) => {
-    if (!fileList || fileList.length === 0 || !onUploadAttachment) {
-      return;
-    }
-    setUploadError(null);
-    setIsUploading(true);
-    setUploadPercent(null);
-    try {
-      const files = Array.from(fileList);
-      // Check every file before uploading any, so one oversized file does not
-      // leave the others half-uploaded.
-      if (fieldMaxFileSize !== null) {
-        for (const file of files) assertFileWithinLimit(file, fieldMaxFileSize);
-      }
-      const uploaded: AssetAttachmentRef[] = [];
-      for (const file of files) {
-        uploaded.push(await onUploadAttachment(file, { onProgress: setUploadPercent }));
-        setUploadPercent(null);
-      }
-      const next = multiple ? [...attachments, ...uploaded] : uploaded.slice(-1);
-      onChange(options.maxFiles && options.maxFiles > 0 ? next.slice(-options.maxFiles) : next);
-    } catch (error) {
-      setUploadError(presentCoreError(messages, locale, error, messages.recordView.uploadFailed));
-    } finally {
-      setIsUploading(false);
-      setUploadPercent(null);
-    }
-  };
+  const handleFiles = (fileList: FileList | null) =>
+    upload.upload(fileList, (uploaded) =>
+      onChange(upload.merge(attachments, uploaded, (existing, added) => [...existing, ...added])),
+    );
 
   return (
     <div className="grid gap-2">
@@ -1846,27 +1816,23 @@ function AttachmentFieldEditor({
         htmlFor={inputId}
       >
         <Paperclip size={14} />
-        {isUploading
-          ? uploadPercent === null
-            ? messages.recordView.uploading
-            : `${messages.recordView.uploading} ${Math.floor(uploadPercent)}%`
-          : messages.recordView.addFile}
+        {upload.label}
       </label>
       <input
-        accept={accept}
+        accept={upload.accept}
         aria-describedby={ariaDescribedBy}
         aria-label={fieldName}
         className="sr-only"
-        disabled={isUploading || !onUploadAttachment}
+        disabled={upload.isUploading || !upload.canUpload}
         id={inputId}
-        multiple={multiple}
+        multiple={upload.multiple}
         onChange={(event) => {
           void handleFiles(event.currentTarget.files);
           event.currentTarget.value = "";
         }}
         type="file"
       />
-      {uploadError ? <p className="text-destructive text-xs">{uploadError}</p> : null}
+      {upload.uploadError ? <p className="text-destructive text-xs">{upload.uploadError}</p> : null}
       {attachments.length > 0 ? (
         <ul className="grid gap-1">
           {attachments.map((item) => {
@@ -1913,46 +1879,6 @@ function AttachmentFieldEditor({
     </div>
   );
 }
-
-/**
- * Coerce ONE editor value into the shape the server stores for that field type.
- *
- * Exported per-field (rather than only as the whole-record `normalizeEditorFields`
- * below) because a bulk edit patches a SUBSET of fields: running the whole-record
- * version there would fill every untouched field with its default and overwrite
- * data the user never looked at.
- */
-export const normalizeEditorFieldValue = (field: BaseFieldVO, value: unknown): unknown => {
-  if (field.type === "attachment") {
-    return getAttachmentRefs(value);
-  }
-  if (field.type === "number") {
-    // An empty input clears the field; it is distinct from an explicit zero.
-    if (value == null || (typeof value === "string" && value.trim() === "")) return null;
-    // Keep invalid input intact so field validation can report it instead of
-    // silently clearing it or coercing booleans/arrays into a numeric value.
-    if (typeof value !== "string" && typeof value !== "number") return value;
-    const numberValue = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(numberValue) ? numberValue : value;
-  }
-  if (field.type === "checkbox") {
-    return value === true || value === "true";
-  }
-  if (field.type === "multiselect" || field.type === "relation" || field.type === "ai_tags") {
-    return Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
-      : typeof value === "string" && value
-        ? [value]
-        : [];
-  }
-  if (field.type === "whiteboard") {
-    // Re-validate/reshape defensively at submit time, same spirit as the
-    // other structured types above — guarantees the server always
-    // receives a well-formed { scene, previewSvg } value.
-    return parseWhiteboardFieldValue(value);
-  }
-  return value ?? "";
-};
 
 /**
  * A reverse relation column in the record editor: the linking records as chips,
@@ -2175,23 +2101,29 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
                   <CellAgentPromptsButton field={field} record={record} />
                 </div>
                 <div className="mt-3 text-base leading-7">
-                  <FieldValuePreview
-                    className={
-                      field.type === "html" ||
-                      field.type === "code" ||
-                      field.type === "json" ||
-                      field.type === "yaml" ||
-                      field.type === "whiteboard"
-                        ? "text-sm"
-                        : "whitespace-pre-wrap text-foreground/95"
-                    }
-                    field={field}
-                    computed={record.computedFields?.[field.slug]}
-                    fieldUsers={record.fieldUsers}
-                    record={record}
-                    records={records}
-                    value={value}
-                  />
+                  {field.type === "drive" ? (
+                    // A drive cell is a chip list everywhere else; here, where
+                    // there is room, its files show in their folders.
+                    <DriveFieldTree value={value} />
+                  ) : (
+                    <FieldValuePreview
+                      className={
+                        field.type === "html" ||
+                        field.type === "code" ||
+                        field.type === "json" ||
+                        field.type === "yaml" ||
+                        field.type === "whiteboard"
+                          ? "text-sm"
+                          : "whitespace-pre-wrap text-foreground/95"
+                      }
+                      field={field}
+                      computed={record.computedFields?.[field.slug]}
+                      fieldUsers={record.fieldUsers}
+                      record={record}
+                      records={records}
+                      value={value}
+                    />
+                  )}
                 </div>
               </section>
             ) : (

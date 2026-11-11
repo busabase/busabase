@@ -32,16 +32,18 @@ const VALID_INPUT_KINDS = new Set([
   "relation",
   "member",
   "attachment",
+  "drive",
   "tags",
   "whiteboard",
   "computed",
 ]);
 
 describe("FIELD_TYPES registry — complete & well-formed for every field type", () => {
-  it("has exactly 29 field types", () => {
+  it("has exactly 30 field types", () => {
     // 28 → 29 when `member` landed (the person-picker field; see
-    // content/spec/member-field.md).
-    expect(ALL_FIELD_TYPES).toHaveLength(29);
+    // content/spec/member-field.md); 29 → 30 with `drive` (attachment refs
+    // organised in folders by a per-file path).
+    expect(ALL_FIELD_TYPES).toHaveLength(30);
   });
 
   it("structured text fields validate their syntax and reuse code display", () => {

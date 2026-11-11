@@ -76,6 +76,11 @@ interface SplitSubmitButtonProps {
   hint?: string;
   /** Open below when the button is placed in a top toolbar. */
   dropdownPosition?: "above" | "below";
+  /**
+   * Where focus goes when the dropdown closes. By default it returns to the
+   * chevron; an in-place editor hands it back to its input instead.
+   */
+  onMenuCloseAutoFocus?: (event: Event) => void;
 }
 
 /**
@@ -92,6 +97,7 @@ export function SplitSubmitButton({
   disabled = false,
   hint,
   dropdownPosition = "above",
+  onMenuCloseAutoFocus,
 }: SplitSubmitButtonProps) {
   const messages = useCoreI18n();
   const inheritedPermissionLevel = useContext(SubmitPermissionContext);
@@ -152,6 +158,7 @@ export function SplitSubmitButton({
         <DropdownMenuContent
           align="end"
           className="min-w-max"
+          onCloseAutoFocus={onMenuCloseAutoFocus}
           side={dropdownPosition === "below" ? "bottom" : "top"}
         >
           {hint ? (

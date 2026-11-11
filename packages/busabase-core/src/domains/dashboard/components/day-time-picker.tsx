@@ -4,7 +4,7 @@ import { Button } from "kui/button";
 import { Calendar } from "kui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import { CalendarIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import type { DayPickerLocale } from "react-day-picker";
 import { de, enUS, es, fr, ja, ko, ptBR, vi, zhCN, zhTW } from "react-day-picker/locale";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
@@ -43,6 +43,21 @@ const normalizeTimeOfDay = (text: string): string | null => {
   return match ? `${match[1]?.padStart(2, "0")}:${match[2]}` : null;
 };
 
+/**
+ * Lets a host own the calendar popover instead of the trigger button: the grid
+ * opens it the moment a date cell starts editing, and decides what closing it
+ * means (Esc cancels, clicking away saves). Without it the button toggles the
+ * popover itself, as the record form uses it.
+ */
+export interface DayTimePickerPopoverControl {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onEscapeKeyDown?: (event: KeyboardEvent) => void;
+  onCloseAutoFocus?: (event: Event) => void;
+  /** The host's own actions at the bottom of the calendar (the grid's submit control). */
+  footer?: ReactNode;
+}
+
 interface DayTimePickerProps {
   ariaDescribedBy?: string;
   ariaLabel: string;
@@ -63,6 +78,9 @@ interface DayTimePickerProps {
   text: string | null;
   /** `HH:mm` shown in the time box; only used when `includeTime`. */
   time: string;
+  popover?: DayTimePickerPopoverControl;
+  /** A line at the bottom of the calendar (the time zone the time box is in). */
+  note?: string;
 }
 
 /**
@@ -83,13 +101,17 @@ export function DayTimePicker({
   includeTime,
   minDay,
   onClear,
+  note,
   onPick,
+  popover,
   text,
   time,
 }: DayTimePickerProps) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = popover ? popover.open : ownOpen;
+  const setOpen = popover ? popover.onOpenChange : setOwnOpen;
   const [timeDraft, setTimeDraft] = useState(time);
   useEffect(() => setTimeDraft(time), [time]);
   const selected = day ? dayKeyToLocalDate(day) : undefined;
@@ -122,6 +144,8 @@ export function DayTimePicker({
       <PopoverContent
         align="start"
         className="max-h-[var(--radix-popover-content-available-height)] w-auto overflow-y-auto p-0"
+        onCloseAutoFocus={popover?.onCloseAutoFocus}
+        onEscapeKeyDown={popover?.onEscapeKeyDown}
       >
         <Calendar
           autoFocus
@@ -184,6 +208,14 @@ export function DayTimePicker({
             </Button>
           ) : null}
         </div>
+        {note ? (
+          <div className="px-2 pb-2 text-[11px] text-muted-foreground" suppressHydrationWarning>
+            {note}
+          </div>
+        ) : null}
+        {popover?.footer ? (
+          <div className="border-border/60 border-t p-2">{popover.footer}</div>
+        ) : null}
       </PopoverContent>
     </Popover>
   );

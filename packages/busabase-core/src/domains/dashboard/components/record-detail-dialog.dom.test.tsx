@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { RecordVO } from "busabase-contract/types";
 import { useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 import { CoreI18nProvider } from "../../../i18n";
@@ -13,6 +13,11 @@ import { coreMessagesByLocale } from "../../../i18n/catalog";
 import type { CoreLocale } from "../../../i18n/locales";
 import { DashboardVisitorProvider } from "../visitor-context";
 import { RecordDetailDialog } from "./record-detail-dialog";
+
+vi.mock(
+  "previewfile-core/client/embedded/lazy",
+  () => import("../../../../tests/mocks/embedded-file-viewer"),
+);
 
 const timestamp = "2026-10-26T08:00:00.000Z";
 const record = {
@@ -147,7 +152,106 @@ describe("record detail dialog", () => {
     fireEvent.click(within(detail).getByRole("link", { name: files[11]?.fileName }));
     const preview = screen.getByTestId("attachment-preview-dialog");
     expect(within(preview).getByRole("heading", { name: files[11]?.fileName })).toBeTruthy();
-    expect(preview.querySelector("iframe")?.getAttribute("src")).toBe(files[11]?.url);
+    expect(within(preview).getByTestId("embedded-file-preview").getAttribute("data-url")).toBe(
+      files[11]?.url,
+    );
+    expect(preview.querySelector('[data-previewfile-type="pdf"]')).toBeTruthy();
+  });
+
+  it("shows a drive field as a read-only folder tree and opens a file from it", () => {
+    const file = (id: string, path?: string) => ({
+      id,
+      fileName: (path ?? id).split("/").at(-1),
+      url: `https://example.com/${id}`,
+      mimeType: "application/pdf",
+      size: 10,
+      ...(path ? { path } : {}),
+    });
+    const withDrive = (docs: unknown): RecordVO => ({
+      ...record,
+      base: {
+        ...record.base,
+        fields: [
+          ...record.base.fields,
+          {
+            id: "fld_docs",
+            baseId: record.baseId,
+            slug: "docs",
+            name: "Documents",
+            type: "drive",
+            options: {},
+            required: false,
+            position: 2,
+          },
+        ],
+      },
+      headCommit: { ...record.headCommit, payload: { ...record.headCommit.payload, docs } },
+    });
+    renderDialog("en", "member", {
+      record: withDrive([
+        file("ast_main", "contracts/2026/main.pdf"),
+        file("ast_quote", "contracts/quote.pdf"),
+        // A ref with no path sits at the root under its file name.
+        file("readme.pdf"),
+      ]),
+    });
+    const section = screen
+      .getByTestId("record-detail-dialog")
+      .querySelector('[data-record-field-slug="docs"]') as HTMLElement;
+    const tree = within(section).getByRole("tree");
+    expect(
+      within(tree)
+        .getAllByRole("treeitem")
+        .map((item) => item.textContent),
+    ).toEqual(["contracts", "2026", "main.pdf", "quote.pdf", "readme.pdf"]);
+    // Read-only: no rename or remove, only download.
+    expect(within(tree).queryByRole("button", { name: "Actions for folder contracts" })).toBeNull();
+    fireEvent.pointerDown(within(tree).getByRole("button", { name: "Actions for main.pdf" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Download file",
+    ]);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    fireEvent.click(within(tree).getByRole("treeitem", { name: "quote.pdf" }));
+    const preview = screen.getByTestId("drive-file-preview-dialog");
+    expect(within(preview).getByRole("heading", { name: "quote.pdf" })).toBeTruthy();
+    expect(within(preview).getByText("contracts/quote.pdf")).toBeTruthy();
+    expect(within(preview).getByTestId("embedded-file-preview").getAttribute("data-url")).toBe(
+      "https://example.com/ast_quote",
+    );
+  });
+
+  it("shows an empty drive field as the usual placeholder", () => {
+    renderDialog("en", "member", {
+      record: {
+        ...record,
+        base: {
+          ...record.base,
+          fields: [
+            ...record.base.fields,
+            {
+              id: "fld_docs",
+              baseId: record.baseId,
+              slug: "docs",
+              name: "Documents",
+              type: "drive",
+              options: {},
+              required: false,
+              position: 2,
+            },
+          ],
+        },
+      } as RecordVO,
+    });
+    const section = screen
+      .getByTestId("record-detail-dialog")
+      .querySelector('[data-record-field-slug="docs"]') as HTMLElement;
+    expect(within(section).queryByRole("tree")).toBeNull();
+    expect(within(section).getByText("-")).toBeTruthy();
   });
 
   it("shows a loading state, not a not-found message, until the full record arrives", () => {

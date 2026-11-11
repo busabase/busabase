@@ -65,11 +65,11 @@ export const createAgentPromptEnvelope = (
   input: Omit<AgentPromptEnvelope, "version" | "kind">,
 ): AgentPromptEnvelope =>
   AgentPromptEnvelopeSchema.parse({ version: 1, kind: "busabase-agent-prompt", ...input });
+/** Origin is descriptive metadata; edition and Cloud workspace define compatibility. */
 export const isAgentPromptSourceCompatible = (
   source: AgentPromptSource,
-  destination: AgentPromptSource,
+  destination: Pick<AgentPromptSource, "edition" | "spaceId">,
 ): boolean =>
-  source.origin === destination.origin &&
   source.edition === destination.edition &&
   (source.edition !== "cloud" || Boolean(source.spaceId && source.spaceId === destination.spaceId));
 export const agentPromptResourceUri = (id: string): string =>

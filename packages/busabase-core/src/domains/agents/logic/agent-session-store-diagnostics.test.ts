@@ -2,6 +2,12 @@ import type { AgentSessionEventVO } from "busabase-contract/domains/agents/types
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withAgentSessionDiagnosticContext } from "./agent-session-diagnostics";
 
+// These unit tests isolate SQL/capacity behavior; durable restore holds have
+// their own real-storage integration coverage.
+vi.mock("../../dump/logic/restore-activity", () => ({
+  isRestoreAutomationBlocked: async () => false,
+}));
+
 const mocks = vi.hoisted(() => ({ database: undefined as unknown }));
 vi.mock("../../../context", () => ({
   getContextActorId: () => "actor-private",

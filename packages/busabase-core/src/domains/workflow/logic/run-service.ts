@@ -5,8 +5,10 @@ import {
   type CancelQueuedWorkflowRunsInput,
   type CancelWorkflowRunInput,
   type DecideWorkflowRunInput,
+  type ListWaitingWorkflowRunsInput,
   type ListWorkflowRunsInput,
   type ResumeWorkflowRunInput,
+  type RetryWorkflowRunInput,
   type StartWorkflowRunInput,
   WORKFLOW_RUN_RETENTION_DAYS,
   type WorkflowRecordSnapshot,
@@ -32,6 +34,7 @@ import {
   createDeleteChangeRequest,
   createUpdateChangeRequest,
 } from "../../base/logic/record-ops";
+import { isRestoreAutomationBlocked } from "../../dump/logic/restore-activity";
 import { readRichNodeDocument } from "../../rich-node/handlers";
 import { runFunction } from "../../webhook/logic/sandbox";
 import {
@@ -51,15 +54,18 @@ import {
   decideWorkflowRun,
   failWorkflowRunFromHost,
   getWorkflowRun,
+  listWaitingWorkflowRuns,
   listWorkflowRuns,
   resumeElapsedWorkflowRuns,
   resumeWorkflowRun,
+  retryWorkflowRun,
   startWorkflowRun,
   type WorkflowFunctionCall,
   type WorkflowFunctionCallResult,
   type WorkflowRuntimeDeps,
   workflowRunFailedEvent,
 } from "./runs";
+import { pollSandboxFunction, startSandboxFunction, stopSandboxFunction } from "./sandbox-step";
 import {
   enqueueDueScheduledRuns,
   enqueueWorkflowHookRun,
@@ -250,8 +256,21 @@ const liveDeps = (options: { background?: boolean } = {}): WorkflowRuntimeDeps =
     deleteRecord: deleteRecordForWorkflow,
     findRecords: findRecordsForWorkflow,
     loadDocument: (nodeId) => readRichNodeDocument(nodeId, "workflow"),
+    describeWorkflow: async (nodeId) => {
+      const node = await resolveVisibleNodeOfTypes(
+        nodeId,
+        ["workflow"],
+        () => new ORPCError("BAD_REQUEST", { message: `Node ${nodeId} is not a workflow` }),
+      );
+      return { name: node.name };
+    },
     executeFunction: (call) => executeStoredFunction(spaceId, call),
     sendWebhook: sendWorkflowWebhook,
+    sandbox: {
+      start: startSandboxFunction,
+      poll: pollSandboxFunction,
+      stop: stopSandboxFunction,
+    },
     createId: () => id("wfr"),
     resolveActorNames,
     notify: emitNotificationEvent,
@@ -261,27 +280,43 @@ const liveDeps = (options: { background?: boolean } = {}): WorkflowRuntimeDeps =
   };
 };
 
+const mutateStoredWorkflow = async <T>(mutate: () => Promise<T>): Promise<T> => {
+  if (await isRestoreAutomationBlocked(getContextSpaceId()))
+    throw new ORPCError("CONFLICT", {
+      message:
+        "This space is being restored. Workflow changes and execution are paused until the restore completes.",
+    });
+  return mutate();
+};
+
 export const startStoredWorkflowRun = (input: StartWorkflowRunInput) =>
-  startWorkflowRun(liveDeps(), input);
+  mutateStoredWorkflow(() => startWorkflowRun(liveDeps(), input));
 
 export const getStoredWorkflowRun = (runId: string) => getWorkflowRun(liveDeps(), runId);
+
+export const listWaitingStoredWorkflowRuns = (input: ListWaitingWorkflowRunsInput) =>
+  listWaitingWorkflowRuns(liveDeps(), input);
 
 export const listStoredWorkflowRuns = (input: ListWorkflowRunsInput) =>
   listWorkflowRuns(liveDeps(), input);
 
 export const resumeStoredWorkflowRun = (input: ResumeWorkflowRunInput) =>
-  resumeWorkflowRun(liveDeps(), input);
+  mutateStoredWorkflow(() => resumeWorkflowRun(liveDeps(), input));
 
 export const decideStoredWorkflowRun = (input: DecideWorkflowRunInput) =>
-  decideWorkflowRun(liveDeps(), input);
+  mutateStoredWorkflow(() => decideWorkflowRun(liveDeps(), input));
+
+export const retryStoredWorkflowRun = (input: RetryWorkflowRunInput) =>
+  mutateStoredWorkflow(() => retryWorkflowRun(liveDeps(), input));
 
 export const cancelStoredWorkflowRun = (input: CancelWorkflowRunInput) =>
-  cancelWorkflowRun(liveDeps(), input);
+  mutateStoredWorkflow(() => cancelWorkflowRun(liveDeps(), input));
 
 export const cancelQueuedStoredWorkflowRuns = (input: CancelQueuedWorkflowRunsInput) =>
-  cancelQueuedWorkflowRuns(liveDeps(), input);
+  mutateStoredWorkflow(() => cancelQueuedWorkflowRuns(liveDeps(), input));
 
-export const resumeElapsedStoredWorkflowRuns = () => resumeElapsedWorkflowRuns(liveDeps());
+export const resumeElapsedStoredWorkflowRuns = () =>
+  mutateStoredWorkflow(() => resumeElapsedWorkflowRuns(liveDeps()));
 
 /** Queue runs for schedules that are due. `processDueWorkflowRuns` calls it on every tick. */
 export { enqueueDueScheduledRuns };
@@ -358,6 +393,10 @@ export const processDueWorkflowRuns = async (options: {
   result.scheduled = await enqueueDueScheduledRuns(options.db);
 
   for (const run of await store.listInterrupted(Date.now(), 50)) {
+    if (await isRestoreAutomationBlocked(run.spaceId)) {
+      result.deferred += 1;
+      continue;
+    }
     const failed = await failWorkflowRunFromHost(
       store,
       run.id,
@@ -373,6 +412,10 @@ export const processDueWorkflowRuns = async (options: {
 
   const due = await store.listDue(Date.now(), options.limit ?? 50);
   for (const run of due) {
+    if (await isRestoreAutomationBlocked(run.spaceId)) {
+      result.deferred += 1;
+      continue;
+    }
     if (Date.now() - startedAt > budgetMs) {
       result.deferred += 1;
       continue;

@@ -1,14 +1,16 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
 import { createRouterClient, ORPCError } from "@orpc/server";
-import type {
-  InstallEventVO,
-  InstallFailureVO,
-  InstallFromGithubDTO,
-  InstallPlanFromGithubDTO,
-  InstallPlanNodeVO,
-  InstallPlanVO,
-  InstallResultVO,
+import {
+  type InstallEventVO,
+  type InstallFailureVO,
+  type InstallFromGithubDTO,
+  type InstallPlanFromGithubDTO,
+  InstallPlanFromGithubDTOSchema,
+  type InstallPlanNodeVO,
+  type InstallPlanVO,
+  type InstallResultVO,
 } from "busabase-contract/domains/install/types";
 import { applyInstall, getInstallFailureDetails } from "busabase-package/apply";
 import type { PackageClient } from "busabase-package/client";
@@ -72,9 +74,19 @@ interface PreparedInstall {
  * caller does with the plan, not what the plan contains), so both DTOs fit.
  */
 const prepareInstall = async (
-  input: Pick<InstallPlanFromGithubDTO, "repoUrl" | "intoFolder" | "rename">,
+  input: Pick<InstallPlanFromGithubDTO, "repoUrl" | "intoFolder" | "newFolder" | "rename">,
 ): Promise<PreparedInstall> => {
   requireWriteForInstall();
+  // The router validates HTTP callers; repeat at the service boundary so direct
+  // internal callers cannot download or mutate anything with an invalid target.
+  const parsed = InstallPlanFromGithubDTOSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "Invalid installation target.",
+      data: { issues: parsed.error.issues },
+    });
+  }
+  input = parsed.data;
 
   const { source, files } = await fetchPackageFiles(input.repoUrl);
 
@@ -93,13 +105,31 @@ const prepareInstall = async (
   // Must derive the default the SAME way `buildInstallPlan` does, or the folder we
   // look up here isn't the folder the plan targets — collisions would be computed
   // against the wrong node. (A manifest name is free-form; a slug is not.)
-  const targetFolderSlug = input.intoFolder ?? suggestSlug(tree.manifest.name);
-  const target = await resolveTargetState(client, targetFolderSlug);
+  let targetFolderSlug =
+    input.newFolder?.slug ??
+    (input.newFolder ? `f-${randomUUID()}` : (input.intoFolder ?? suggestSlug(tree.manifest.name)));
+  let target = await resolveTargetState(client, targetFolderSlug);
+  // Automatic candidates can be reallocated while planning is still read-only.
+  // A supplied slug is the preview's chosen identity: never replace or reuse it.
+  if (input.newFolder && !input.newFolder.slug) {
+    for (let attempt = 0; target.targetFolder && attempt < 5; attempt++) {
+      targetFolderSlug = `f-${randomUUID()}`;
+      target = await resolveTargetState(client, targetFolderSlug);
+    }
+  }
+  if (input.newFolder && target.targetFolder) {
+    throw new ORPCError("CONFLICT", {
+      message: "The new installation folder already exists. Preview the install again.",
+    });
+  }
 
   let plan: InstallPlan;
   try {
     plan = buildInstallPlan(tree, target, {
       intoFolder: input.intoFolder,
+      ...(input.newFolder
+        ? { newFolder: { slug: targetFolderSlug, name: input.newFolder.name } }
+        : {}),
       rename: input.rename,
     });
   } catch (error) {
@@ -217,6 +247,7 @@ export const installFromGithub = async (input: InstallFromGithubDTO): Promise<In
 
   return {
     targetFolderSlug: plan.targetFolderSlug,
+    ...(plan.newFolder ? { targetFolderName: plan.newFolder.name } : {}),
     targetFolderNodeId: result.targetFolderNodeId,
     created: result.created,
     pendingChangeRequests: result.pendingChangeRequests,
@@ -327,6 +358,7 @@ export async function* installFromGithubStream(
     kind: "done",
     result: {
       targetFolderSlug: plan.targetFolderSlug,
+      ...(plan.newFolder ? { targetFolderName: plan.newFolder.name } : {}),
       targetFolderNodeId: result.targetFolderNodeId,
       created: result.created,
       pendingChangeRequests: result.pendingChangeRequests,
@@ -478,6 +510,7 @@ const toPlanVO = (
       subdir: source.subdir,
     },
     targetFolderSlug: plan.targetFolderSlug,
+    ...(plan.newFolder ? { newFolder: plan.newFolder } : {}),
     nodes,
     counts,
     collisions: plan.collisions.map((collision) => ({

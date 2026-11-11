@@ -11,6 +11,7 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
+import { isFileFieldType } from "../../base/field-types";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { resolveCoverField } from "../../base/utils/view-field-resolution";
 import { getRecordTitle } from "../helpers/change-request";
@@ -149,7 +150,7 @@ function GalleryCard({
                 </div>
               ) : null}
               <div className="truncate text-muted-foreground text-xs" title={preview}>
-                {field.type === "attachment" ? (
+                {isFileFieldType(field.type) ? (
                   <span className="inline-flex items-center gap-1">
                     <Paperclip size={10} className="shrink-0" />
                     {preview}

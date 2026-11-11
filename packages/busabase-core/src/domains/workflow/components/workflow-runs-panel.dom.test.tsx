@@ -100,7 +100,11 @@ const steps = [
 
 function setup(
   initialRuns: WorkflowRun[],
-  { canRun = true, decidable }: { canRun?: boolean; decidable?: string[] } = {},
+  {
+    canRun = true,
+    decidable,
+    retryable = [],
+  }: { canRun?: boolean; decidable?: string[]; retryable?: string[] } = {},
 ) {
   let serverRuns = initialRuns;
   const list = vi.fn(
@@ -111,6 +115,7 @@ function setup(
       decidableRunIds:
         decidable ??
         (canRun ? serverRuns.filter((r) => r.status === "waiting_approval").map((r) => r.id) : []),
+      retryableRunIds: canRun ? retryable : [],
       nextCursor: null,
       queuedCount: serverRuns.filter((r) => r.status === "queued").length,
       actorNames: { "user-1": "Ada Lovelace" },
@@ -146,6 +151,24 @@ function setup(
     serverRuns = serverRuns.map((entry) => (entry.id === input.runId ? cancelled : entry));
     return cancelled;
   });
+  const retry = vi.fn(async (input: { runId: string }) => {
+    const retried = run({
+      id: "run-retried",
+      status: "running",
+      startedAt: "2026-10-30T14:00:00.000Z",
+      payload: { retryOf: input.runId },
+    });
+    serverRuns = [
+      retried,
+      ...serverRuns.map((entry) =>
+        entry.id === input.runId
+          ? { ...entry, payload: { ...entry.payload, retriedAs: retried.id } }
+          : entry,
+      ),
+    ];
+    retryable = retryable.filter((id) => id !== input.runId);
+    return retried;
+  });
   const cancelQueued = vi.fn(async () => ({ cancelled: 0 }));
   const orpc = {
     workflows: {
@@ -159,6 +182,7 @@ function setup(
       resume: { mutationOptions: () => ({ mutationFn: resume }) },
       decide: { mutationOptions: () => ({ mutationFn: decide }) },
       cancel: { mutationOptions: () => ({ mutationFn: cancel }) },
+      retry: { mutationOptions: () => ({ mutationFn: retry }) },
       cancelQueued: { mutationOptions: () => ({ mutationFn: cancelQueued }) },
     },
   } as unknown as BusabaseQueryUtils;
@@ -186,7 +210,18 @@ function setup(
         />
       </Providers>,
     );
-  return { cancel, cancelQueued, client, decide, highlights, list, renderPanel, resume, start };
+  return {
+    cancel,
+    cancelQueued,
+    client,
+    decide,
+    highlights,
+    list,
+    renderPanel,
+    resume,
+    retry,
+    start,
+  };
 }
 
 const runItem = (container: HTMLElement, runId: string) => {
@@ -383,6 +418,7 @@ describe("WorkflowRunsPanel", () => {
         runs: cursor ? [failedRun] : [completedRun],
         canRun: true,
         decidableRunIds: [],
+        retryableRunIds: [],
         nextCursor: cursor ? null : "page-2",
         queuedCount: 0,
         actorNames: {},
@@ -491,5 +527,70 @@ describe("WorkflowRunsPanel", () => {
     await waitFor(() => runItem(container, "run-waiting"));
     unmount();
     expect(highlights.at(-1)).toBeNull();
+  });
+});
+
+describe("WorkflowRunsPanel retry", () => {
+  const openRun = async (container: HTMLElement, runId: string) => {
+    await waitFor(() => runItem(container, runId));
+    fireEvent.click(runItem(container, runId));
+  };
+
+  it("offers Retry from this step on a failed run the server says can run again, and opens the new run", async () => {
+    const { renderPanel, retry } = setup([failedRun], { retryable: [failedRun.id] });
+    const { container } = renderPanel();
+    await openRun(container, failedRun.id);
+    const button = await waitFor(() => {
+      const found = container.querySelector<HTMLButtonElement>("[data-workflow-run-retry]");
+      if (!found) throw new Error("retry button missing");
+      return found;
+    });
+    expect(container.querySelector("[data-workflow-run-retry-box]")?.textContent).toContain(
+      "A request this step already sent is sent again.",
+    );
+    fireEvent.click(button);
+    await waitFor(() => expect(retry).toHaveBeenCalledTimes(1));
+    expect(retry.mock.calls[0]?.[0]).toEqual({ runId: failedRun.id });
+    // The new run is selected, labelled as a retry, and links back to the failed one.
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-run-id="run-retried"][aria-pressed="true"]'),
+      ).not.toBeNull(),
+    );
+    expect(runItem(container, "run-retried").textContent).toContain("Retry");
+    expect(
+      container.querySelector(`[data-workflow-run-retry-of="${failedRun.id}"]`),
+    ).not.toBeNull();
+    expect(container.querySelector("[data-workflow-run-retry]")).toBeNull();
+  });
+
+  it("shows no retry button when the server did not list the run as retryable", async () => {
+    const { renderPanel } = setup([failedRun], { retryable: [] });
+    const { container } = renderPanel();
+    await openRun(container, failedRun.id);
+    await waitFor(() =>
+      expect(container.querySelector("[data-workflow-run-failure]")).not.toBeNull(),
+    );
+    expect(container.querySelector("[data-workflow-run-retry]")).toBeNull();
+  });
+
+  it("shows a viewer no retry button, and a retried run links to its retry", async () => {
+    const retried = { ...failedRun, payload: { retriedAs: "run-later" } };
+    const later = run({ id: "run-later", status: "completed", payload: { retryOf: failedRun.id } });
+    const { renderPanel } = setup([later, retried], { canRun: false, retryable: [failedRun.id] });
+    const { container } = renderPanel();
+    await openRun(container, failedRun.id);
+    await waitFor(() =>
+      expect(container.querySelector('[data-workflow-run-retried-as="run-later"]')).not.toBeNull(),
+    );
+    expect(container.querySelector("[data-workflow-run-retry]")).toBeNull();
+    fireEvent.click(
+      container.querySelector('[data-workflow-run-retried-as="run-later"]') as HTMLElement,
+    );
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-run-id="run-later"][aria-pressed="true"]'),
+      ).not.toBeNull(),
+    );
   });
 });

@@ -12,7 +12,8 @@ import {
 } from "../src/domains/assets/logic/storage-cleanup-logic";
 import { docBodyKey } from "../src/domains/doc/handlers";
 import { queryInChunks } from "../src/domains/dump/logic/import-logic";
-import { folderReadmeKey } from "../src/domains/folder/handlers";
+import { folderReadmeHtmlKey, folderReadmeKey } from "../src/domains/folder/handlers";
+import { richNodeDocumentKey } from "../src/domains/rich-node/handlers";
 import { rootNodeIdForSpace } from "../src/logic/kernel";
 import { busabaseRouter } from "../src/router";
 
@@ -114,6 +115,98 @@ describe("dump domain logic — oRPC integration", () => {
         }),
       ),
     ).rejects.toThrow(/not found|expired/i);
+  });
+
+  it.each(["futureColumn", "constructor", "toString"])(
+    "rejects an unknown own PO column %s before filtering the source root or inserting any batch row",
+    async (column) => {
+      const sourceSpace = `space_dump_future_source_${column}`;
+      const targetSpace = `space_dump_future_target_${column}`;
+      const sourceRoot = rootNodeIdForSpace(sourceSpace);
+      await inSpace(targetSpace, () => client.nodes.list({}));
+      const before = await inSpace(targetSpace, () =>
+        client.dump.exportTables({ table: "nodes", limit: 2000 }),
+      );
+      const { sessionId } = await inSpace(targetSpace, () =>
+        client.dump.importBegin({ sourceSpaceId: sourceSpace }),
+      );
+      const node = (id: string, parentId: string | null, slug: string) => ({
+        id,
+        spaceId: sourceSpace,
+        parentId,
+        type: "folder",
+        slug,
+        name: slug,
+        description: "",
+        metadata: {},
+        position: 0,
+      });
+      await expect(
+        inSpace(targetSpace, () =>
+          client.dump.importTables({
+            sessionId,
+            table: "nodes",
+            rows: [
+              node(
+                `nod_future_child_${column}`,
+                sourceRoot,
+                `future-child-${column.toLowerCase()}`,
+              ),
+              { ...node(sourceRoot, null, "root"), [column]: { futureData: true } },
+            ],
+          }),
+        ),
+      ).rejects.toThrow(new RegExp(`unknown archive column.*${column}.*update the target server`));
+      const after = await inSpace(targetSpace, () =>
+        client.dump.exportTables({ table: "nodes", limit: 2000 }),
+      );
+      expect(after.rows.map((row) => row.id)).toEqual(before.rows.map((row) => row.id));
+      expect(after.rows.some((row) => row.id === `nod_future_child_${column}`)).toBe(false);
+      await inSpace(targetSpace, () => client.dump.importAbort({ sessionId }));
+    },
+  );
+
+  it("preserves unknown nested JSONB keys including an own __proto__ property", async () => {
+    const sourceSpace = "space_dump_nested_source";
+    const targetSpace = "space_dump_nested_target";
+    const nodeId = "nod_nested_metadata_exact";
+    const metadata = JSON.parse(
+      '{"futureColumn":{"nestedFuture":{"value":17}},"__proto__":{"preserved":true}}',
+    ) as Record<string, unknown>;
+    expect(Object.hasOwn(metadata, "__proto__")).toBe(true);
+    const { sessionId } = await inSpace(targetSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: sourceSpace }),
+    );
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "nodes",
+        rows: [
+          {
+            id: nodeId,
+            spaceId: sourceSpace,
+            parentId: rootNodeIdForSpace(sourceSpace),
+            type: "folder",
+            slug: "nested-metadata",
+            name: "Nested metadata",
+            description: "",
+            metadata,
+            position: 0,
+          },
+        ],
+      }),
+    );
+    const page = await inSpace(targetSpace, () =>
+      client.dump.exportTables({ table: "nodes", limit: 2000 }),
+    );
+    const restored = page.rows.find((row) => row.id === nodeId)?.metadata as Record<
+      string,
+      unknown
+    >;
+    expect(restored).toEqual(metadata);
+    expect(Object.hasOwn(restored, "__proto__")).toBe(true);
+    expect(restored.__proto__).toEqual({ preserved: true });
+    await inSpace(targetSpace, () => client.dump.importAbort({ sessionId }));
   });
 
   // ── docBodies / attachmentBlobs pseudo-table handling + date coercion ──
@@ -312,6 +405,152 @@ describe("dump domain logic — oRPC integration", () => {
     ).toBe("# mine\n");
   });
 
+  it("restores archived rich node raw objects without reserializing them or crossing spaces", async () => {
+    const sourceSpace = "space_dump_rich_source";
+    const targetSpace = "space_dump_rich_target";
+    const at = new Date().toISOString();
+    const types = ["html", "whiteboard", "workflow"] as const;
+    const raw = {
+      html: "<!doctype html>\n<p>Original &amp; exact</p>\n",
+      whiteboard: '{ "version": 1, "elements": [] }\n',
+      workflow: '{\n "version": 1, "nodes": [], "edges": []\n}\n',
+    };
+    const { sessionId } = await inSpace(targetSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: sourceSpace }),
+    );
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "nodes",
+        rows: types.map((type) => ({
+          id: `nod_dump_rich_${type}`,
+          spaceId: sourceSpace,
+          parentId: rootNodeIdForSpace(sourceSpace),
+          type,
+          slug: `rich-${type}`,
+          name: type,
+          description: "",
+          metadata: {},
+          position: 0,
+          archivedAt: at,
+          deletedAt: null,
+          createdAt: at,
+          updatedAt: at,
+        })),
+      }),
+    );
+    await expect(
+      inSpace(targetSpace, () =>
+        client.dump.importTables({
+          sessionId,
+          table: "docBodies",
+          rows: [{ nodeId: "nod_dump_rich_html", nodeType: "workflow", markdown: "wrong" }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(
+      inSpace(targetSpace, () =>
+        client.dump.importTables({
+          sessionId,
+          table: "docBodies",
+          rows: [{ nodeId: "foreign-node", nodeType: "html", markdown: "wrong" }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "docBodies",
+        rows: types.map((nodeType) => ({
+          nodeId: `nod_dump_rich_${nodeType}`,
+          nodeType,
+          markdown: raw[nodeType],
+        })),
+      }),
+    );
+    for (const type of types) {
+      expect(await storage.getObject(richNodeDocumentKey(`nod_dump_rich_${type}`, type))).toEqual(
+        Buffer.from(raw[type]),
+      );
+    }
+    expect((await inSpace(targetSpace, () => client.dump.importCommit({ sessionId }))).ok).toBe(
+      true,
+    );
+  });
+
+  // An HTML readme is the same `docBodies` row with `bodyFormat: "html"`.
+  it("docBodies restores an HTML folder readme to folder/readme.html, and refuses HTML for a Doc", async () => {
+    const sourceSpace = "space_dump_html_readme_source";
+    const targetSpace = "space_dump_html_readme_target";
+    const sourceRootId = rootNodeIdForSpace(sourceSpace);
+    const folderId = "nod_dump_html_readme_folder";
+    const docId = "nod_dump_html_readme_doc";
+    const at = new Date().toISOString();
+    const nodeRow = (id: string, parentId: string | null, type: string, slug: string) => ({
+      id,
+      spaceId: sourceSpace,
+      parentId,
+      type,
+      slug,
+      name: slug,
+      description: "",
+      metadata: {},
+      position: 0,
+      archivedAt: null,
+      deletedAt: null,
+      createdAt: at,
+      updatedAt: at,
+    });
+
+    const { sessionId } = await inSpace(targetSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: sourceSpace }),
+    );
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "nodes",
+        rows: [
+          nodeRow(sourceRootId, null, "folder", "root"),
+          nodeRow(folderId, sourceRootId, "folder", "html-readme-folder"),
+          nodeRow(docId, folderId, "doc", "html-readme-doc"),
+        ],
+      }),
+    );
+    await expect(
+      inSpace(targetSpace, () =>
+        client.dump.importTables({
+          sessionId,
+          table: "docBodies",
+          rows: [{ nodeId: docId, markdown: "<h1>not a doc</h1>", bodyFormat: "html" }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(storage.objectExists(docBodyKey(docId))).resolves.toBe(false);
+
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "docBodies",
+        rows: [
+          { nodeId: folderId, markdown: "<h1>Folder page</h1>\n", bodyFormat: "html" },
+          { nodeId: docId, markdown: "# Doc body\n" },
+        ],
+      }),
+    );
+    expect((await inSpace(targetSpace, () => client.dump.importCommit({ sessionId }))).ok).toBe(
+      true,
+    );
+
+    const detail = await inSpace(targetSpace, () =>
+      client.nodes.get({ nodeId: folderId, type: "folder" }),
+    );
+    if (detail.type !== "folder") throw new Error("expected a folder detail");
+    expect(detail.body).toBe("<h1>Folder page</h1>\n");
+    expect(detail.bodyFormat).toBe("html");
+    await expect(storage.objectExists(folderReadmeHtmlKey(folderId))).resolves.toBe(true);
+    await expect(storage.objectExists(folderReadmeKey(folderId))).resolves.toBe(false);
+  });
+
   // ── cursor pagination termination + no dup/gap across pages ────────────
   it("exportTables cursor pagination visits every row exactly once, in order", async () => {
     const spaceId = "space_dump_pagination";
@@ -442,8 +681,12 @@ describe("dump domain logic — oRPC integration", () => {
     );
 
     const commit = await inSpace(targetSpace, () => client.dump.importCommit({ sessionId }));
-    expect(commit.ok).toBe(true);
+    expect(commit.ok).toBe(false);
     expect(commit.warnings.some((w) => /attachmentId that was not imported/i.test(w))).toBe(true);
+    // Failed commit retains the session so ordinary restore can still roll back.
+    expect(await inSpace(targetSpace, () => client.dump.importAbort({ sessionId }))).toEqual({
+      ok: true,
+    });
   });
 
   // ── nodePrincipals: cross-space restore remaps a "space" grant's principalId ─

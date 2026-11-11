@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
+import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busabaseRouter } from "../src/router";
 
@@ -17,7 +19,6 @@ import { busabaseRouter } from "../src/router";
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
-const HASH = (byte: string) => `sha256:${byte.repeat(64)}`;
 
 const expectDefined = <T>(value: T | undefined | null): T => {
   expect(value).toBeDefined();
@@ -256,13 +257,15 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
     });
 
     it("rejects an asset with zero editable mounts (uploaded but never mounted anywhere)", async () => {
-      const contentHash = HASH("1");
+      const bytes = Buffer.alloc(20, 1);
+      const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
       const requested = await client.assets.createUploadUrl({
         fileName: "unmounted.txt",
         mimeType: "text/plain",
         sizeBytes: 20,
         contentHash,
       });
+      await storage.uploadFileToKey(bytes, requested.storageKey, "text/plain");
       const confirmed = await client.assets.confirm({
         storageKey: requested.storageKey,
         fileName: "unmounted.txt",

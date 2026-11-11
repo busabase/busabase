@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * Unified grep, item D of agent-playbook-discovery.md §9 — against a real
  * PGLite database through the real oRPC router (plus one pass through the
@@ -14,6 +15,7 @@ import { createRouterClient } from "@orpc/server";
 import type { UnifiedGrepResultVO } from "busabase-contract/contract/grep-schemas";
 import type { CustomAgentPrompts } from "busabase-contract/contract/node-agent-prompt-schemas";
 import { and, eq } from "drizzle-orm";
+import { storage } from "openlib/storage";
 import { beforeAll, describe, expect, it } from "vitest";
 import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
 import { busabaseAssetUsages, busabaseNodes } from "../src/db/schema";
@@ -25,8 +27,6 @@ type Db = Awaited<ReturnType<typeof seedScenario>>["db"];
 
 const asManager = <T>(fn: () => Promise<T>) =>
   runWithBusabaseContext({ spaceId: LOCAL_SPACE_ID, actorId: "alice", isSpaceManager: true }, fn);
-
-const HASH = (byte: string) => `sha256:${byte.repeat(64)}`;
 
 describe("unified grep — owner, prompts source, fair budget, archived owners", () => {
   let raw: RawClient;
@@ -70,13 +70,15 @@ describe("unified grep — owner, prompts source, fair budget, archived owners",
   /** Upload+confirm+putText an unmounted text asset. */
   const seedFile = (opts: { fileName: string; hashByte: string; text: string }) =>
     asManager(async () => {
-      const contentHash = HASH(opts.hashByte);
+      const bytes = Buffer.alloc(100, opts.hashByte);
+      const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
       const req = await raw.assets.createUploadUrl({
         fileName: opts.fileName,
         mimeType: "text/plain",
         sizeBytes: 100,
         contentHash,
       });
+      await storage.uploadFileToKey(bytes, req.storageKey, "text/plain");
       const confirmed = await raw.assets.confirm({
         storageKey: req.storageKey,
         fileName: opts.fileName,

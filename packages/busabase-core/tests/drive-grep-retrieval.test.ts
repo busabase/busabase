@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -65,13 +66,15 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
     hashByte: string;
     sizeBytes?: number;
   }) => {
-    const contentHash = HASH(opts.hashByte);
+    const bytes = Buffer.alloc(opts.sizeBytes ?? 100, opts.hashByte);
+    const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
     const req = await client.assets.createUploadUrl({
       fileName: opts.fileName,
       mimeType: opts.mimeType,
       sizeBytes: opts.sizeBytes ?? 100,
       contentHash,
     });
+    await storage.uploadFileToKey(bytes, req.storageKey, opts.mimeType);
     const confirmed = await client.assets.confirm({
       storageKey: req.storageKey,
       fileName: opts.fileName,

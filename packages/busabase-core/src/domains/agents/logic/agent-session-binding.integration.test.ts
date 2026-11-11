@@ -1,3 +1,5 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
@@ -25,6 +27,7 @@ import {
 
 describe("Buda binding revision with encrypted real vault persistence", () => {
   let client: PGlite;
+  let storageDir: string;
   let db: ReturnType<typeof drizzle<typeof schema>>;
   const asOwner = <T>(fn: () => Promise<T>) =>
     runWithBusabaseContext(
@@ -47,6 +50,8 @@ describe("Buda binding revision with encrypted real vault persistence", () => {
   };
 
   beforeAll(async () => {
+    storageDir = await mkdtemp(path.join(tmpdir(), "agent-binding-storage-"));
+    vi.stubEnv("STORAGE_URL", `local:${storageDir}`);
     vi.stubEnv("BUSABASE_VAULT_ENCRYPTION_KEY", "binding-integration-fixture-key");
     client = await PGlite.create({ extensions: { pg_trgm } });
     db = drizzle({ client, schema });
@@ -77,6 +82,7 @@ describe("Buda binding revision with encrypted real vault persistence", () => {
   afterEach(() => vi.unstubAllGlobals());
   afterAll(async () => {
     await client.close();
+    await rm(storageDir, { recursive: true, force: true });
     vi.unstubAllEnvs();
   });
 

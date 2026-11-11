@@ -1,4 +1,5 @@
 import type { BaseFieldVO, BaseVO } from "busabase-contract/types";
+import { isFileFieldType } from "../field-types";
 
 /**
  * Resolve which attachment field supplies the cover image. Honors the view's
@@ -11,7 +12,7 @@ export const resolveCoverField = (
   fields: BaseFieldVO[],
   coverFieldSlug: string | null | undefined,
 ): BaseFieldVO | null => {
-  const attachmentFields = (base?.fields ?? fields).filter((f) => f.type === "attachment");
+  const attachmentFields = (base?.fields ?? fields).filter((f) => isFileFieldType(f.type));
   if (coverFieldSlug === null) {
     // Explicitly "no cover".
     return null;

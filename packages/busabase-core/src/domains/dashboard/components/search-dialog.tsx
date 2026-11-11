@@ -71,6 +71,7 @@ const NODE_TYPE_FOR_SECTION = { skills: "skill", apps: "airapp" } as const satis
 >;
 const QUICK_RESULT_LIMIT = 6;
 const NODE_NAME_SEARCH_LIMIT = 20;
+const SEARCH_DEBOUNCE_MS = 500;
 
 /**
  * One shared shape every result row renders from, regardless of which tab
@@ -185,6 +186,8 @@ export function SearchDialog({
   const dialogRef = useRef<HTMLElement | null>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
+  const isComposingRef = useRef(false);
+  const debounceTimerRef = useRef<number | undefined>(undefined);
   const searchSessionRef = useRef<{
     key: string;
     id: string;
@@ -193,6 +196,7 @@ export function SearchDialog({
   } | null>(null);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [isComposing, setIsComposing] = useState(false);
   const [filter, setFilter] = useState<SearchFilterKey>("all");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [showLoading, setShowLoading] = useState(false);
@@ -273,18 +277,21 @@ export function SearchDialog({
   // local cache match stays instant/undebounced (see `recentLocalMatches`),
   // and is merged with the debounced server results (see `recentMatches`).
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    if (!open || isComposing) return;
+    debounceTimerRef.current = window.setTimeout(() => {
       setDebouncedQuery(query.trim());
       setHighlightedIndex(0);
-    }, 200);
-    return () => window.clearTimeout(timer);
-  }, [query]);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(debounceTimerRef.current);
+  }, [isComposing, open, query]);
 
   // Reset state when closed.
   useEffect(() => {
     if (!open) {
       setQuery("");
       setDebouncedQuery("");
+      isComposingRef.current = false;
+      setIsComposing(false);
       setFilter("all");
       setHighlightedIndex(0);
     }
@@ -314,7 +321,7 @@ export function SearchDialog({
    * settled keystroke instead of one. Each is cheaper than the combined call it
    * replaces — `sources` exists so a caller can skip the expensive
    * records-ranking query, which three of these four do — and all four share
-   * the same 180ms debounce.
+   * the same 500ms debounce after the input method commits its text.
    */
   // Written out four times rather than through a helper that wraps `useQuery`:
   // a helper would be a hook, and a hook called in a loop or behind a condition
@@ -345,12 +352,16 @@ export function SearchDialog({
       names: options("names"),
     };
   }, [orpc, debouncedQuery]);
-  const canSearch = open && debouncedQuery.length > 0;
   const normalizedDebouncedQuery = normalizeSearchText(debouncedQuery);
-  const isDebouncedQueryCurrent = normalizedDebouncedQuery === normalizedQuery;
-  const searchQueryKeysHash = hashKey(
-    Object.values(searchOptions).map((options) => options.queryKey),
-  );
+  const isDebouncedQueryCurrent = !isComposing && normalizedDebouncedQuery === normalizedQuery;
+  const canSearch = open && isDebouncedQueryCurrent && debouncedQuery.length > 0;
+  const nodeNameSearchOptions = orpc.nodes.searchByName.queryOptions({
+    input: { query: debouncedQuery, limit: NODE_NAME_SEARCH_LIMIT },
+  });
+  const searchQueryKeysHash = hashKey([
+    ...Object.values(searchOptions).map((options) => options.queryKey),
+    nodeNameSearchOptions.queryKey,
+  ]);
 
   useEffect(() => {
     const queryKeys = JSON.parse(searchQueryKeysHash) as readonly QueryKey[];
@@ -418,7 +429,8 @@ export function SearchDialog({
   const contentTruncated =
     isDebouncedQueryCurrent && contentQueries.some((q) => q.data?.contentTruncated ?? false);
   const isSearching =
-    (hasQuery && !isDebouncedQueryCurrent) || contentQueries.some((q) => q.isFetching);
+    (!isComposing && hasQuery && !isDebouncedQueryCurrent) ||
+    contentQueries.some((q) => q.isFetching);
   const searchError = !isDebouncedQueryCurrent
     ? null
     : contentQueries.some((q) => q.isError)
@@ -465,14 +477,8 @@ export function SearchDialog({
   // matches still render instantly underneath it (see `recentMatches`).
   const recentWantsNetworkSearch = (shows("recent") || shows("workspace")) && hasQuery;
   const nodeSearchByNameQuery = useQuery({
-    ...orpc.nodes.searchByName.queryOptions({
-      input: { query: debouncedQuery, limit: NODE_NAME_SEARCH_LIMIT },
-    }),
-    enabled:
-      open &&
-      recentWantsNetworkSearch &&
-      debouncedQuery.length > 0 &&
-      normalizeSearchText(debouncedQuery) === normalizeSearchText(query),
+    ...nodeNameSearchOptions,
+    enabled: canSearch && recentWantsNetworkSearch,
   });
   const recentNetworkResults = isDebouncedQueryCurrent ? (nodeSearchByNameQuery.data ?? []) : [];
   // Local rows first (already on screen — never reordered under the user),
@@ -496,7 +502,9 @@ export function SearchDialog({
   // (see `showLoadingIndicator`) — with local hits on screen the server results
   // simply appear underneath when they land, no flicker.
   const recentIsSearching =
-    recentWantsNetworkSearch && (!isDebouncedQueryCurrent || nodeSearchByNameQuery.isFetching);
+    !isComposing &&
+    recentWantsNetworkSearch &&
+    (!isDebouncedQueryCurrent || nodeSearchByNameQuery.isFetching);
   const recentSearchError =
     isDebouncedQueryCurrent && nodeSearchByNameQuery.isError
       ? presentCoreError(messages, locale, nodeSearchByNameQuery.error, messages.search.failed)
@@ -766,6 +774,14 @@ export function SearchDialog({
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
+      // Some IMEs end composition before their final keydown; WebKit marks that key as 229.
+      if (
+        isComposingRef.current ||
+        event.nativeEvent.isComposing ||
+        event.nativeEvent.keyCode === 229
+      ) {
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         onClose();
@@ -819,6 +835,7 @@ export function SearchDialog({
   );
 
   const quickSearchPending =
+    isComposing ||
     isSearching ||
     recentIsSearching ||
     (shows("apps") && appsQuery.isPending) ||
@@ -827,14 +844,14 @@ export function SearchDialog({
   useEffect(() => {
     setShowLoading(false);
     setIsSlow(false);
-    if (!normalizedQuery || !quickSearchPending || visibleResults.length > 0) return;
+    if (isComposing || !normalizedQuery || !quickSearchPending || visibleResults.length > 0) return;
     const loadingTimer = window.setTimeout(() => setShowLoading(true), 500);
     const slowTimer = window.setTimeout(() => setIsSlow(true), 1_000);
     return () => {
       window.clearTimeout(loadingTimer);
       window.clearTimeout(slowTimer);
     };
-  }, [normalizedQuery, quickSearchPending, visibleResults.length]);
+  }, [isComposing, normalizedQuery, quickSearchPending, visibleResults.length]);
 
   useEffect(() => {
     const hasSearchError =
@@ -963,6 +980,17 @@ export function SearchDialog({
             className="h-14 min-w-0 flex-1 bg-transparent font-light text-base text-foreground outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
             id="busabase-dashboard-search"
             onChange={(event) => setQuery(event.target.value)}
+            onCompositionStart={() => {
+              isComposingRef.current = true;
+              window.clearTimeout(debounceTimerRef.current);
+              setDebouncedQuery("");
+              setIsComposing(true);
+            }}
+            onCompositionEnd={(event) => {
+              isComposingRef.current = false;
+              setQuery(event.currentTarget.value);
+              setIsComposing(false);
+            }}
             placeholder={messages.search.placeholder}
             ref={inputRef}
             role="combobox"
@@ -974,6 +1002,8 @@ export function SearchDialog({
             className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             onClick={() => {
               if (hasQuery) {
+                isComposingRef.current = false;
+                setIsComposing(false);
                 setQuery("");
                 setHighlightedIndex(0);
                 inputRef.current?.focus();

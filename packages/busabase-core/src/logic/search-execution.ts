@@ -92,8 +92,8 @@ export async function withSearchExecution<T>(
   callback: (db: DbInstance, execution: SearchExecution) => Promise<T>,
 ): Promise<T> {
   const prefix = `BUSABASE_SEARCH_${mode.toUpperCase()}`;
-  const statementMs = budget(`${prefix}_STATEMENT_TIMEOUT_MS`, mode === "quick" ? 1_000 : 3_000);
-  const requestMs = budget(`${prefix}_REQUEST_TIMEOUT_MS`, mode === "quick" ? 2_000 : 5_000);
+  const statementMs = budget(`${prefix}_STATEMENT_TIMEOUT_MS`, 3_000);
+  const requestMs = budget(`${prefix}_REQUEST_TIMEOUT_MS`, 5_000);
   const deadline = Date.now() + requestMs;
   const activeQueries = new Set<Promise<unknown>>();
   let closed = false;

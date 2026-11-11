@@ -2,38 +2,35 @@
 
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
-import { Download, Expand, ExternalLink, FileText, Film, Music, RotateCcw } from "lucide-react";
+import { Download, Expand, ExternalLink, RotateCcw } from "lucide-react";
 import { Fragment, type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
 import { buildAssetDownloadUrl } from "../../assets/utils/asset-content-url";
-import { attachmentGridLayout } from "../helpers/attachment-grid-layout";
+import {
+  attachmentGridLayout,
+  attachmentGridThumbnailSize,
+} from "../helpers/attachment-grid-layout";
 import { getAttachmentRefs, getSafeAttachmentUrl } from "../helpers/field";
-import { AssetMediaPreview } from "./assets";
+import { attachmentFileType } from "../utils/attachment-file-type";
+import { attachmentTextKind } from "../utils/text-attachment";
+import { AttachmentFileIcon } from "./attachment-file-icon";
+import { AttachmentViewer } from "./attachment-viewer";
 import { DialogContent } from "./localized-dialog-content";
 
 type Attachment = ReturnType<typeof getAttachmentRefs>[number];
-
-function FileIcon({ mimeType }: { mimeType: string }) {
-  const Icon = mimeType.startsWith("video/")
-    ? Film
-    : mimeType.startsWith("audio/")
-      ? Music
-      : FileText;
-  return <Icon aria-hidden className="size-3.5 shrink-0" />;
-}
 
 /** Keep a failed image identifiable and recoverable, without changing a signed URL. */
 function AttachmentImage({
   item,
   url,
-  large = false,
   grid = false,
+  thumbnailSize = 32,
   onOpen,
 }: {
   item: Attachment;
   url: string;
-  large?: boolean;
   grid?: boolean;
+  thumbnailSize?: number;
   onOpen?: (event: MouseEvent<HTMLAnchorElement>) => void;
 }) {
   const messages = useCoreI18n();
@@ -41,9 +38,15 @@ function AttachmentImage({
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const image = failed ? (
-    <span className="flex max-w-full items-center gap-1.5 px-2 text-xs">
-      <FileIcon mimeType={item.mimeType} />
-      <span className="truncate">{item.fileName}</span>
+    <span
+      className={`flex max-w-full items-center text-xs ${grid ? "justify-center" : "gap-1.5 px-2"}`}
+    >
+      <AttachmentFileIcon
+        fileName={item.fileName}
+        mimeType={item.mimeType}
+        size={grid ? Math.max(16, thumbnailSize - 6) : 20}
+      />
+      {grid ? null : <span className="truncate">{item.fileName}</span>}
     </span>
   ) : (
     <img
@@ -52,16 +55,18 @@ function AttachmentImage({
       decoding="async"
       draggable={false}
       key={attempt}
-      loading={large ? "eager" : "lazy"}
+      loading="lazy"
       onError={() => setFailed(true)}
       onLoad={() => setLoaded(true)}
       src={url}
     />
   );
-  const frameClass = `relative flex items-center justify-center overflow-hidden rounded border bg-muted/40 ${large ? "h-[55vh] w-full" : grid ? "size-[32px] shrink-0" : failed ? "h-12 w-40 max-w-full" : "h-12 w-16"}`;
+  const gridSize = grid ? { height: thumbnailSize, width: thumbnailSize } : undefined;
+  const frameClass = `relative flex items-center justify-center overflow-hidden rounded border bg-muted/40 ${grid ? "shrink-0" : failed ? "h-12 w-40 max-w-full" : "h-12 w-16"}`;
   return (
     <div
-      className={`relative flex min-w-0 ${large ? "w-full flex-col" : grid ? "size-[32px] shrink-0" : "max-w-48"} items-center gap-1`}
+      className={`relative flex min-w-0 ${grid ? "shrink-0" : "max-w-48"} items-center gap-1`}
+      style={gridSize}
     >
       {onOpen ? (
         <a
@@ -73,6 +78,7 @@ function AttachmentImage({
           rel="noreferrer"
           target="_blank"
           title={item.fileName}
+          style={gridSize}
         >
           {image}
           {!failed && !loaded ? (
@@ -80,7 +86,7 @@ function AttachmentImage({
           ) : null}
         </a>
       ) : (
-        <div className={frameClass}>
+        <div className={frameClass} style={gridSize}>
           {image}
           {!failed && !loaded ? (
             <span aria-hidden className="absolute inset-0 animate-pulse bg-muted" />
@@ -101,7 +107,6 @@ function AttachmentImage({
           type="button"
         >
           <RotateCcw aria-hidden className="size-3.5" />
-          {large ? messages.nodeDetail.filePreviewRetry : null}
         </button>
       ) : null}
     </div>
@@ -117,11 +122,13 @@ export function AttachmentValuePreview({
   resolveUrl = getSafeAttachmentUrl,
   minimalChrome = false,
   presentation = "flow",
+  rowHeight = 48,
 }: {
   value: unknown;
   compact?: boolean;
-  /** Grid rows have a fixed 48px height; flow remains compatible with detail/cards. */
+  /** Grid previews fit the selected row; flow remains compatible with detail/cards. */
   presentation?: "flow" | "grid";
+  rowHeight?: number;
   className?: string;
   /** Reuse this preview with a host-owned chip instead of the default thumbnail/link. */
   renderTrigger?: (
@@ -170,9 +177,11 @@ export function AttachmentValuePreview({
   const selectedEntry = entries.find((entry) => entry.key === selectedKey) ?? entries[0];
   const selected = selectedEntry?.item;
   const selectedUrl = selected ? resolveUrl(selected) : null;
+  const thumbnailSize = attachmentGridThumbnailSize(rowHeight, width, attachments.length);
+  const controlHeight = Math.min(32, Math.max(16, rowHeight - 8));
   const layout = attachmentGridLayout(
     width,
-    attachments.map(() => 32),
+    attachments.map(() => thumbnailSize),
   );
   const visible = grid ? entries.slice(0, layout.visible) : compact ? entries.slice(0, 3) : entries;
   if (attachments.length === 0) return <span className="text-muted-foreground">-</span>;
@@ -197,11 +206,17 @@ export function AttachmentValuePreview({
     <>
       <Popover onOpenChange={setExpanded} open={grid && expanded}>
         <div
-          className={`flex min-w-0 items-center ${grid ? "h-[32px] w-full flex-nowrap gap-[6px]" : "flex-wrap gap-1.5"} ${className}`}
+          className={`flex min-w-0 items-center ${grid ? "w-full flex-nowrap gap-[6px]" : "flex-wrap gap-1.5"} ${className}`}
           data-attachment-preview
           data-attachment-presentation={presentation}
           data-attachment-count={attachments.length}
           data-attachment-visible-count={visible.length}
+          data-attachment-thumbnail-size={grid ? thumbnailSize : undefined}
+          style={
+            grid
+              ? { height: Math.max(thumbnailSize, controlHeight), maxHeight: rowHeight - 8 }
+              : undefined
+          }
           ref={container}
           role="group"
           tabIndex={grid ? 0 : -1}
@@ -222,33 +237,56 @@ export function AttachmentValuePreview({
               );
             }
             const url = resolveUrl(item);
-            if (url && item.mimeType.startsWith("image/")) {
+            if (url && !attachmentTextKind(item) && item.mimeType.startsWith("image/")) {
               return (
                 <AttachmentImage
                   item={item}
                   grid={grid}
                   key={`${key}:${url}`}
                   onOpen={(event) => openAttachment(event, key)}
+                  thumbnailSize={thumbnailSize}
                   url={url}
                 />
               );
             }
             const content = (
               <>
-                <FileIcon mimeType={item.mimeType} />
-                {grid ? (
+                <AttachmentFileIcon
+                  fileName={item.fileName}
+                  mimeType={item.mimeType}
+                  size={
+                    grid
+                      ? thumbnailSize >= 64
+                        ? thumbnailSize - 30
+                        : thumbnailSize >= 28
+                          ? thumbnailSize - 10
+                          : thumbnailSize
+                      : 20
+                  }
+                />
+                {grid && thumbnailSize >= 28 ? (
                   <span
                     aria-hidden
-                    className="max-w-full truncate text-[8px] uppercase leading-none"
+                    className={`max-w-full truncate font-medium text-muted-foreground ${thumbnailSize >= 64 ? "text-[10px] leading-3" : "text-[8px] leading-none"}`}
+                    data-attachment-extension
                   >
-                    {item.fileName.includes(".") ? item.fileName.split(".").pop()?.slice(0, 4) : ""}
+                    {attachmentFileType(item.fileName, item.mimeType).label}
                   </span>
-                ) : (
+                ) : null}
+                {grid && thumbnailSize >= 64 ? (
+                  <span
+                    aria-hidden
+                    className="max-w-full truncate text-center text-[10px] leading-3"
+                  >
+                    {item.fileName.slice(0, 128)}
+                  </span>
+                ) : !grid ? (
                   <span className="truncate">{item.fileName}</span>
-                )}
+                ) : null}
               </>
             );
-            const chipClass = `${grid ? "size-[32px] shrink-0 flex-col justify-center gap-0.5 px-0.5" : "max-w-48 gap-1.5 px-2"} inline-flex min-w-0 items-center rounded border bg-card py-1 text-xs`;
+            const chipClass = `${grid ? "shrink-0 flex-col justify-center gap-0.5" : "max-w-48 gap-1.5 border bg-card px-2 py-1"} inline-flex min-w-0 items-center rounded text-xs`;
+            const chipStyle = grid ? { height: thumbnailSize, width: thumbnailSize } : undefined;
             return url ? (
               <a
                 aria-label={item.fileName}
@@ -260,6 +298,7 @@ export function AttachmentValuePreview({
                 rel="noreferrer"
                 target="_blank"
                 title={item.fileName}
+                style={chipStyle}
               >
                 {content}
               </a>
@@ -270,6 +309,7 @@ export function AttachmentValuePreview({
                 key={key}
                 role="group"
                 title={item.fileName}
+                style={chipStyle}
               >
                 {content}
               </span>
@@ -279,12 +319,15 @@ export function AttachmentValuePreview({
             <PopoverTrigger asChild>
               <button
                 aria-label={`${messages.shell.expand}: ${messages.nodeDetail.filePreviewTitle}`}
-                className="h-8 max-w-full shrink-0 rounded border px-1 text-muted-foreground text-xs tabular-nums hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="max-w-full shrink-0 rounded border px-1 text-muted-foreground text-xs tabular-nums hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 data-attachment-expand
                 data-attachment-overflow
                 onClick={(event) => event.stopPropagation()}
                 ref={expandTrigger}
-                style={{ width: Math.min(layout.overflowWidth, width || layout.overflowWidth) }}
+                style={{
+                  height: controlHeight,
+                  width: Math.min(layout.overflowWidth, width || layout.overflowWidth),
+                }}
                 title={`${attachments.length} ${messages.common.items} (Shift+Space)`}
                 type="button"
               >
@@ -294,9 +337,9 @@ export function AttachmentValuePreview({
           ) : (compact || grid) && attachments.length > visible.length ? (
             <button
               aria-label={`${messages.common.open}: ${attachments.length} ${messages.common.items}`}
-              className={`${grid ? "h-[32px] shrink-0 px-1 text-xs tabular-nums" : "px-2 text-xs"} rounded border py-1 text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+              className={`${grid ? "shrink-0 px-1 text-xs tabular-nums" : "px-2 text-xs"} rounded border py-1 text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
               data-attachment-overflow
-              style={grid ? { width: layout.overflowWidth } : undefined}
+              style={grid ? { height: controlHeight, width: layout.overflowWidth } : undefined}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -361,10 +404,14 @@ export function AttachmentValuePreview({
                     type="button"
                   >
                     <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded border bg-muted/40">
-                      {url && item.mimeType.startsWith("image/") ? (
+                      {url && !attachmentTextKind(item) && item.mimeType.startsWith("image/") ? (
                         <img alt="" className="size-full object-contain" loading="lazy" src={url} />
                       ) : (
-                        <FileIcon mimeType={item.mimeType} />
+                        <AttachmentFileIcon
+                          fileName={item.fileName}
+                          mimeType={item.mimeType}
+                          size={32}
+                        />
                       )}
                     </span>
                     <span className="min-w-0 break-all">{item.fileName}</span>
@@ -378,7 +425,7 @@ export function AttachmentValuePreview({
       <Dialog onOpenChange={setOpen} open={open}>
         <DialogContent
           {...(minimalChrome ? { "aria-describedby": undefined } : {})}
-          className="flex max-h-[90vh] max-w-4xl flex-col overflow-y-auto"
+          className="flex max-h-[90dvh] max-w-4xl flex-col overflow-y-auto"
           data-testid="attachment-preview-dialog"
           onCloseAutoFocus={(event) => {
             event.preventDefault();
@@ -391,8 +438,8 @@ export function AttachmentValuePreview({
             openingFromExpanded.current = false;
           }}
         >
-          <DialogHeader>
-            <DialogTitle className="break-all pr-6">
+          <DialogHeader className="min-w-0 shrink-0">
+            <DialogTitle className="line-clamp-2 break-all pr-6" title={selected?.fileName}>
               {selected?.fileName ?? messages.nodeDetail.filePreviewTitle}
             </DialogTitle>
             {minimalChrome ? null : (
@@ -401,7 +448,7 @@ export function AttachmentValuePreview({
           </DialogHeader>
           {attachments.length > 1 ? (
             <p
-              className="text-muted-foreground text-xs tabular-nums"
+              className="shrink-0 text-muted-foreground text-xs tabular-nums"
               data-attachment-position
               aria-live="polite"
             >
@@ -409,9 +456,7 @@ export function AttachmentValuePreview({
             </p>
           ) : null}
           {minimalChrome && attachments.length <= 1 ? null : (
-            <div
-              className={`flex flex-wrap gap-1.5 ${grid ? "max-h-28 shrink-0 overflow-y-auto" : ""}`}
-            >
+            <div className="flex max-h-28 min-w-0 shrink-0 flex-wrap gap-1.5 overflow-y-auto">
               {entries.map(({ item, key }, index) => (
                 <button
                   aria-pressed={key === selectedEntry?.key}
@@ -422,53 +467,14 @@ export function AttachmentValuePreview({
                   title={item.fileName}
                   type="button"
                 >
-                  <FileIcon mimeType={item.mimeType} />
+                  <AttachmentFileIcon fileName={item.fileName} mimeType={item.mimeType} />
                   <span className="truncate">{item.fileName}</span>
                 </button>
               ))}
             </div>
           )}
-          {selected && selectedUrl ? (
-            <>
-              {selected.mimeType.startsWith("image/") ? (
-                <AttachmentImage
-                  item={selected}
-                  key={`${selected.id}:${selectedUrl}`}
-                  large
-                  url={selectedUrl}
-                />
-              ) : (
-                <AssetMediaPreview
-                  mediaClassName="max-h-[55vh] w-full object-contain"
-                  mimeType={selected.mimeType}
-                  name={selected.fileName}
-                  url={selectedUrl}
-                />
-              )}
-              <div className="flex flex-wrap gap-3 text-sm">
-                <a
-                  className="inline-flex items-center gap-1 text-primary hover:underline"
-                  href={selectedUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  <ExternalLink aria-hidden className="size-4" />
-                  {messages.nodeDetail.openFileInNewTab}
-                </a>
-                <a
-                  className="inline-flex items-center gap-1 text-primary hover:underline"
-                  download={selected.fileName}
-                  href={
-                    selected.assetId
-                      ? buildAssetDownloadUrl(selected.assetId, selected.fileName)
-                      : selectedUrl
-                  }
-                >
-                  <Download aria-hidden className="size-4" />
-                  {messages.nodeDetail.downloadFile}
-                </a>
-              </div>
-            </>
+          {selected ? (
+            <AttachmentFilePreviewBody item={selected} key={selectedEntry.key} url={selectedUrl} />
           ) : (
             <p className="text-muted-foreground text-sm">
               {messages.nodeDetail.filePreviewUnavailable}
@@ -476,6 +482,48 @@ export function AttachmentValuePreview({
           )}
         </DialogContent>
       </Dialog>
+    </>
+  );
+}
+
+/**
+ * One file's preview plus its open / download links — the body of the
+ * attachment preview dialog, shared with the `drive` field's folder tree so a
+ * file opens the same way wherever it is listed. `url` is the already-resolved
+ * safe address (`getSafeAttachmentUrl`); null renders the "unavailable" note.
+ */
+export function AttachmentFilePreviewBody({ item, url }: { item: Attachment; url: string | null }) {
+  const messages = useCoreI18n();
+  if (!url) {
+    return (
+      <p className="text-muted-foreground text-sm">{messages.nodeDetail.filePreviewUnavailable}</p>
+    );
+  }
+  return (
+    <>
+      <AttachmentViewer
+        key={JSON.stringify([item.id, url, item.fileName, item.mimeType, item.size])}
+        file={{ name: item.fileName, mimeType: item.mimeType, url, size: item.size }}
+      />
+      <div className="flex shrink-0 flex-wrap gap-3 text-sm">
+        <a
+          className="inline-flex items-center gap-1 text-primary hover:underline"
+          href={url}
+          rel="noreferrer"
+          target="_blank"
+        >
+          <ExternalLink aria-hidden className="size-4" />
+          {messages.nodeDetail.openFileInNewTab}
+        </a>
+        <a
+          className="inline-flex items-center gap-1 text-primary hover:underline"
+          download={item.fileName}
+          href={item.assetId ? buildAssetDownloadUrl(item.assetId, item.fileName) : url}
+        >
+          <Download aria-hidden className="size-4" />
+          {messages.nodeDetail.downloadFile}
+        </a>
+      </div>
     </>
   );
 }

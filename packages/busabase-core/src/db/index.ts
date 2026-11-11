@@ -240,6 +240,34 @@ export async function getDb(): Promise<DbInstance> {
   return state.initPromise;
 }
 
+/**
+ * Close the local database client and forget it, so the next `getDb()` opens a
+ * fresh one. Waits for an initialization in flight, so the client it opens is
+ * the one that gets closed.
+ *
+ * Call it before deleting a PGLite data directory. A PGLite left open keeps
+ * writing its WAL there: deleting the directory under it either fails with
+ * ENOTEMPTY or leaves PGLite spinning forever on a flush to files that no
+ * longer exist — a test job that hangs until CI kills it hours later.
+ */
+export async function closeDb(): Promise<void> {
+  const state = getDbState();
+  if (state.initPromise) await state.initPromise.catch(() => undefined);
+  const client = state.client;
+  state.db = null;
+  state.client = null;
+  state.initPromise = null;
+  if (!client) return;
+  if ("close" in client && typeof client.close === "function") {
+    await client.close();
+  } else if ("end" in client && typeof client.end === "function") {
+    await client.end();
+  }
+  // The per-space seed check belongs to the database just closed.
+  (globalThis as { __busabaseReadyBySpace?: Map<string, Promise<void>> }).__busabaseReadyBySpace =
+    undefined;
+}
+
 export async function getPgliteClient() {
   const url = getDatabaseUrl();
   if (!isPgliteUrl(url)) {

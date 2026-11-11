@@ -1,7 +1,6 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 // Record CR history is a kernel CR-lifecycle read, not a base handler.
-import { getEffectiveNodeLevel } from "../../logic/node-acl";
 import { listRecordChangeRequests } from "../../logic/store";
 import {
   countRecords,
@@ -25,7 +24,7 @@ import {
   createUpdateFieldChangeRequest,
   createUpdateViewChangeRequest,
   createViewChangeRequest,
-  getBase,
+  getBaseWithViewerPermission,
   getRecord,
   getRecordByField,
   getRecords,
@@ -53,15 +52,11 @@ export const baseRouter = {
       : listBases({ fields: input.fields }),
   ),
   get: os.bases.get.handler(async ({ input }) => {
-    const base = await getBase(input.baseId);
+    const base = await getBaseWithViewerPermission(input.baseId);
     if (!base) {
       throw new ORPCError("NOT_FOUND", { message: `Base not found: ${input.baseId}` });
     }
-    // Node-level effective permission so the client can hide write affordances
-    // the server would reject. getBase already filters invisible Bases, so a
-    // null level is unexpected — omit the field rather than invent one.
-    const viewerPermissionLevel = await getEffectiveNodeLevel(base.nodeId);
-    return viewerPermissionLevel ? { ...base, viewerPermissionLevel } : base;
+    return base;
   }),
   create: os.bases.create.handler(async ({ input }) => createBase(input)),
   createChangeRequest: os.bases.createChangeRequest.handler(async ({ input }) => {

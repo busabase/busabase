@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -59,8 +60,8 @@ describe("search — sources scope", () => {
     await client.changeRequests.merge({ changeRequestIds: [recordCr.id] });
 
     // Files source: a marker living only in a mounted file's content.
-    const hash = `sha256:${"d".repeat(64)}`;
     const content = `File body containing ${FILE_MARKER} in its text.`;
+    const hash = `sha256:${createHash("sha256").update(content).digest("hex")}`;
     const sizeBytes = Buffer.byteLength(content, "utf8");
     const uploadReq = await client.assets.createUploadUrl({
       fileName: "sources-test.txt",

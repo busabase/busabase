@@ -11,6 +11,7 @@ import type {
 import { iStringParse, iStringSchema } from "openlib/i18n/i-string";
 import { fmt } from "../../../i18n/fmt";
 import type { CoreI18nMessages } from "../../../i18n/messages";
+import { isFileFieldType } from "../../base/field-types";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { isListPayloadLongTextOmitted, isListPayloadOmitted } from "../utils/list-payload-preview";
 import { fieldPreviewText } from "./field";
@@ -536,7 +537,7 @@ export const getChangeRequestRiskHints = (
         if (field?.type === "yaml") {
           hints.add("YAML");
         }
-        if (field?.type === "attachment") {
+        if (field && isFileFieldType(field.type)) {
           hints.add(messages?.operation.attachment ?? "attachment");
         }
         if (field?.type === "relation") {

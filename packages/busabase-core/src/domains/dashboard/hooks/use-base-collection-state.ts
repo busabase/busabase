@@ -34,10 +34,13 @@ export function useBaseCollectionState({
     if (scope === null) return;
     const previous = previousCollection.current;
     previousCollection.current = { identity, scope };
-    if (previous && previous.scope !== scope && pagination.page !== 1) {
+    // A history entry with this view's own find state already names the page
+    // to restore. Forward view links drop the marker and still start at page 1.
+    const restoresFind = new URLSearchParams(search).get("recordFindScope") === scope;
+    if (previous && previous.scope !== scope && pagination.page !== 1 && !restoresFind) {
       onPaginationChange(1, pagination.pageSize, true);
     }
-  }, [identity, scope, pagination.page, pagination.pageSize, onPaginationChange]);
+  }, [identity, scope, search, pagination.page, pagination.pageSize, onPaginationChange]);
 
   const fullScope = scope === null ? null : JSON.stringify([identity, scope, search]);
   const [snapshot, setSnapshot] = useState(() => ({

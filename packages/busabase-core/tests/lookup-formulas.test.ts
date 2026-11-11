@@ -316,6 +316,41 @@ describe("lookup-dependent formulas use current merged values (real PGLite)", ()
     expect(descending.records.map((record) => record.id)).toEqual([projectId]);
   });
 
+  it("refuses a space-wide sort on a lookup-dependent field instead of hydrating the space", async () => {
+    // Without baseId the candidates are every record in the space; hydrating
+    // them all to compute the lookup was a 500 in a 96k-record space.
+    for (const fieldSlug of ["spent", "remaining", "double"]) {
+      const attempt = client.records.list({
+        sort: { fieldSlug, fieldType: "number", direction: "asc" },
+        limit: 5,
+      });
+      await expect(attempt).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        data: { reason: "sort_field_requires_base", fieldSlug },
+      });
+      await expect(attempt).rejects.toThrow(/pass baseId/);
+      await expect(attempt).rejects.toThrow(projects.slug);
+    }
+    // A field that is stored (not read-time computed) still sorts space-wide,
+    // through the SQL path, exactly as before.
+    const plain = await client.records.list({
+      sort: { fieldSlug: "budget", fieldType: "number", direction: "desc" },
+      limit: 50,
+    });
+    const budgets = plain.records
+      .map((record) => record.headCommit.payload.budget)
+      .filter((budget): budget is number => typeof budget === "number");
+    expect(budgets.length).toBeGreaterThanOrEqual(2);
+    expect(budgets).toEqual([...budgets].sort((left, right) => right - left));
+    // Scoped to the Base, the same lookup sort answers as it always did.
+    const scoped = await client.records.list({
+      baseId: projects.id,
+      sort: { fieldSlug: "spent", fieldType: "number", direction: "asc" },
+      limit: 5,
+    });
+    expect(scoped.records.length).toBeGreaterThan(0);
+  });
+
   it("sorts by current values when source edits invert the stored order, including tied and null cursors", async () => {
     const base = await client.bases.create({
       slug: "lookup-formula-sort",

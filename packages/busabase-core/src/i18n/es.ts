@@ -725,6 +725,8 @@ export const dashboardEs: CoreI18nMessages = {
     engineFollowAppNamed: "Seguir la app ({engine})",
     engineFollowAppHint:
       "Lo decide el airapp.json de esta app. Elige un motor para sustituirlo en este nodo.",
+    engineFollowAppFallback:
+      "El airapp.json de esta app prefiere {preferred}, que no está disponible aquí. Motor en uso: {engine}.",
     engineRequired: "La app requiere {engine}",
     engineRequiredHint:
       "Este requisito lo define requiredEngine en airapp.json y no se puede sustituir en este nodo.",
@@ -768,6 +770,38 @@ export const dashboardEs: CoreI18nMessages = {
     swUnsupportedLinkCopied: "Enlace copiado",
     swUnsupportedCopyFailed: "No se pudo copiar el enlace. Selecciónalo y cópialo manualmente:",
     site: {
+      publish: {
+        previewStale:
+          "Los archivos cambiaron después de esta vista previa. Crea o actualiza la vista previa web antes de publicar.",
+        noPreview: "Crea una vista previa web antes de publicar.",
+        previewUnavailable: "No se pudo cargar la vista previa. Créala de nuevo antes de publicar.",
+        title: "Publicar como sitio",
+        description:
+          "Dale a esta AirApp un Busabase Site siempre disponible con una dirección pública fija. Los visitantes no necesitan una cuenta de Busabase.",
+        preserveBrowser:
+          "La vista previa del navegador sigue funcionando mientras preparas el sitio.",
+        checking: "Comprobando si el sitio está listo…",
+        checkFailed: "No se pudo comprobar el sitio. Inténtalo de nuevo.",
+        planRequired: "El alojamiento de sitios está incluido desde {plan}.",
+        paidPlanRequired: "Este espacio necesita un plan de pago para alojar un sitio.",
+        upgradeHint:
+          "Prepara la app y luego mejora el plan del espacio para previsualizarla y publicarla. Un enlace de vista previa del navegador no es un sitio siempre disponible.",
+        prepareTitle: "Preparar la versión web",
+        prepareHint:
+          "Pide a tu agente que prepare una versión web. Puede ser necesario cambiar el código antes de publicar.",
+        copyPrompt: "Copiar prompt para el agente",
+        copied: "Prompt copiado",
+        agentPrompt:
+          "Usa la habilidad busabase-app-creator para preparar esta AirApp como Busabase Site. Revisa los archivos y conserva la ejecución en el navegador y sus funciones. Añade una declaración site explícita en airapp.json y recursos estáticos; si hace falta, un Worker JavaScript ES empaquetado en un solo módulo con fetch exportado por defecto. No publiques un servidor de desarrollo Node ni cambies solo el motor. Mantén site.access de solo lectura salvo que necesite escribir; expón solo endpoints específicos y seguros, nunca la clave API ni un proxy para peticiones arbitrarias. Valida el paquete y explica los cambios necesarios. Publicaré yo después de revisar la vista previa privada.",
+        previewHint:
+          "Crea primero una vista previa privada y revísala aquí antes de hacerla pública.",
+        createPreview: "Crear vista previa web",
+        preparingPreview: "Preparando vista previa…",
+        refreshPreview: "Actualizar vista previa web",
+        previewTitle: "Vista previa web privada",
+        publishConsent:
+          "Se publicará la versión revisada. Cualquier persona con la dirección podrá utilizar el sitio, incluidos los datos y las acciones que exponga su código.",
+      },
       statusNotLive: "Sin publicar",
       statusLive: "Publicado",
       statusLiveWithChanges: "Cambios sin publicar",
@@ -2313,6 +2347,23 @@ export const dashboardEs: CoreI18nMessages = {
     uploadFailed: "Error al subir",
     uploading: "Subiendo...",
     addFile: "Añadir archivo",
+    drive: {
+      filePath: "Ruta del archivo",
+      moveFile: "Renombrar o mover",
+      moveFolder: "Renombrar o mover carpeta",
+      moveFolderHint:
+        "Edita la ruta para renombrar o mover la carpeta con todo su contenido, p. ej. contracts/2026. Déjala vacía para mover su contenido a la raíz.",
+      folderPath: "Ruta de la carpeta",
+      movePathHint: "Cambia las carpetas de la ruta para moverlo, p. ej. contracts/2026/main.pdf.",
+      apply: "Aplicar",
+      pathTaken: 'Ya hay algo en "{path}". Elige otra ruta.',
+      invalidPath: "Introduce una ruta válida, p. ej. contracts/2026/main.pdf.",
+      folderIntoItself: "Una carpeta no se puede mover dentro de sí misma.",
+      removeFolderBody:
+        'Esto quita "{folder}" y sus {count} archivo{plural} de este campo. No cambia nada hasta que guardes el registro.',
+      emptyFolderHint:
+        "Las carpetas vacías no se guardan. Añade archivos para conservar esta carpeta.",
+    },
     properties: "Propiedades",
     source: "Origen",
     openFullPage: "Abrir página completa",
@@ -2563,6 +2614,7 @@ export const dashboardEs: CoreI18nMessages = {
     member: "Miembro",
     lookup: "Búsqueda",
     attachment: "Archivo",
+    drive: "Drive",
     ai_summary: "Resumen de IA",
     ai_tags: "Etiquetas de IA",
     created_time: "Creado el",
@@ -2752,6 +2804,13 @@ export const dashboardEs: CoreI18nMessages = {
       "Un POST (JSON o texto) o un GET a esta URL inicia una ejecución. La solicitud está en steps.trigger.payload.request: method, query, headers y body. Si un paso de código devuelve { response: … } antes de que la ejecución se pause, quien llama recibe eso; si no, recibe 202 y el ID de la ejecución. Cualquiera con esta URL puede iniciar una ejecución: cámbiala para que la anterior deje de funcionar. Los cambios se aplican al guardar.",
     hookNeedsEvent:
       "Cambia el modo de ejecución a Evento en los ajustes de ejecución; si no, esta URL responde 404.",
+    webhookSign: "Firmar las solicitudes",
+    webhookSigningSecret: "Secreto de firma",
+    webhookSigningRegenerate: "Cambiar el secreto",
+    webhookSigningHint:
+      'Cada solicitud lleva el encabezado X-Busabase-Signature: t=<hora Unix>,v1=<HMAC-SHA256 en hexadecimal de "<t>.<cuerpo>" con este secreto>. Compruébalo donde llega la solicitud y rechaza una t de más de unos minutos, para que una solicitud falsificada o repetida se rechace. Cualquiera que pueda abrir este flujo de trabajo puede leer el secreto: cámbialo para que el anterior deje de valer. Los cambios se aplican al guardar.',
+    webhookSignOffHint:
+      "Desactivado: la solicitud no lleva firma. Actívalo para que el receptor pueda comprobar que una solicitud viene de este paso.",
     functionCode: "Código",
     functionCodeHint:
       "JavaScript que se ejecuta en el servidor cuando la ejecución llega a este paso. input tiene los datos de la ejecución (payload, steps, record), await fetch(...) llama a URL públicas y el valor que devuelves es la salida de este paso (los pasos siguientes lo leen como steps.<id>.<campo>). Cualquiera que pueda abrir este flujo de trabajo puede leer el código.",
@@ -2833,6 +2892,27 @@ export const dashboardEs: CoreI18nMessages = {
     findRecordsForEach: "Ejecutar los pasos siguientes una vez por registro",
     findRecordsForEachHint:
       "Cada registro tiene su propia ejecución, sobre ese registro: Actualizar un registro lo cambia y los pasos siguientes lo leen como record. Esta ejecución termina aquí, y esas ejecuciones esperan su turno según la concurrencia.",
+    runIn: "Ejecutar en",
+    runInServer: "Este servidor",
+    runInSandbox: "Una máquina sandbox",
+    runInServerHint:
+      "Rápido. Solo JavaScript, sin paquetes, hasta el tiempo límite del flujo de trabajo.",
+    runInSandboxHint:
+      "Una máquina iniciada para este paso: JavaScript o Python, con paquetes instalados antes, hasta 10 minutos. La ejecución la espera como en un paso de espera, así que una solicitud que inició la ejecución recibe 202.",
+    runInSandboxLocked: "Ejecutar código en un sandbox requiere el plan {plan}.",
+    runInSandboxNotConfigured:
+      "Este servidor no tiene un sandbox configurado. Un administrador puede activarlo con una clave de API de Sandock.",
+    sandboxLanguage: "Lenguaje",
+    sandboxLanguageJavascript: "JavaScript (Node.js)",
+    sandboxLanguagePython: "Python",
+    sandboxPackages: "Paquetes",
+    sandboxPackagesHintJavascript:
+      'Paquetes de npm que se instalan antes, separados por espacios, como dayjs o lodash@4. Cárgalos con require("dayjs").',
+    sandboxPackagesHintPython:
+      "Paquetes de pip que se instalan antes, separados por espacios, como requests o pycryptodome==3.20.0. Impórtalos como siempre.",
+    sandboxCode: "Código en un sandbox",
+    sandboxCodeHint:
+      "Se ejecuta en la máquina sandbox. input tiene los datos de la ejecución y lo que devuelvas es la salida de este paso. Cualquiera que pueda abrir este flujo de trabajo puede leer el código.",
     customActionHint: "Este nombre de acción aún no hace nada: solo se registra.",
     chooseBase: "Elige una base",
     targetRecord: "Registro (opcional)",
@@ -2926,6 +3006,8 @@ export const dashboardEs: CoreI18nMessages = {
     triggerSchedule: "Programación",
     triggerWebhook: "Solicitud",
     triggerForEach: "Por registro",
+    waitingSandbox: "Ejecutando código en un sandbox. La ejecución continúa cuando termine.",
+    waitingSandboxDeadline: "Se detiene si no ha terminado a las {time}.",
     runDetails: "Detalles de la ejecución",
     recordLabel: "Registro: {id}",
     waitingUntil: "En espera hasta {time}. Después continúa sola.",
@@ -2934,6 +3016,12 @@ export const dashboardEs: CoreI18nMessages = {
     approve: "Aprobar",
     reject: "Rechazar",
     errorLabel: "Error",
+    retryFromStep: "Reintentar desde este paso",
+    retryFromStepHint:
+      "Inicia una nueva ejecución que conserva tal cual todos los pasos anteriores y vuelve a ejecutar solo este. Una solicitud que este paso ya envió se envía de nuevo.",
+    retriedAsLink: "Reintentada: abrir la nueva ejecución",
+    retryOfLink: "Reintento de una ejecución anterior: abrirla",
+    triggerRetry: "Reintento",
     steps: "Pasos",
     noSteps: "Aún no ha terminado ningún paso.",
     stepData: "Datos",
@@ -2977,6 +3065,16 @@ export const dashboardEs: CoreI18nMessages = {
     rename: "Instalar los elementos en conflicto con nombres nuevos",
     renameHint: "Añade un sufijo (-2, -3, …). El contenido existente no se toca.",
     warningsTitle: "Conviene saber",
+    folderName: "Nombre de la carpeta",
+    folderNameHint: "Nombre que aparece en tu espacio de trabajo. Puedes usar cualquier idioma.",
+    folderNameRequired: "Introduce un nombre de carpeta.",
+    installUnavailable: "No se puede iniciar la instalación en este momento. Inténtalo más tarde.",
+    installNoChanges: "No se ha creado contenido de la plantilla. Puedes volver a intentarlo.",
+    installPartial:
+      "Se creó parte del contenido antes de detenerse la instalación. Revisa el espacio antes de reintentarlo.",
+    installUnknown:
+      "No se ha podido confirmar el resultado. Revisa el espacio antes de volver a instalar.",
+    technicalDetails: "Detalles técnicos",
     targetFolder: "Instalar en la carpeta",
     targetFolderHint:
       "Se crea una carpeta nueva para el paquete. Por defecto usa el nombre del propio paquete.",

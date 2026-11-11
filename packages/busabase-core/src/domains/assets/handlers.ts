@@ -37,6 +37,8 @@ import { describeCaller } from "../../logic/caller-provenance";
 import { id } from "../../logic/kernel";
 import { hasNodePermission, hasWorkspacePermission } from "../../logic/node-acl";
 import { ensureReady } from "../../logic/seed";
+import { isFileFieldType } from "../base/field-types";
+import { driveEntryPath } from "../base/utils/drive-field-value";
 import { dispatchWebhookEvent } from "../webhook/logic/dispatch";
 import { resolveAssetContent } from "./logic/asset-content-logic";
 import { assertAssetPermission } from "./logic/asset-permissions";
@@ -47,6 +49,10 @@ import {
 } from "./logic/asset-texts-logic";
 import { notifySpaceStorageChanged } from "./logic/space-storage-changes";
 import { withStorageKeyRegistration } from "./logic/storage-cleanup-logic";
+import {
+  assertLocalStoredUploadIntegrity,
+  assertLocalUploadIntegrity,
+} from "./logic/upload-integrity";
 import { type AssetTextStatus, busabaseAssetTexts } from "./schema/asset-texts";
 import {
   type AssetContentKind,
@@ -310,6 +316,9 @@ export const requestAssetUploadUrl = async (input: RequestUploadUrlDTO) => {
       attachments,
     );
     if (result.duplicate && result.attachmentId) {
+      // A legacy registry row may still point at bytes truncated by the old
+      // upload relay. Reuse only bytes that actually match this upload.
+      await assertLocalStoredUploadIntegrity({ ...input, storageKey: result.storageKey });
       const assetId = await createAsset(result.attachmentId, input.fileName, {
         contentKind: contentKindForMimeType(input.mimeType),
       });
@@ -324,12 +333,9 @@ export const requestAssetUploadUrl = async (input: RequestUploadUrlDTO) => {
 export const confirmAssetUpload = async (input: ConfirmUploadDTO) => {
   try {
     const spaceId = input.spaceId ?? getContextSpaceId();
-    const result = await confirmUpload(
-      { ...input, spaceId },
-      resolveActorId("local"),
-      db,
-      attachments,
-    );
+    const actorId = resolveActorId("local");
+    await assertLocalUploadIntegrity(input, actorId);
+    const result = await confirmUpload({ ...input, spaceId }, actorId, db, attachments);
     return await registerConfirmedAsset(input, spaceId, result);
   } catch (error) {
     throw assetUploadError("confirm asset upload", error);
@@ -350,6 +356,9 @@ export const createAssetMultipartUpload = async (input: CreateMultipartUploadDTO
       attachments,
     );
     if (result.duplicate && result.attachmentId) {
+      // A legacy registry row may still point at bytes truncated by the old
+      // upload relay. Reuse only bytes that actually match this upload.
+      await assertLocalStoredUploadIntegrity({ ...input, storageKey: result.storageKey });
       const assetId = await createAsset(result.attachmentId, input.fileName, {
         contentKind: contentKindForMimeType(input.mimeType),
       });
@@ -875,6 +884,8 @@ interface AttachmentFieldRef {
   assetId?: unknown;
   id?: unknown;
   fileName?: unknown;
+  /** `drive` cells only — where the file sits in the cell's tree. */
+  path?: unknown;
 }
 
 export interface AssetUsageInput {
@@ -976,14 +987,20 @@ export const replaceAssetUsageRows = async (
 const isAssetId = (value: unknown): value is string =>
   typeof value === "string" && value.startsWith("ast");
 
-/** Pull asset/attachment ids out of an attachment cell (array of refs). */
-const extractAttachmentRefs = (
-  value: unknown,
-): { assetId: string | null; attachmentId: string | null; fileName: string }[] => {
+interface ExtractedAttachmentRef {
+  assetId: string | null;
+  attachmentId: string | null;
+  fileName: string;
+  /** The ref's own `path`, when it carries one (`drive` cells). */
+  path: string | undefined;
+}
+
+/** Pull asset/attachment ids out of an attachment or drive cell (array of refs). */
+const extractAttachmentRefs = (value: unknown): ExtractedAttachmentRef[] => {
   if (!Array.isArray(value)) {
     return [];
   }
-  const refs: { assetId: string | null; attachmentId: string | null; fileName: string }[] = [];
+  const refs: ExtractedAttachmentRef[] = [];
   for (const item of value) {
     if (item && typeof item === "object") {
       const ref = item as AttachmentFieldRef;
@@ -1001,6 +1018,7 @@ const extractAttachmentRefs = (
           assetId,
           attachmentId,
           fileName: typeof ref.fileName === "string" ? ref.fileName : fallbackName,
+          path: typeof ref.path === "string" ? ref.path : undefined,
         });
       }
     }
@@ -1009,7 +1027,7 @@ const extractAttachmentRefs = (
 };
 
 const resolveAssetRef = async (
-  ref: { assetId: string | null; attachmentId: string | null; fileName: string },
+  ref: Pick<ExtractedAttachmentRef, "assetId" | "attachmentId" | "fileName">,
   tx: Awaited<ReturnType<typeof getDb>>,
 ): Promise<string | null> => {
   if (ref.assetId) {
@@ -1029,8 +1047,9 @@ const resolveAssetRef = async (
 
 /**
  * Reconcile the where-used index for one merged Base record: for every
- * attachment-type field, ensure each referenced file has a library asset and
- * record a usage row against the Base's node. Replace semantics — stale rows for
+ * file-holding field (`attachment`, `drive`), ensure each referenced file has a
+ * library asset and record a usage row against the Base's node — for a `drive`
+ * cell under the file's path in that cell, the way a Drive node records it. Replace semantics — stale rows for
  * this record are cleared first, so removing a file from a record drops its usage.
  * Called from the Base record merge handlers (canonical state only, never CR previews).
  */
@@ -1058,8 +1077,9 @@ export const syncRecordAssetUsages = async (
     .from(busabaseBaseFields)
     .where(eq(busabaseBaseFields.baseId, baseId));
   const attachmentSlugs = new Set(
-    fieldRows.filter((f) => f.type === "attachment").map((f) => f.slug),
+    fieldRows.filter((f) => isFileFieldType(f.type)).map((f) => f.slug),
   );
+  const driveSlugs = new Set(fieldRows.filter((f) => f.type === "drive").map((f) => f.slug));
   if (attachmentSlugs.size === 0) {
     return;
   }
@@ -1096,6 +1116,7 @@ export const syncRecordAssetUsages = async (
           assetId,
           ownerType: "base",
           nodeId: base.nodeId,
+          ...(driveSlugs.has(fieldSlug) ? { path: driveEntryPath(ref) } : {}),
           recordId,
           fieldSlug,
         });

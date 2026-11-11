@@ -34,6 +34,7 @@ export const busabaseFieldTypeEnum = pgEnum("busabase_field_type", [
   "markdown",
   "html",
   "attachment",
+  "drive",
   "relation",
   "member",
   "number",
@@ -119,6 +120,12 @@ export const busabaseBaseFields = pgTable(
           prompt?: string;
           model?: string;
           reviewRequired?: boolean;
+        };
+        /** `attachment` / `drive` per-field file limits (see field-types attachmentValidator). */
+        attachment?: {
+          maxFiles?: number;
+          allowedMimeTypes?: string[];
+          maxFileSize?: number;
         };
         embed?: {
           aspectRatio?: "16:9" | "4:3" | "1:1";

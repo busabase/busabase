@@ -27,10 +27,36 @@ export const SidePanelTabSchema = z.object({
 
 export type SidePanelTab = z.infer<typeof SidePanelTabSchema>;
 
+// Only these references can be resumed after a document load. Live previews,
+// composer drafts, attachments and transcript contents stay in page memory.
+const SavedAgentChatTabSchema = z
+  .object({
+    id: z.string(),
+    type: z.literal("agent-chat"),
+    title: z.string(),
+    payload: z.object({
+      agentSlug: z.string().min(1),
+      sessionId: z.string().min(1).optional(),
+    }),
+  })
+  .refine((tab) => tab.id === `agent-${tab.payload.agentSlug}`);
+
+const SavedPanelContentSchema = z.object({
+  scopeKey: z.string().min(1),
+  tabs: z.array(SavedAgentChatTabSchema),
+  activeTabId: z.string().nullable(),
+});
+
+const SavedPanelPreferencesSchema = z.object({
+  isOpen: z.boolean().optional(),
+  layout: z.enum(["split", "maximized"]).optional(),
+  width: z.number().optional(),
+});
+
 export type SidePanelLayout = "split" | "maximized";
 
 export interface SidePanelStoreState {
-  /** Live tab ownership; never persisted with display preferences. */
+  /** Ownership of both live tabs and saved conversation references. */
   scopeKey: string | null;
   isOpen: boolean;
   layout: SidePanelLayout;
@@ -81,16 +107,11 @@ export const clampSidePanelWidth = (width: number) =>
   Math.min(MAX_SIDE_PANEL_WIDTH, Math.max(MIN_SIDE_PANEL_WIDTH, width));
 
 /**
- * Persists `isOpen` / `layout` / `width` only — deliberately NOT `tabs` /
- * `activeTabId`. Those reference live pinned content (e.g. a running AirApp
- * preview); resurrecting them from a stale localStorage snapshot after a
- * reload would point at content that no longer exists or has moved on.
- *
- * That split used to produce a broken post-reload state: `isOpen: true` with
- * `tabs: []` rendered nothing at all, behind a toggle that was simultaneously
- * `aria-pressed` and disabled. Now that zero tabs is a real state with its own
- * launcher UI, restoring "open with nothing in it" is simply the empty state —
- * the panel reopens where you left it and offers to fill itself.
+ * Saves display preferences and workspace/user-scoped agent conversation
+ * references. A reload reconnects the existing session through the normal API;
+ * it never revives a live AirApp process or copies chat content into storage.
+ * The panel gates its first render by scope and `setScope` retires saved
+ * conversations when the workspace or signed-in actor changes.
  */
 export const useSidePanelStore = create<SidePanelStoreState>()(
   persist(
@@ -194,11 +215,47 @@ export const useSidePanelStore = create<SidePanelStoreState>()(
     }),
     {
       name: "busabase-side-panel-prefs",
-      partialize: (state) => ({
-        isOpen: state.isOpen,
-        layout: state.layout,
-        width: state.width,
-      }),
+      partialize: (state) => {
+        const tabs = state.scopeKey
+          ? state.tabs.flatMap((tab) => {
+              const saved = SavedAgentChatTabSchema.safeParse(tab);
+              return saved.success ? [saved.data] : [];
+            })
+          : [];
+        return {
+          isOpen: state.isOpen,
+          layout: state.layout,
+          width: state.width,
+          scopeKey: state.scopeKey,
+          tabs,
+          activeTabId: tabs.some((tab) => tab.id === state.activeTabId)
+            ? state.activeTabId
+            : (tabs[0]?.id ?? null),
+        };
+      },
+      merge: (persisted, current) => {
+        const preferences = SavedPanelPreferencesSchema.safeParse(persisted);
+        const content = SavedPanelContentSchema.safeParse(persisted);
+        return {
+          ...current,
+          ...(preferences.success ? preferences.data : {}),
+          width:
+            preferences.success && preferences.data.width !== undefined
+              ? clampSidePanelWidth(preferences.data.width)
+              : current.width,
+          // Legacy preferences have no owner. Never adopt unscoped or malformed
+          // content, even when its tab shape happens to look valid.
+          ...(content.success
+            ? {
+                scopeKey: content.data.scopeKey,
+                tabs: content.data.tabs,
+                activeTabId: content.data.tabs.some((tab) => tab.id === content.data.activeTabId)
+                  ? content.data.activeTabId
+                  : (content.data.tabs[0]?.id ?? null),
+              }
+            : {}),
+        };
+      },
     },
   ),
 );

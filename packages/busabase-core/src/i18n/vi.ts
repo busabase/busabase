@@ -715,6 +715,8 @@ export const dashboardVi: CoreI18nMessages = {
     engineFollowAppNamed: "Theo ứng dụng ({engine})",
     engineFollowAppHint:
       "airapp.json của ứng dụng này quyết định. Hãy chọn một engine để ghi đè cho nút này.",
+    engineFollowAppFallback:
+      "airapp.json của ứng dụng này ưu tiên {preferred}, nhưng ở đây không dùng được. Engine đang dùng: {engine}.",
     engineRequired: "Ứng dụng yêu cầu {engine}",
     engineRequiredHint:
       "Yêu cầu này được đặt bởi requiredEngine trong airapp.json và không thể ghi đè cho nút này.",
@@ -758,6 +760,35 @@ export const dashboardVi: CoreI18nMessages = {
     swUnsupportedLinkCopied: "Đã sao chép liên kết",
     swUnsupportedCopyFailed: "Không thể sao chép liên kết. Hãy chọn và sao chép thủ công:",
     site: {
+      publish: {
+        previewStale:
+          "Các tệp đã thay đổi sau bản xem trước này. Hãy tạo hoặc làm mới bản xem trước website, rồi xuất bản.",
+        noPreview: "Hãy tạo bản xem trước website trước khi xuất bản.",
+        previewUnavailable: "Không thể tải bản xem trước. Hãy tạo lại trước khi xuất bản.",
+        title: "Xuất bản thành website",
+        description:
+          "Tạo Busabase Site luôn hoạt động với địa chỉ công khai cố định cho AirApp này. Khách không cần tài khoản Busabase.",
+        preserveBrowser: "Bản xem trước trong trình duyệt vẫn chạy khi bạn chuẩn bị website.",
+        checking: "Đang kiểm tra điều kiện xuất bản…",
+        checkFailed: "Không thể kiểm tra website. Hãy thử lại.",
+        planRequired: "Gói {plan} trở lên bao gồm lưu trữ website.",
+        paidPlanRequired: "Không gian này cần gói trả phí để lưu trữ website.",
+        upgradeHint:
+          "Chuẩn bị ứng dụng trước, rồi nâng cấp không gian để xem trước và xuất bản. Liên kết xem trước trong trình duyệt không phải website luôn hoạt động.",
+        prepareTitle: "Chuẩn bị phiên bản web",
+        prepareHint: "Nhờ agent chuẩn bị phiên bản web. Có thể cần sửa mã trước khi xuất bản.",
+        copyPrompt: "Sao chép lời nhắc cho agent",
+        copied: "Đã sao chép lời nhắc",
+        agentPrompt:
+          "Dùng kỹ năng busabase-app-creator để chuẩn bị AirApp này thành Busabase Site. Kiểm tra tệp và giữ nguyên cách chạy trong trình duyệt cùng chức năng hiện có. Thêm khai báo site rõ ràng trong airapp.json và tài nguyên tĩnh; nếu cần, cung cấp Worker JavaScript ES đóng gói thành một mô-đun với fetch xuất mặc định. Không xuất bản máy chủ phát triển Node hoặc chỉ đổi engine. Giữ site.access chỉ đọc trừ khi cần ghi; chỉ mở endpoint cụ thể an toàn, không lộ khóa API hay chuyển tiếp yêu cầu tùy ý của khách. Kiểm tra gói website và giải thích thay đổi cần thiết. Tôi sẽ xuất bản sau khi xem bản xem trước riêng tư.",
+        previewHint: "Tạo bản xem trước riêng tư trước, kiểm tra tại đây rồi mới công khai.",
+        createPreview: "Tạo bản xem trước website",
+        preparingPreview: "Đang chuẩn bị bản xem trước…",
+        refreshPreview: "Làm mới bản xem trước website",
+        previewTitle: "Bản xem trước website riêng tư",
+        publishConsent:
+          "Phiên bản đã kiểm tra sẽ được công khai. Bất kỳ ai có địa chỉ đều có thể sử dụng website, gồm dữ liệu và thao tác mà mã cung cấp.",
+      },
       statusNotLive: "Chưa xuất bản",
       statusLive: "Đang hoạt động",
       statusLiveWithChanges: "Có thay đổi chưa xuất bản",
@@ -2272,6 +2303,22 @@ export const dashboardVi: CoreI18nMessages = {
     uploadFailed: "Tải lên thất bại",
     uploading: "Đang tải lên...",
     addFile: "Thêm tệp",
+    drive: {
+      filePath: "Đường dẫn tệp",
+      moveFile: "Đổi tên hoặc di chuyển",
+      moveFolder: "Đổi tên hoặc di chuyển thư mục",
+      moveFolderHint:
+        "Sửa đường dẫn để đổi tên hoặc di chuyển thư mục cùng mọi thứ bên trong, ví dụ contracts/2026. Để trống để chuyển nội dung về thư mục gốc.",
+      folderPath: "Đường dẫn thư mục",
+      movePathHint: "Đổi phần thư mục trong đường dẫn để di chuyển, ví dụ contracts/2026/main.pdf.",
+      apply: "Áp dụng",
+      pathTaken: 'Đã có một mục tại "{path}". Hãy chọn đường dẫn khác.',
+      invalidPath: "Nhập đường dẫn hợp lệ, ví dụ contracts/2026/main.pdf.",
+      folderIntoItself: "Không thể di chuyển một thư mục vào chính nó.",
+      removeFolderBody:
+        'Thao tác này sẽ xóa "{folder}" và {count} tệp bên trong khỏi trường này. Chưa có gì thay đổi cho đến khi bạn lưu bản ghi.',
+      emptyFolderHint: "Thư mục trống sẽ không được lưu. Hãy thêm tệp để giữ thư mục này.",
+    },
     properties: "Thuộc tính",
     source: "Nguồn",
     openFullPage: "Mở trang đầy đủ",
@@ -2518,6 +2565,7 @@ export const dashboardVi: CoreI18nMessages = {
     member: "Thành viên",
     lookup: "Tra cứu",
     attachment: "Tệp",
+    drive: "Drive",
     ai_summary: "Tóm tắt AI",
     ai_tags: "Thẻ AI",
     created_time: "Tạo lúc",
@@ -2707,6 +2755,13 @@ export const dashboardVi: CoreI18nMessages = {
       "Gửi POST (JSON hoặc văn bản) hoặc GET tới URL này để bắt đầu một lượt chạy. Nội dung yêu cầu nằm trong steps.trigger.payload.request: method, query, headers và body. Nếu một bước mã trả về { response: … } trước khi lượt chạy tạm dừng, bên gọi sẽ nhận được nó; nếu không, bên gọi nhận 202 và ID lượt chạy. Ai có URL này cũng bắt đầu được lượt chạy: đổi URL để URL cũ ngừng hoạt động. Thay đổi có hiệu lực sau khi lưu.",
     hookNeedsEvent:
       "Đặt chế độ thực thi thành Sự kiện trong phần cài đặt thực thi, nếu không URL này sẽ trả về 404.",
+    webhookSign: "Ký các yêu cầu",
+    webhookSigningSecret: "Khóa bí mật để ký",
+    webhookSigningRegenerate: "Đổi khóa bí mật",
+    webhookSigningHint:
+      'Mỗi yêu cầu mang tiêu đề X-Busabase-Signature: t=<giờ Unix>,v1=<HMAC-SHA256 dạng hex của "<t>.<nội dung>" với khóa bí mật này>. Hãy kiểm tra nó ở nơi nhận yêu cầu và từ chối t cũ hơn vài phút, để yêu cầu giả mạo hoặc bị gửi lại bị từ chối. Ai mở được quy trình này đều đọc được khóa bí mật: hãy đổi khóa để khóa cũ hết tác dụng. Thay đổi có hiệu lực sau khi lưu.',
+    webhookSignOffHint:
+      "Tắt: yêu cầu không có chữ ký. Bật lên để bên nhận có thể kiểm tra yêu cầu đến từ bước này.",
     functionCode: "Mã",
     functionCodeHint:
       "JavaScript chạy trên máy chủ khi lượt chạy tới bước này. input chứa dữ liệu của lượt chạy (payload, steps, record), await fetch(...) gọi được URL công khai, và giá trị bạn return là đầu ra của bước này (các bước sau đọc bằng steps.<id>.<trường>). Ai mở được quy trình này cũng đọc được mã.",
@@ -2788,6 +2843,27 @@ export const dashboardVi: CoreI18nMessages = {
     findRecordsForEach: "Chạy các bước tiếp theo cho từng bản ghi",
     findRecordsForEachHint:
       "Mỗi bản ghi có một lần chạy riêng về bản ghi đó: Cập nhật bản ghi sẽ thay đổi nó, và các bước sau đọc nó là record. Lần chạy này kết thúc ở đây; các lần chạy kia lần lượt chạy theo thiết lập Đồng thời.",
+    runIn: "Chạy trên",
+    runInServer: "Máy chủ này",
+    runInSandbox: "Một máy sandbox",
+    runInServerHint:
+      "Nhanh. Chỉ JavaScript, không cài gói, tối đa bằng thời gian chờ của quy trình.",
+    runInSandboxHint:
+      "Một máy được khởi động riêng cho bước này: JavaScript hoặc Python, cài gói trước, tối đa 10 phút. Lần chạy chờ nó như một bước Chờ, nên yêu cầu đã khởi động lần chạy sẽ nhận 202.",
+    runInSandboxLocked: "Chạy mã trong sandbox cần gói {plan}.",
+    runInSandboxNotConfigured:
+      "Máy chủ này chưa cấu hình sandbox. Quản trị viên có thể bật bằng khóa API Sandock.",
+    sandboxLanguage: "Ngôn ngữ",
+    sandboxLanguageJavascript: "JavaScript (Node.js)",
+    sandboxLanguagePython: "Python",
+    sandboxPackages: "Gói",
+    sandboxPackagesHintJavascript:
+      'Các gói npm cài trước, cách nhau bằng dấu cách, ví dụ dayjs hoặc lodash@4. Tải bằng require("dayjs").',
+    sandboxPackagesHintPython:
+      "Các gói pip cài trước, cách nhau bằng dấu cách, ví dụ requests hoặc pycryptodome==3.20.0. Import như bình thường.",
+    sandboxCode: "Mã trong sandbox",
+    sandboxCodeHint:
+      "Chạy trên máy sandbox. input chứa dữ liệu của lần chạy và giá trị bạn trả về là đầu ra của bước này. Ai mở được quy trình này đều đọc được mã.",
     customActionHint: "Tên hành động này chưa có tác dụng: chỉ được ghi lại.",
     chooseBase: "Chọn cơ sở dữ liệu",
     targetRecord: "Bản ghi (không bắt buộc)",
@@ -2881,6 +2957,8 @@ export const dashboardVi: CoreI18nMessages = {
     triggerSchedule: "Theo lịch",
     triggerWebhook: "Yêu cầu",
     triggerForEach: "Từng bản ghi",
+    waitingSandbox: "Đang chạy mã trong sandbox. Lần chạy sẽ tiếp tục khi xong.",
+    waitingSandboxDeadline: "Sẽ bị dừng nếu chưa xong trước {time}.",
     runDetails: "Chi tiết lượt chạy",
     recordLabel: "Bản ghi: {id}",
     waitingUntil: "Đang chờ đến {time}. Khi đó sẽ tự tiếp tục.",
@@ -2889,6 +2967,12 @@ export const dashboardVi: CoreI18nMessages = {
     approve: "Phê duyệt",
     reject: "Từ chối",
     errorLabel: "Lỗi",
+    retryFromStep: "Thử lại từ bước này",
+    retryFromStepHint:
+      "Bắt đầu một lần chạy mới, giữ nguyên mọi bước trước bước này và chỉ chạy lại bước này. Yêu cầu mà bước này đã gửi sẽ được gửi lại.",
+    retriedAsLink: "Đã thử lại: mở lần chạy mới",
+    retryOfLink: "Đây là lần thử lại của một lần chạy trước: mở nó",
+    triggerRetry: "Thử lại",
     steps: "Các bước",
     noSteps: "Chưa có bước nào hoàn thành.",
     stepData: "Dữ liệu",
@@ -2932,6 +3016,16 @@ export const dashboardVi: CoreI18nMessages = {
     rename: "Cài đặt các mục xung đột dưới tên mới",
     renameHint: "Thêm hậu tố (-2, -3, …). Nội dung hiện có được giữ nguyên.",
     warningsTitle: "Cần lưu ý",
+    folderName: "Tên thư mục",
+    folderNameHint: "Tên hiển thị trong không gian làm việc. Bạn có thể dùng bất kỳ ngôn ngữ nào.",
+    folderNameRequired: "Hãy nhập tên thư mục.",
+    installUnavailable: "Hiện chưa thể bắt đầu cài đặt. Vui lòng thử lại sau.",
+    installNoChanges: "Chưa có nội dung mẫu nào được tạo. Bạn có thể thử lại.",
+    installPartial:
+      "Một phần nội dung đã được tạo trước khi cài đặt dừng. Hãy kiểm tra không gian làm việc trước khi thử lại.",
+    installUnknown:
+      "Chưa thể xác nhận kết quả cài đặt. Hãy kiểm tra không gian làm việc để tránh cài đặt trùng lặp.",
+    technicalDetails: "Chi tiết kỹ thuật",
     targetFolder: "Cài đặt vào thư mục",
     targetFolderHint: "Một thư mục mới được tạo cho gói. Mặc định là tên của chính gói.",
     requireReview: "Gửi nội dung đi xét duyệt trước",

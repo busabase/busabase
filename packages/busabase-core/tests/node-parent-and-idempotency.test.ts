@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
 import { subscribeRealtimeMessages } from "openlib/realtime";
+import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LOCAL_SPACE_ID } from "../src/context";
 import { getDb } from "../src/db";
@@ -221,7 +223,8 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
     });
 
     it("files.create: materialized true when autoMerge, false when review-first", async () => {
-      const hash = `sha256:${"9".repeat(64)}`;
+      const bytes = Buffer.alloc(10, 9);
+      const hash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
       const req = await client.assets.createUploadUrl({
         fileName: "note.txt",
         mimeType: "text/plain",
@@ -229,6 +232,7 @@ describe("Node-parent validation, materialized flag, and ChangeRequest safety â€
         contentHash: hash,
         context: "file-node",
       });
+      await storage.uploadFileToKey(bytes, req.storageKey, "text/plain");
       const confirmed = await client.assets.confirm({
         storageKey: req.storageKey,
         fileName: "note.txt",

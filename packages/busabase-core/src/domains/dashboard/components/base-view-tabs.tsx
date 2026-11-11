@@ -22,6 +22,7 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { clearRecordFind } from "../helpers/record-find-url";
 import { ACTIVE_VIEW_CONTROL_CLASS_NAME } from "./view-control-styles";
 
 // Per-view-type tab glyph (kept in one place so tabs and the type picker agree).
@@ -188,7 +189,10 @@ export function BaseViewTabs({
     }),
   );
   const hrefFor = (view: ViewVO) =>
-    mergeSearchIntoHref(`/base/${base.slug}/${view.slug}`, currentSearch);
+    mergeSearchIntoHref(
+      `/base/${base.slug}/${view.slug}`,
+      view.id === activeViewId ? currentSearch : clearRecordFind(currentSearch),
+    );
 
   if (!canReorder || !onReorder || views.length < 2) {
     return (

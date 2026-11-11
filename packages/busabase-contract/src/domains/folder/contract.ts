@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { nodeSchema } from "../../contract/schemas";
+import { FolderBodyFormatSchema } from "./types";
 
 // --- Folder domain schema (a folder + its direct child nodes) ---
 
@@ -9,6 +10,8 @@ export const folderSchema = z.object({
   storagePrefix: z.string(),
   /** Directory readme. Empty string when no object has been written yet. */
   body: z.string(),
+  /** `markdown` or `html` — which readme object holds `body`. `markdown` when there is none. */
+  bodyFormat: FolderBodyFormatSchema,
 });
 
 // The Folder domain has no transport surface of its own any more. `GET /folders`

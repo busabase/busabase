@@ -420,7 +420,39 @@ describe("operation lease lifecycle with real ACP and PGLite persistence", () =>
     expect(await row(id)).toMatchObject({ status: "idle", leaseOwnerId: null });
   });
 
-  it("rejects mismatched source before event acceptance and leaves a persisted session available for valid retry", async () => {
+  it("dispatches and persists context from another domain while releasing the operation lease", async () => {
+    const id = "ags_context_cross_domain";
+    await insertSession(id);
+    const agent = fakeAgent({ embeddedContext: true });
+    const context = createPromptResourceContext(
+      createAgentPromptEnvelope({
+        ...promptContext().metadata["busabase.agentPrompt"],
+        source: { origin: "https://other.test", edition: "desktop" },
+      }),
+      "cross-domain-context",
+    );
+
+    await inScope(() => promptAgentSession(id, "", undefined, { resourceContext: [context] }));
+
+    expect(agent.promptContents).toHaveLength(1);
+    expect(agent.promptContents[0]?.[1]).toMatchObject({
+      type: "resource",
+      resource: { uri: context.uri, text: context.text },
+    });
+    const events = await inScope(() => loadSessionEvents(id, -1));
+    const userMessages = events.filter(
+      (entry) => (entry.acpUpdate as { sessionUpdate?: string })?.sessionUpdate === "user_message",
+    );
+    expect(userMessages).toHaveLength(1);
+    expect(userMessages[0]?.acpUpdate).toEqual({
+      sessionUpdate: "user_message",
+      text: "",
+      resourceContext: [context],
+    });
+    expect(await row(id)).toMatchObject({ status: "idle", leaseOwnerId: null });
+  });
+
+  it("rejects a mismatched edition before event acceptance and leaves a persisted session available for valid retry", async () => {
     const id = "ags_context_source_mismatch";
     await insertSession(id);
     const agent = fakeAgent({ embeddedContext: true });
@@ -428,7 +460,7 @@ describe("operation lease lifecycle with real ACP and PGLite persistence", () =>
     const mismatched = createPromptResourceContext(
       createAgentPromptEnvelope({
         ...context.metadata["busabase.agentPrompt"],
-        source: { origin: "https://other.test", edition: "desktop" },
+        source: { origin: "https://other.test", edition: "cloud", spaceId: "org-other" },
       }),
       context.id,
     );

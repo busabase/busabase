@@ -1,8 +1,9 @@
 // Pure, isomorphic field-type conversion via text as intermediate form.
 // No DB, no React, no server-only imports — safe to use on both client and server.
 import type { FieldType } from "busabase-contract/types";
-import { isSystemFieldType } from "../field-types";
+import { isFileFieldType, isSystemFieldType } from "../field-types";
 import { normalizeDateFieldText } from "./date-value";
+import { withDrivePaths, withoutDrivePaths } from "./drive-field-value";
 import { EMPTY_WHITEBOARD_FIELD_VALUE } from "./whiteboard-value";
 
 export interface FieldConversionOptions {
@@ -33,9 +34,38 @@ export class ConversionNotSupportedError extends Error {
  * wipe — the merge's `catch { converted = null }` cannot tell "this value failed
  * to parse" from "this type was never convertible".
  */
-const UNCONVERTIBLE_FROM: ReadonlySet<FieldType> = new Set(["relation", "attachment", "member"]);
+const UNCONVERTIBLE_FROM: ReadonlySet<FieldType> = new Set([
+  "relation",
+  "attachment",
+  "drive",
+  "member",
+]);
 
 export const isUnconvertibleFieldType = (type: FieldType): boolean => UNCONVERTIBLE_FROM.has(type);
+
+/**
+ * Whether a column of `fromType` can be converted to `toType` — the ONE gate the
+ * server (`field-ops.ts`) and the field editor both ask. Text-convertible types
+ * convert through text; file refs never become text, but they do move between
+ * the two file-holding types: `attachment` → `drive` lands every file at the
+ * root, `drive` → `attachment` drops the folders and keeps every file.
+ */
+export const canConvertFieldType = (fromType: FieldType, toType: FieldType): boolean => {
+  if (isSystemFieldType(fromType) || isSystemFieldType(toType)) return false;
+  if (fromType !== toType && isFileFieldType(fromType) && isFileFieldType(toType)) return true;
+  return !UNCONVERTIBLE_FROM.has(fromType) && !UNCONVERTIBLE_FROM.has(toType);
+};
+
+/** attachment ⇄ drive: same refs, with or without a path. Non-ref items are dropped. */
+const convertFileRefs = (value: unknown, toType: FieldType): unknown[] => {
+  const refs = (Array.isArray(value) ? value : []).filter(
+    (item): item is { fileName: string; path?: unknown } =>
+      typeof item === "object" &&
+      item !== null &&
+      typeof (item as { fileName?: unknown }).fileName === "string",
+  );
+  return toType === "drive" ? withDrivePaths(refs) : withoutDrivePaths(refs);
+};
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const URL_RE = /^https?:\/\//;
@@ -219,9 +249,10 @@ export function fromText(
 }
 
 /**
- * Convert a field value from one type to another, using text as the intermediate form.
- * Throws ConversionNotSupportedError if either side is unconvertible (relation,
- * attachment, system fields).
+ * Convert a field value from one type to another, using text as the intermediate form
+ * (file refs move between `attachment` and `drive` directly — see canConvertFieldType).
+ * Throws ConversionNotSupportedError if either side is otherwise unconvertible
+ * (relation, attachment, drive, member, system fields).
  */
 export function convertFieldValue(
   value: unknown,
@@ -230,6 +261,10 @@ export function convertFieldValue(
   options?: FieldConversionOptions,
 ): unknown {
   if (fromType === toType) return value;
+
+  if (isFileFieldType(fromType) && isFileFieldType(toType)) {
+    return value === null || value === undefined ? null : convertFileRefs(value, toType);
+  }
 
   // Validate toType before doing any work
   if (isSystemFieldType(toType) || UNCONVERTIBLE_FROM.has(toType)) {

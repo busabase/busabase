@@ -1,5 +1,6 @@
 import type { ChangeRequestVO, OperationVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
+import { gridRowHeightMessages } from "../../../i18n/grid-row-height";
 import { coreMessagesEn } from "../../../i18n/messages";
 import { describeViewConfig, getOperationFieldChanges } from "./operation-diff";
 
@@ -13,6 +14,38 @@ const changeRequest = {
 } as unknown as ChangeRequestVO;
 
 describe("view configuration diff", () => {
+  it("shows the default 48px before a row-height-only change and the selected 96px after it", () => {
+    const describeDensity = (config: unknown) =>
+      describeViewConfig(
+        changeRequest,
+        config,
+        coreMessagesEn,
+        undefined,
+        gridRowHeightMessages.en,
+        true,
+      ).filter((rule) => rule.kind === "density");
+    expect(describeDensity({})).toEqual([
+      { key: "row-height:medium", kind: "density", label: "Row height · Medium (48px)" },
+    ]);
+    expect(describeDensity({ rowHeight: "tall" })).toEqual([
+      { key: "row-height:tall", kind: "density", label: "Row height · Tall (96px)" },
+    ]);
+  });
+
+  it("uses localized row-height labels without adding density to unrelated view settings", () => {
+    const rules = describeViewConfig(
+      changeRequest,
+      { rowHeight: "extra-tall" },
+      coreMessagesEn,
+      undefined,
+      gridRowHeightMessages["zh-CN"],
+    );
+    expect(rules.find((rule) => rule.kind === "density")?.label).toBe("行高 · 超高 (144px)");
+    expect(
+      describeViewConfig(changeRequest, {}, coreMessagesEn).some((rule) => rule.kind === "density"),
+    ).toBe(false);
+  });
+
   it("describes field order separately from field membership and includes widths", () => {
     const rules = describeViewConfig(
       changeRequest,

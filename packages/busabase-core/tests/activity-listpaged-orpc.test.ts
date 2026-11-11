@@ -211,4 +211,27 @@ describe("activity.listPaged — keyset merge parity", () => {
       ),
     ).toBe(false);
   });
+
+  it("does not skip events that share a millisecond but differ by microseconds", async () => {
+    // JS Date is ms-only; encoding the cursor with toISOString() truncated sub-ms
+    // values and the next page skipped the rest of that millisecond. Force every
+    // operation into one millisecond, 1µs apart, then walk with two page sizes.
+    const { getDb } = await import("../src/db");
+    const { sql } = await import("drizzle-orm");
+    const db = await getDb();
+    await db.execute(sql`
+      with ranked as (
+        select id, row_number() over (order by id) - 1 as n
+        from busabase_operations
+      )
+      update busabase_operations o
+      set updated_at = timestamptz '2099-01-01 00:00:00.123000+00' + (ranked.n * interval '1 microsecond')
+      from ranked
+      where o.id = ranked.id
+    `);
+    const big = (await pageAll(100)).map(keyOf);
+    const small = (await pageAll(3)).map(keyOf);
+    expect(small.length).toBeGreaterThan(10);
+    expect(small).toEqual(big);
+  });
 });

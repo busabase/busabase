@@ -38,6 +38,21 @@ function useCollectionRoute() {
 }
 
 describe("collection pagination across record navigation", () => {
+  it("restores a view's scoped find and page when returning through browser history", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/base/tasks/grid?recordPage=2&recordPageSize=25&recordFind=Acme&recordFindScope=tasks%3Agrid",
+    );
+    const { result } = renderHook(useCollectionRoute);
+    act(() => result.current.navigate("/base/tasks/board?recordPage=1&recordPageSize=25"));
+    expect(result.current.pagination.page).toBe(1);
+    act(() => window.history.back());
+    await waitFor(() => expect(result.current.path).toBe("/base/tasks/grid"));
+    expect(result.current.pagination.page).toBe(2);
+    expect(new URLSearchParams(result.current.search).get("recordFind")).toBe("Acme");
+  });
+
   it.each(["rec_task", "rec_task/edit"])(
     "preserves page two when opening %s and using browser Back",
     async (recordPath) => {

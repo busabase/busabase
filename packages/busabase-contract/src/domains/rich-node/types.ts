@@ -87,6 +87,14 @@ export const WorkflowNodeSchema = z.discriminatedUnion("kind", [
      * so anyone who can open it can read them.
      */
     headers: z.array(WorkflowWebhookHeaderSchema).max(20).optional(),
+    /**
+     * When set, every request carries `X-Busabase-Signature:
+     * t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<body>" with this secret>`,
+     * so the receiver can tell the request came from this step. Stored in the
+     * workflow, so anyone who can open it can read it; change it to retire the
+     * old one.
+     */
+    signingSecret: z.string().min(16).max(100).optional(),
   }),
   z.object({
     ...workflowNodeBase,
@@ -99,6 +107,17 @@ export const WorkflowNodeSchema = z.discriminatedUnion("kind", [
      * the returned value is the step's output.
      */
     code: z.string().max(50_000).optional(),
+    /**
+     * Where `code` runs. `server` (the default) is the app's own sandbox: fast,
+     * JavaScript only, no packages. `sandbox` is a machine provisioned for the
+     * run: JavaScript or Python, packages installed first, minutes of time, and
+     * the run waits for it like a Wait.
+     */
+    runIn: z.enum(["server", "sandbox"]).optional(),
+    /** For `runIn: "sandbox"`: the language `code` is written in. Default JavaScript. */
+    language: z.enum(["javascript", "python"]).optional(),
+    /** For `runIn: "sandbox"`: npm or pip packages to install first, separated by spaces or commas. */
+    packages: z.string().max(1_000).optional(),
   }),
   z.object({
     ...workflowNodeBase,

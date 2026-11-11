@@ -142,6 +142,65 @@ describe("SidePanel workspace ownership", () => {
     expect(useSidePanelStore.getState().tabs).toEqual([]);
   });
 
+  it("mounts a saved conversation only for its matching workspace and actor", async () => {
+    localStorage.setItem(
+      "busabase-side-panel-prefs",
+      JSON.stringify({
+        version: 0,
+        state: {
+          isOpen: true,
+          scopeKey: "space-a:user-a",
+          activeTabId: "agent-buda:research",
+          tabs: [
+            {
+              id: "agent-buda:research",
+              type: "agent-chat",
+              title: "Research",
+              payload: { agentSlug: "buda:research", sessionId: "saved-session" },
+            },
+          ],
+        },
+      }),
+    );
+    await useSidePanelStore.persist.rehydrate();
+    const orpc = {} as BusabaseQueryUtils;
+    render(panel("space-a:user-a", orpc));
+
+    expect(screen.getByRole("textbox", { name: "Draft" })).toBeTruthy();
+    expect(renderedSessions).toEqual([{ orpc, sessionId: "saved-session" }]);
+  });
+
+  it.each(["space-b:user-a", "space-a:user-b"])(
+    "never renders saved content before retiring mismatched ownership %s",
+    async (scopeKey) => {
+      localStorage.setItem(
+        "busabase-side-panel-prefs",
+        JSON.stringify({
+          version: 0,
+          state: {
+            isOpen: true,
+            scopeKey: "space-a:user-a",
+            activeTabId: "agent-buda:research",
+            tabs: [
+              {
+                id: "agent-buda:research",
+                type: "agent-chat",
+                title: "Research",
+                payload: { agentSlug: "buda:research", sessionId: "private-session" },
+              },
+            ],
+          },
+        }),
+      );
+      await useSidePanelStore.persist.rehydrate();
+      render(panel(scopeKey, {} as BusabaseQueryUtils));
+
+      expect(renderedSessions).toEqual([]);
+      expect(screen.queryByRole("textbox", { name: "Draft" })).toBeNull();
+      expect(useSidePanelStore.getState().tabs).toEqual([]);
+    },
+  );
+
   it("returns to a fresh launcher after switching spaces from the Agent picker", () => {
     const orpc = {} as BusabaseQueryUtils;
     const view = render(panel("space-a:user-a", orpc));

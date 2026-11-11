@@ -2,7 +2,7 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import type { CommentSubjectType } from "busabase-contract/types";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, lt, or, type SQL, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   getContextIsSpaceManager,
@@ -23,6 +23,7 @@ import {
   busabaseRecords,
 } from "../db/schema";
 import { applyPlaybookAttributionVisibility } from "../domains/playbooks/logic/playbook-attribution";
+import { buildAuditSubjectAclSql } from "./acl-list-sql";
 import {
   dispatchAgentMentions,
   insertCommentMentions,
@@ -373,7 +374,7 @@ export const createAuditEvent = async (input: z.infer<typeof auditEventInputSche
 };
 
 const listVisibleChangeRequestIds = async (
-  candidates: (typeof busabaseAuditEvents.$inferSelect)[],
+  candidates: { changeRequestId: string | null }[],
 ): Promise<Set<string>> => {
   const changeRequestIds = [
     ...new Set(
@@ -396,25 +397,66 @@ const listVisibleChangeRequestIds = async (
   return new Set((await filterVisibleChangeRequestRows(rows)).map((row) => row.id));
 };
 
+/**
+ * The newest audit events the caller may see. Runs on every dashboard load.
+ *
+ * Visibility used to be decided per event in JS while an OFFSET walk read the
+ * table 50 rows at a time, so a member who can see little crossed most of the
+ * space — re-reading every earlier row on each step — before 50 were visible.
+ * The same rule is now the WHERE (see `buildAuditSubjectAclSql`; events that
+ * name a change request follow `filterVisibleChangeRequestRows`, the others
+ * `assertAuditSubjectPermission`), the walk is keyset, and only flagged events
+ * are re-checked in JS. The rule is evaluated row by row (`probe`): the walk
+ * stops after a page, and letting PostgreSQL hash every change request and
+ * operation of the space first made a manager's call 10x slower on 70k rows.
+ */
 export const listAuditEvents = async (input?: z.input<typeof listInputSchema>) => {
   const { ensureReady } = await import("./seed");
   await ensureReady();
   const db = await getDb();
   const parsed = listInputSchema.parse(input);
+  const acl = buildAuditSubjectAclSql(
+    db,
+    {
+      baseId: busabaseAuditEvents.baseId,
+      recordId: busabaseAuditEvents.recordId,
+      changeRequestId: busabaseAuditEvents.changeRequestId,
+      operationId: busabaseAuditEvents.operationId,
+      commitId: busabaseAuditEvents.commitId,
+    },
+    "list",
+    // The index walk stops after a page: look rows up one by one.
+    "probe",
+  );
   const events: (typeof busabaseAuditEvents.$inferSelect)[] = [];
   const batchSize = Math.max(parsed.limit, 20);
-  let offset = 0;
+  let after: { createdAt: Date; id: string } | null = null;
   for (;;) {
-    const candidates = await db
-      .select()
-      .from(busabaseAuditEvents)
-      .where(eq(busabaseAuditEvents.spaceId, getContextSpaceId()))
-      .orderBy(desc(busabaseAuditEvents.createdAt), desc(busabaseAuditEvents.id))
-      .limit(batchSize)
-      .offset(offset);
-    const visibleChangeRequestIds = await listVisibleChangeRequestIds(candidates);
+    const keyset: SQL | undefined = after
+      ? or(
+          lt(busabaseAuditEvents.createdAt, after.createdAt),
+          and(
+            eq(busabaseAuditEvents.createdAt, after.createdAt),
+            lt(busabaseAuditEvents.id, after.id),
+          ),
+        )
+      : undefined;
+    const candidates: (typeof busabaseAuditEvents.$inferSelect & { needsScopeCheck: boolean })[] =
+      await db
+        .select({
+          ...getTableColumns(busabaseAuditEvents),
+          needsScopeCheck: sql<boolean>`${acl.needsScopeCheck}`,
+        })
+        .from(busabaseAuditEvents)
+        .where(and(eq(busabaseAuditEvents.spaceId, getContextSpaceId()), acl.visible, keyset))
+        .orderBy(desc(busabaseAuditEvents.createdAt), desc(busabaseAuditEvents.id))
+        .limit(batchSize);
+    // Flagged events take the per-event path the whole list used to take.
+    const flagged = candidates.filter((event) => event.needsScopeCheck);
+    const visibleChangeRequestIds = await listVisibleChangeRequestIds(flagged);
     const visibility = await Promise.all(
       candidates.map(async (event) => {
+        if (!event.needsScopeCheck) return true;
         if (event.changeRequestId) {
           return visibleChangeRequestIds.has(event.changeRequestId);
         }
@@ -427,9 +469,14 @@ export const listAuditEvents = async (input?: z.input<typeof listInputSchema>) =
         }
       }),
     );
-    events.push(...candidates.filter((_, index) => visibility[index]));
-    if (events.length >= parsed.limit || candidates.length < batchSize) break;
-    offset += candidates.length;
+    events.push(
+      ...candidates
+        .filter((_, index) => visibility[index])
+        .map(({ needsScopeCheck: _needsScopeCheck, ...event }) => event),
+    );
+    const last: (typeof candidates)[number] | undefined = candidates[candidates.length - 1];
+    if (events.length >= parsed.limit || candidates.length < batchSize || !last) break;
+    after = { createdAt: last.createdAt, id: last.id };
   }
   events.splice(parsed.limit);
   const users = await resolveUserRefs(events.map((event) => event.actorId));

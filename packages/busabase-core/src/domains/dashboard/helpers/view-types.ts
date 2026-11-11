@@ -53,6 +53,8 @@ export interface RecordsPagination {
 
 export interface ViewSubmitOptions {
   mergeImmediately?: boolean;
+  /** In-place presentation controls retain the current route, query and table state. */
+  preserveLocation?: boolean;
 }
 
 /**

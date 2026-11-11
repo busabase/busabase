@@ -10,8 +10,10 @@ import { busabaseRouter } from "../src/router";
  *
  * Every source used to scan against the call's one deadline, so the first slow
  * source spent all of it: in a space with 100k+ files and 70k records, an
- * unscoped grep answered with records `scanned: 0`. Now each source gets an
- * even slice of the time left, and time it does not use rolls forward.
+ * unscoped grep answered with records `scanned: 0`. Now files and nodes run in
+ * one lane and prompts and records in another, side by side; within a lane
+ * each source gets an even slice of the time left, and time it does not use
+ * rolls forward (see `tests/grep-source-lanes.test.ts` for the lanes).
  *
  * The files source is replaced by a fake that either spends its whole slice
  * (a space full of files) or returns at once, and the deadline every scan of a
@@ -136,21 +138,21 @@ describe("grep — each source gets a fair share of the time", () => {
     expect(result.truncated).toBe(true);
   }, 30_000);
 
-  it("gives a later source the time an earlier one did not use", async () => {
+  it("gives a later source in its lane the time an earlier one did not use", async () => {
     files.mode = "fast";
     const startedAt = Date.now();
     await client.grep({
       pattern: "TIMEBUDGETNEEDLE",
-      sources: ["files", "records", "prompts"],
       scope: { records: { baseIds: [baseId] } },
     });
-    // Files was offered a third of the call.
+    // Files shares its lane with nodes: it was offered half of the call.
     const [filesDeadline] = files.deadlines;
-    expect(filesDeadline - startedAt).toBeLessThanOrEqual(TIMEOUT_MS / 3 + 100);
-    // It returned at once, so records gets half of nearly all the time — not
-    // a fixed third that would leave files' unused time on the table.
+    expect(filesDeadline - startedAt).toBeLessThanOrEqual(TIMEOUT_MS / 2 + 100);
+    // Records shares its lane with prompts, which goes first and returns at
+    // once, so records gets nearly the whole call — not a fixed half that
+    // would leave prompts' unused time on the table.
     const [firstRecordScan] = recordScans;
     expect(firstRecordScan).toBeDefined();
-    expect(firstRecordScan.deadline - firstRecordScan.at).toBeGreaterThan(TIMEOUT_MS * 0.4);
+    expect(firstRecordScan.deadline - firstRecordScan.at).toBeGreaterThan(TIMEOUT_MS * 0.8);
   }, 30_000);
 });

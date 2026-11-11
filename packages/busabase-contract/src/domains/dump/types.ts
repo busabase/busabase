@@ -13,26 +13,40 @@ import { z } from "zod";
  * webhook signing secrets are intentionally excluded — never dumped. */
 export const DumpTableSchema = z.enum([
   "nodes",
-  /** Node-level access grants (permissions). Not secret — restore must keep them
-   * so a backed-up space's sharing/permission config survives a full restore. */
   "nodePrincipals",
+  "nodeShares",
+  "favorites",
+  "nodeSubscriptions",
+  "spaceInstructions",
+  "spaceWelcome",
+  "embedLinks",
   "bases",
   "baseFields",
   "views",
+  "forms",
+  "commits",
+  "changeRequests",
+  "operations",
   "records",
   "fieldValues",
   "recordLinks",
-  /** The physical bytes registry (open-domains/attachments) an Asset's `attachmentId` FKs into. */
   "attachments",
   "assets",
   "assetUsages",
   "assetTexts",
-  "commits",
-  "changeRequests",
-  "operations",
   "comments",
+  "commentMentions",
   "reviews",
   "auditEvents",
+  "workflowRuns",
+  "workflowTriggers",
+  "webhookRules",
+  "webhookDeliveries",
+  "agentSessions",
+  "agentSessionEvents",
+  "agentSessionCommands",
+  "routerGrants",
+  "routerConnections",
 ]);
 export type DumpTable = z.infer<typeof DumpTableSchema>;
 
@@ -60,6 +74,19 @@ export const ExportTablesVOSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 export type ExportTablesVO = z.infer<typeof ExportTablesVOSchema>;
+
+/** A physical object in this space, including legacy rows referenced by its Assets. */
+export const ExportAttachmentInputSchema = z.object({ attachmentId: z.string().min(1) });
+export type ExportAttachmentInput = z.infer<typeof ExportAttachmentInputSchema>;
+export const ExportAttachmentVOSchema = z.object({
+  attachmentId: z.string(),
+  storageKey: z.string(),
+  downloadUrl: z.string(),
+  mimeType: z.string(),
+  contentHash: z.string().nullable(),
+  sizeBytes: z.number().nonnegative(),
+});
+export type ExportAttachmentVO = z.infer<typeof ExportAttachmentVOSchema>;
 
 /**
  * `POST /dump/export/asset-texts/{assetId}/content` — resolve the download URL
@@ -99,9 +126,10 @@ export const ExportAssetTextVOSchema = z.object({
 export type ExportAssetTextVO = z.infer<typeof ExportAssetTextVOSchema>;
 
 /**
- * `POST /dump/export/doc-bodies` — read the raw markdown behind a batch of Doc
- * nodes, straight from object storage. Also serves folder readmes
- * (`…/folder/readme.md`), the same kind of markdown object.
+ * `POST /dump/export/doc-bodies` — read stored node documents, including
+ * archived Docs, folder readmes, HTML, whiteboard and workflow source objects.
+ * `markdown` is the historical wire key; rich entries carry their original
+ * UTF-8 bytes as a string plus `nodeType`, without JSON parse/stringify.
  *
  * The export side's counterpart to the `docBodies` pseudo-table on
  * `importTables`. Without it a backup has no way to reach a Doc's body except
@@ -125,16 +153,33 @@ export const ExportDocBodiesInputSchema = z.object({
 export type ExportDocBodiesInput = z.infer<typeof ExportDocBodiesInputSchema>;
 
 export const ExportDocBodiesVOSchema = z.object({
+  /** Absent on older servers, which cannot distinguish a missing rich object from unsupported coverage. */
+  supportedRichNodeTypes: z.array(z.enum(["html", "whiteboard", "workflow"])).optional(),
   /**
-   * One entry per requested node that is a Doc or folder in this space. A node
+   * One entry per requested supported node with stored content in this space. A node
    * id that does not resolve is simply absent (not an error): the caller asked
    * for a batch, and one bad id must not cost it the other 24. A Doc that
    * exists but has no body object yet yields `markdown: ""`, matching what a
    * read through the Doc domain would return. A folder with no readme object
    * is absent instead — most folders never have one, and archiving `""` for
-   * each would restore an empty object where none existed.
+   * each would restore an empty object where none existed. The same absence
+   * rule applies to a rich node with no object: its renderer's default document
+   * is not source content and must not be archived as though it were.
+   *
+   * `bodyFormat: "html"` marks a folder whose readme is HTML (`…/readme.html`);
+   * `markdown` then carries the raw HTML source. It is absent for everything
+   * else, so a Doc entry and a Markdown readme look exactly as they always
+   * have. The same field on a `docBodies` import row restores the HTML object.
    */
-  bodies: z.array(z.object({ nodeId: z.string(), markdown: z.string() })),
+  bodies: z.array(
+    z.object({
+      nodeId: z.string(),
+      markdown: z.string(),
+      bodyFormat: z.literal("html").optional(),
+      /** Raw stored rich document; markdown retains the exact UTF-8 source, including JSON whitespace. */
+      nodeType: z.enum(["html", "whiteboard", "workflow"]).optional(),
+    }),
+  ),
 });
 export type ExportDocBodiesVO = z.infer<typeof ExportDocBodiesVOSchema>;
 
@@ -178,6 +223,8 @@ export type ImportBeginInput = z.infer<typeof ImportBeginInputSchema>;
 
 export const ImportBeginVOSchema = z.object({
   sessionId: z.string(),
+  /** Large blobs may be sent as bounded, session-scoped multipart chunks only when this capability is present. */
+  blobChunkProtocol: z.literal(1).optional(),
 });
 export type ImportBeginVO = z.infer<typeof ImportBeginVOSchema>;
 
@@ -192,6 +239,14 @@ export type ImportBeginVO = z.infer<typeof ImportBeginVOSchema>;
  * `busabase_asset_texts` row that owns a DERIVED text object
  * (`asset-texts/blobs/sha256/…`); auto-registered rows are deliberately absent
  * because their key is the attachment's own key, already covered above.
+ */
+/**
+ * When importBegin returns blobChunkProtocol:1, attachmentBlobs/assetTextBlobs
+ * can instead carry one part per request: original key + mimeType + base64 and
+ * chunk:{partNumber,totalParts,sizeBytes,sha256}. Parts are six MiB decoded
+ * except the last; sha256 is the hex digest of the entire object. The server
+ * stages, validates and promotes only a complete object; repeated last parts
+ * are idempotent. Old servers must never be sent chunks.
  */
 export const ImportTablesInputSchema = z.object({
   sessionId: z.string(),
@@ -218,6 +273,8 @@ export type ImportSessionInput = z.infer<typeof ImportSessionInputSchema>;
 export const ImportCommitVOSchema = z.object({
   ok: z.boolean(),
   warnings: z.array(z.string()),
+  /** Expected safe credential exclusions/reconnect steps, separate from integrity failures. */
+  notices: z.array(z.string()).optional(),
 });
 export type ImportCommitVO = z.infer<typeof ImportCommitVOSchema>;
 

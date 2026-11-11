@@ -12,10 +12,14 @@ import {
   WORKFLOW_WEBHOOK_EVENT,
   type WorkflowRecordEvent,
 } from "busabase-contract/domains/workflow/run";
-import { and, asc, count, eq, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull, lte, notInArray, or } from "drizzle-orm";
 import type { BusabaseDatabase } from "../../../context";
 import { busabaseCommits, busabaseNodes, busabaseRecords } from "../../../db/schema";
 import { id } from "../../../logic/kernel";
+import {
+  isRestoreAutomationBlocked,
+  selectOutsideRestoringSpaces,
+} from "../../dump/logic/restore-activity";
 import { busabaseWorkflowRuns, type WorkflowRunInsertPO } from "../schema/workflow-runs";
 import {
   busabaseWorkflowTriggers,
@@ -139,6 +143,7 @@ export const enqueueWorkflowRunsForRecordEvent = async (
   },
 ): Promise<number> => {
   if (args.recordIds.length === 0 || suppression.getStore()) return 0;
+  if (await isRestoreAutomationBlocked(args.spaceId)) return 0;
   try {
     const triggers = await db
       .select({
@@ -282,33 +287,38 @@ export const enqueueDueScheduledRuns = async (
   now: Date = new Date(),
 ): Promise<number> => {
   try {
-    const due = await db
-      .select({
-        id: busabaseWorkflowTriggers.id,
-        spaceId: busabaseWorkflowTriggers.spaceId,
-        workflowNodeId: busabaseWorkflowTriggers.workflowNodeId,
-        triggerNodeId: busabaseWorkflowTriggers.triggerNodeId,
-        armedBy: busabaseWorkflowTriggers.armedBy,
-        config: busabaseWorkflowTriggers.config,
-        nextRunAt: busabaseWorkflowTriggers.nextRunAt,
-      })
-      .from(busabaseWorkflowTriggers)
-      .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseWorkflowTriggers.workflowNodeId))
-      .where(
-        and(
-          eq(busabaseWorkflowTriggers.eventType, WORKFLOW_SCHEDULE_EVENT),
-          lte(busabaseWorkflowTriggers.nextRunAt, now),
-          isNull(busabaseNodes.archivedAt),
-          isNull(busabaseNodes.deletedAt),
-        ),
-      )
-      .orderBy(asc(busabaseWorkflowTriggers.nextRunAt))
-      .limit(SCHEDULE_BATCH);
+    const due = await selectOutsideRestoringSpaces((excluded) =>
+      db
+        .select({
+          id: busabaseWorkflowTriggers.id,
+          spaceId: busabaseWorkflowTriggers.spaceId,
+          workflowNodeId: busabaseWorkflowTriggers.workflowNodeId,
+          triggerNodeId: busabaseWorkflowTriggers.triggerNodeId,
+          armedBy: busabaseWorkflowTriggers.armedBy,
+          config: busabaseWorkflowTriggers.config,
+          nextRunAt: busabaseWorkflowTriggers.nextRunAt,
+        })
+        .from(busabaseWorkflowTriggers)
+        .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseWorkflowTriggers.workflowNodeId))
+        .where(
+          and(
+            eq(busabaseWorkflowTriggers.eventType, WORKFLOW_SCHEDULE_EVENT),
+            excluded.length > 0
+              ? notInArray(busabaseWorkflowTriggers.spaceId, excluded)
+              : undefined,
+            lte(busabaseWorkflowTriggers.nextRunAt, now),
+            isNull(busabaseNodes.archivedAt),
+            isNull(busabaseNodes.deletedAt),
+          ),
+        )
+        .orderBy(asc(busabaseWorkflowTriggers.nextRunAt))
+        .limit(SCHEDULE_BATCH),
+    );
 
     let queued = 0;
     for (const trigger of due) {
       const dueAt = trigger.nextRunAt;
-      if (!dueAt) continue;
+      if (!dueAt || (await isRestoreAutomationBlocked(trigger.spaceId))) continue;
       const schedule = WorkflowScheduleSchema.parse(trigger.config?.schedule ?? {});
       // Claim and queue together: a failed insert must not lose the slot.
       const didQueue = await db.transaction(async (tx) => {
@@ -394,6 +404,7 @@ export const enqueueWorkflowHookRun = async (
     );
   const trigger = triggers.find((row) => sameToken(row.config?.hookToken, args.token));
   if (!trigger) return { kind: "not_found" };
+  if (await isRestoreAutomationBlocked(trigger.spaceId)) return { kind: "busy" };
 
   const [queued] = await db
     .select({ value: count() })

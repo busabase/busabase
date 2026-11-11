@@ -266,7 +266,7 @@ const stubOrpc = (
   close: ReturnType<typeof vi.fn>,
   create: ReturnType<typeof vi.fn>,
   prompt: ReturnType<typeof vi.fn>,
-  listPage?: () => Promise<{ items: AgentSessionVO[]; nextCursor: null }>,
+  listPage?: (cursor?: string) => Promise<{ items: AgentSessionVO[]; nextCursor: string | null }>,
   cancel: ReturnType<typeof vi.fn> = vi.fn(async () => ({ ok: true })),
   listConnections?: () => Promise<AgentConnectionVO[]>,
   listSkillNodes: () => Promise<
@@ -306,9 +306,10 @@ const stubOrpc = (
         listPaged: {
           infiniteOptions: () => ({
             queryKey: ["agents", "sessions", "listPaged"],
-            queryFn: listPage ?? (async () => ({ items: getItems(), nextCursor: null })),
+            queryFn: ({ pageParam }: { pageParam?: string }) =>
+              listPage ? listPage(pageParam) : { items: getItems(), nextCursor: null },
             initialPageParam: undefined,
-            getNextPageParam: () => undefined,
+            getNextPageParam: (page: { nextCursor: string | null }) => page.nextCursor ?? undefined,
           }),
         },
         list: { queryKey: () => ["agents", "sessions", "list"] },
@@ -329,7 +330,7 @@ function renderView(options: {
   create?: ReturnType<typeof vi.fn>;
   prompt?: ReturnType<typeof vi.fn>;
   cancel?: ReturnType<typeof vi.fn>;
-  listPage?: () => Promise<{ items: AgentSessionVO[]; nextCursor: null }>;
+  listPage?: (cursor?: string) => Promise<{ items: AgentSessionVO[]; nextCursor: string | null }>;
   permissionLevel?: ApiKeyPermissionLevel;
   compactSessionNavigation?: boolean;
   contextNode?: LoadedNode | null;
@@ -340,6 +341,8 @@ function renderView(options: {
   agentSlug?: string;
   listConnections?: () => Promise<AgentConnectionVO[]>;
   listSkillNodes?: () => Promise<Array<{ id: string; name: string; description?: string }>>;
+  initialSessionId?: string;
+  onSessionChange?: (sessionId: string) => void;
 }) {
   const close = options.close ?? vi.fn(async () => ({ ok: true }));
   const cancel = options.cancel ?? vi.fn(async () => ({ ok: true }));
@@ -382,7 +385,9 @@ function renderView(options: {
                 agentSlug={options.agentSlug ?? "test-agent"}
                 compactSessionNavigation={options.compactSessionNavigation}
                 contextNode={options.contextNode}
+                initialSessionId={options.initialSessionId}
                 onBack={() => {}}
+                onSessionChange={options.onSessionChange}
                 orpc={stubOrpc(
                   getItems,
                   close,
@@ -966,11 +971,13 @@ describe("AgentDetailView — end session", () => {
       items = [created, old];
       return created;
     });
-    renderView({ sessions: () => items, create });
+    const onSessionChange = vi.fn();
+    renderView({ sessions: () => items, create, onSessionChange });
 
     const rows = await screen.findAllByTestId("agent-session-item");
     fireEvent.click(rows[0] as HTMLElement);
     expect((await screen.findByTestId("model-selector-row")).textContent).toContain("GPT-5");
+    await waitFor(() => expect(onSessionChange).toHaveBeenLastCalledWith("sess-old"));
 
     fireEvent.click(await screen.findByRole("button", { name: "New session" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
@@ -978,12 +985,99 @@ describe("AgentDetailView — end session", () => {
     await waitFor(() =>
       expect(screen.getByTestId("model-selector-row").textContent).toContain("Claude Opus"),
     );
+    await waitFor(() => expect(onSessionChange).toHaveBeenLastCalledWith("sess-2"));
     const oldRow = screen.getAllByTestId("agent-session-item")[1];
     expect(oldRow).toBeTruthy();
     fireEvent.click(oldRow as HTMLElement);
     await waitFor(() =>
       expect(screen.getByTestId("model-selector-row").textContent).toContain("GPT-5"),
     );
+    await waitFor(() => expect(onSessionChange).toHaveBeenLastCalledWith("sess-old"));
+  });
+
+  it("keeps a newly requested session instead of saving a stale newest-session fallback", async () => {
+    const latest = { ...SESSION, id: "sess-latest" };
+    const older = { ...SESSION, id: "sess-older" };
+    const requested = { ...SESSION, id: "sess-requested" };
+    let release: ((page: { items: AgentSessionVO[]; nextCursor: null }) => void) | undefined;
+    const listPage = vi
+      .fn<() => Promise<{ items: AgentSessionVO[]; nextCursor: null }>>()
+      .mockResolvedValueOnce({ items: [latest, older], nextCursor: null })
+      .mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+    const onSessionChange = vi.fn();
+    const options = { listPage, initialSessionId: older.id, onSessionChange };
+    const view = renderView(options);
+    await waitFor(() => expect(onSessionChange).toHaveBeenLastCalledWith(older.id));
+    onSessionChange.mockClear();
+
+    options.initialSessionId = requested.id;
+    view.rerender();
+    await waitFor(() => expect(release).toBeDefined());
+    expect(screen.queryByTestId("conversation")).toBeNull();
+    expect(onSessionChange).not.toHaveBeenCalled();
+
+    await act(async () => {
+      release?.({ items: [requested, latest, older], nextCursor: null });
+    });
+    await waitFor(() => expect(onSessionChange).toHaveBeenLastCalledWith(requested.id));
+    expect(onSessionChange).not.toHaveBeenCalledWith(latest.id);
+  });
+
+  it("loads older pages before showing or reporting the saved conversation", async () => {
+    const older = { ...SESSION, id: "sess-older" };
+    let release: ((page: { items: AgentSessionVO[]; nextCursor: null }) => void) | undefined;
+    const listPage = vi.fn(async (cursor?: string) => {
+      if (!cursor) return { items: [SESSION], nextCursor: "older-page" };
+      return new Promise<{ items: AgentSessionVO[]; nextCursor: null }>((resolve) => {
+        release = resolve;
+      });
+    });
+    const onSessionChange = vi.fn();
+    renderView({ listPage, initialSessionId: older.id, onSessionChange });
+
+    await waitFor(() => expect(listPage).toHaveBeenCalledWith("older-page"));
+    expect(screen.queryByTestId("conversation")).toBeNull();
+    expect(onSessionChange).not.toHaveBeenCalled();
+    await act(async () => release?.({ items: [older], nextCursor: null }));
+    await waitFor(() => expect(onSessionChange).toHaveBeenLastCalledWith(older.id));
+    expect(await screen.findByTestId("conversation")).toBeTruthy();
+    expect(onSessionChange).not.toHaveBeenCalledWith(SESSION.id);
+  });
+
+  it("stops paging after a recovery error and retries without substituting another session", async () => {
+    const older = { ...SESSION, id: "sess-older" };
+    let fail = true;
+    const listPage = vi.fn(async (cursor?: string) => {
+      if (!cursor) return { items: [SESSION], nextCursor: "older-page" };
+      if (fail) throw new Error("History read failed");
+      return { items: [older], nextCursor: null };
+    });
+    const onSessionChange = vi.fn();
+    renderView({ listPage, initialSessionId: older.id, onSessionChange });
+
+    expect(await screen.findByText("Couldn't load agent sessions")).toBeTruthy();
+    expect(listPage).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("conversation")).toBeNull();
+    expect(onSessionChange).not.toHaveBeenCalled();
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(onSessionChange).toHaveBeenLastCalledWith(older.id));
+    expect(listPage).toHaveBeenCalledTimes(3);
+  });
+
+  it("offers recovery instead of another transcript when a saved session no longer exists", async () => {
+    const onSessionChange = vi.fn();
+    renderView({ initialSessionId: "missing-session", onSessionChange });
+
+    expect(await screen.findByText("Couldn't load agent sessions")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Agents$/ })).toBeTruthy();
+    expect(screen.queryByTestId("conversation")).toBeNull();
+    expect(onSessionChange).not.toHaveBeenCalled();
   });
 
   it("reads a session that was already gone as an outcome, not a failure", async () => {

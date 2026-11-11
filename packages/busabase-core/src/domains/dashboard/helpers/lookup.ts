@@ -27,7 +27,7 @@ export const lookupDisplayField = (target: BaseFieldVO, rollup: LookupRollup): B
       };
 
 export const lookupItemValue = (target: BaseFieldVO, value: unknown) =>
-  ["multiselect", "member", "attachment", "ai_tags", "relation"].includes(target.type)
+  ["multiselect", "member", "attachment", "drive", "ai_tags", "relation"].includes(target.type)
     ? [value]
     : value;
 

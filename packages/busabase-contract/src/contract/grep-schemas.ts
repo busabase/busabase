@@ -33,8 +33,8 @@ import {
  * BREAKING (renamed from "docs" in 0.18.0): this source scans the content of
  * EVERY node type that stores a content object — `doc`, `folder`, `html`,
  * `whiteboard` and `workflow` — not just Docs. A folder's optional readme is
- * that object (`…/folder/readme.md`); a missing object is an empty body, not
- * an error. The old name described the only type that
+ * that object (`…/folder/readme.md`, or `…/folder/readme.html` for an HTML
+ * readme); a missing object is an empty body, not an error. The old name described the only type that
  * had been implemented, not the category, and kept the other three silently
  * unsearchable. Narrow with `scope.nodes.types` to get the old doc-only
  * behaviour back explicitly.
@@ -96,8 +96,10 @@ export const UnifiedGrepInputSchema = z.object({
    * Shared across every scanned source. Each requested source is guaranteed a
    * floor of `floor(maxMatches / sources)` (at least 1); budget a source does
    * not use rolls forward to the next one (files → nodes → records → prompts).
-   * One wall-clock deadline covers the whole call; each source gets an even
-   * slice of the time left, and time it does not use rolls forward too.
+   * One wall-clock deadline covers the whole call. Files and nodes (object
+   * storage) run side by side with prompts and records (Postgres); within each
+   * pair a source gets an even slice of the time left, and time it does not
+   * use rolls forward too.
    */
   maxMatches: z.coerce
     .number()

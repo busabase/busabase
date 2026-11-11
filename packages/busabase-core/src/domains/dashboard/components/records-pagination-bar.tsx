@@ -56,11 +56,13 @@ export function RecordsPaginationBar({
     >
       <div className="flex min-w-0 flex-wrap items-center gap-3">
         <p className="whitespace-nowrap text-muted-foreground text-sm tabular-nums">
-          {fmt(messages.base.paginationRange, {
-            from: recordRange.from,
-            to: recordRange.to,
-            total: Math.max(total, 0),
-          })}
+          {error
+            ? messages.shell.operationFailed
+            : fmt(messages.base.paginationRange, {
+                from: recordRange.from,
+                to: recordRange.to,
+                total: Math.max(total, 0),
+              })}
         </p>
         <div className="flex items-center gap-2 whitespace-nowrap text-muted-foreground text-sm">
           <span>{messages.base.paginationRowsPerPage}</span>

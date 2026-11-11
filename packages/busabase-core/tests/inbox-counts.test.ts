@@ -229,7 +229,10 @@ describe("inbox counts", () => {
     expect(asMember).toEqual(asManager);
   });
 
-  it("scans candidates and operation scopes once beyond the old batch boundary", async () => {
+  // Access is now the candidate query's WHERE: one read, and no operation scope
+  // is resolved in JS unless a row is flagged (an operation that names neither
+  // node nor Base). Every fixture here names a Base, so nothing is flagged.
+  it("reads the candidates once and resolves no scope in JS when nothing is flagged", async () => {
     const db = await getDb();
     const selectSpy = vi.spyOn(db, "select");
     const selectDistinctSpy = vi.spyOn(db, "selectDistinct");
@@ -250,17 +253,16 @@ describe("inbox counts", () => {
           .join(","),
       );
       expect(
-        selectionKeys.filter((keys) => keys === "id,status,submittedBy,updatedAt"),
+        selectionKeys.filter((keys) => keys === "id,needsScopeCheck,status,submittedBy,updatedAt"),
       ).toHaveLength(1);
       const distinctSelectionKeys = selectDistinctSpy.mock.calls.map(([selection]) =>
         Object.keys(selection ?? {})
           .sort()
           .join(","),
       );
-      // ONE operations scan per ACL batch (it used to be two identical scans).
       expect(
         distinctSelectionKeys.filter((keys) => keys === OPERATION_SCOPE_SELECTION),
-      ).toHaveLength(1);
+      ).toHaveLength(0);
       expect(
         selectionKeys.filter(
           (keys) => keys === "baseId,changeRequestId,headCommitId,nodeId,operation,position",
@@ -643,6 +645,9 @@ describe("inbox counts", () => {
       .where(eq(busabaseChangeRequests.id, openFixture.changeRequestId));
   });
 
+  // The JS resolver still runs for flagged rows (and other callers), so its
+  // batching still matters: an operation scope query never names more than
+  // 5,000 change requests.
   it("caps each operation scope query at 5,000 change requests", async () => {
     const db = await getDb();
     const existingRows = await db
@@ -652,28 +657,25 @@ describe("inbox counts", () => {
     const overflowRows = ACL_BATCH_BOUNDARY_TOTAL - existingRows.length;
     expect(overflowRows).toBeGreaterThan(0);
     await insertPendingRows(overflowRows, "inbox-counts-overflow");
+    const allRows = await db
+      .select({ id: busabaseChangeRequests.id })
+      .from(busabaseChangeRequests)
+      .where(eq(busabaseChangeRequests.spaceId, LOCAL_SPACE_ID));
+    expect(allRows.length).toBe(ACL_BATCH_BOUNDARY_TOTAL);
 
-    const selectSpy = vi.spyOn(db, "select");
     const selectDistinctSpy = vi.spyOn(db, "selectDistinct");
     try {
-      const counts = await runWithBusabaseContext(
-        {
-          spaceId: LOCAL_SPACE_ID,
-          actorId: MINE,
-          isSpaceManager: false,
-          permissionLevel: "manage",
-        },
-        () => client.changeRequests.counts({} as never),
-      );
-
-      const selectionKeys = selectSpy.mock.calls.map(([selection]) =>
-        Object.keys(selection ?? {})
-          .sort()
-          .join(","),
-      );
-      expect(
-        selectionKeys.filter((keys) => keys === "id,status,submittedBy,updatedAt"),
-      ).toHaveLength(1);
+      const member = <T>(fn: () => Promise<T>) =>
+        runWithBusabaseContext(
+          {
+            spaceId: LOCAL_SPACE_ID,
+            actorId: MINE,
+            isSpaceManager: false,
+            permissionLevel: "manage",
+          },
+          fn,
+        );
+      const visible = await member(() => filterVisibleChangeRequestRows(allRows));
       const distinctSelectionKeys = selectDistinctSpy.mock.calls.map(([selection]) =>
         Object.keys(selection ?? {})
           .sort()
@@ -682,9 +684,14 @@ describe("inbox counts", () => {
       expect(
         distinctSelectionKeys.filter((keys) => keys === OPERATION_SCOPE_SELECTION),
       ).toHaveLength(2);
+      const counts = await member(() => client.changeRequests.counts({} as never));
       expect(counts.review).toBe(11 + EXTRA_PENDING + overflowRows);
+      // The SQL path and the JS resolver agree on the same rows.
+      const tally = await member(() => client.changeRequests.counts({} as never));
+      expect(Object.values(tally).reduce((sum, value) => sum + value, 0) - tally.created).toBe(
+        visible.length,
+      );
     } finally {
-      selectSpy.mockRestore();
       selectDistinctSpy.mockRestore();
     }
   });

@@ -1,9 +1,10 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
+import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LOCAL_SPACE_ID } from "../src/context";
 import { getDb } from "../src/db";
@@ -616,13 +617,15 @@ describe("Webhook automation domain — oRPC", () => {
 
   describe("asset.uploaded dispatch", () => {
     const uploadAsset = async (opts: { fileName: string; mimeType: string; hashByte: string }) => {
-      const contentHash = `sha256:${opts.hashByte.repeat(64)}`;
+      const bytes = Buffer.alloc(100, opts.hashByte);
+      const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
       const req = await client.assets.createUploadUrl({
         fileName: opts.fileName,
         mimeType: opts.mimeType,
         sizeBytes: 100,
         contentHash,
       });
+      await storage.uploadFileToKey(bytes, req.storageKey, opts.mimeType);
       return client.assets.confirm({
         storageKey: req.storageKey,
         fileName: opts.fileName,

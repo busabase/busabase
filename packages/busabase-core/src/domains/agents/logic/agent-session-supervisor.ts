@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentSessionCommandKind } from "busabase-contract/domains/agents/types";
 import { type BusabaseDatabase, runWithBusabaseContext } from "../../../context";
+import { isRestoreAutomationBlocked } from "../../dump/logic/restore-activity";
 import {
   describeAgentSessionStorageError,
   logAgentSessionDiagnostic,
@@ -261,12 +262,13 @@ async function cancelUndispatched(owner: Owner, command: SupervisedAgentCommand)
 /** A rejected/failed command cannot be made to look unexecuted after socket send. */
 async function execute(owner: Owner, command: SupervisedAgentCommand): Promise<void> {
   const driver = state.driver;
-  if (!driver || owner.stopped) return;
+  if (!driver || owner.stopped || (await isRestoreAutomationBlocked(owner.scope.spaceId))) return;
   if (await cancelUndispatched(owner, command)) return;
   let dispatched = false;
   const beforeDispatch = async () => {
     if (dispatched) return;
-    if (owner.stopped) throw new Error("The session writer changed before dispatch.");
+    if (owner.stopped || (await isRestoreAutomationBlocked(owner.scope.spaceId)))
+      throw new Error("The session writer is paused or changed before dispatch.");
     const changed = await transitionSessionCommand(
       owner.sessionId,
       command.commandId,
@@ -440,6 +442,10 @@ async function reconcile(owner: Owner): Promise<void> {
 
 async function drive(owner: Owner): Promise<void> {
   if (owner.stopped) return;
+  if (await isRestoreAutomationBlocked(owner.scope.spaceId)) {
+    await retire(owner, false);
+    return;
+  }
   if (
     owner.connected &&
     state.driver?.isConnected &&
@@ -613,11 +619,16 @@ async function freezeConnectionFailure(owner: Owner, diagnosticRef: string): Pro
 async function ensureOwner(sessionId: string, scope: AgentSessionScope): Promise<void> {
   const key = ownerKey(sessionId, scope);
   const existing = state.owners.get(key);
+  if (await isRestoreAutomationBlocked(scope.spaceId)) {
+    if (existing) await retire(existing, false);
+    return;
+  }
   if (existing) {
     await drive(existing);
     return;
   }
   if (!state.driver || state.owners.size >= MAX_OWNERS) return;
+  const driver = state.driver;
   if ((state.retryAfter?.get(key)?.nextAt ?? 0) > Date.now()) return;
   const lease = await claimWriterLease(
     sessionId,
@@ -671,8 +682,13 @@ async function ensureOwner(sessionId: string, scope: AgentSessionScope): Promise
   }
   // Never await a remote handshake in the global scanner. Other sessions and
   // active control lanes must make progress while one endpoint is slow.
-  owner.connecting = state.driver
-    .connect(runtime, lease, scope)
+  owner.connecting = (async () => {
+    if (owner.stopped || (await isRestoreAutomationBlocked(scope.spaceId))) {
+      await retire(owner, false);
+      return;
+    }
+    await driver.connect(runtime, lease, scope);
+  })()
     .then(async () => {
       if (!owner.stopped) {
         owner.connected = true;

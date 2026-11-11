@@ -13,11 +13,14 @@ import {
   type CancelQueuedWorkflowRunsOutput,
   type CancelWorkflowRunInput,
   type DecideWorkflowRunInput,
+  type ListWaitingWorkflowRunsInput,
+  type ListWaitingWorkflowRunsOutput,
   type ListWorkflowRunsInput,
   type ListWorkflowRunsOutput,
   parseWorkflowApprovers,
   type ResumeElapsedWorkflowRunsOutput,
   type ResumeWorkflowRunInput,
+  type RetryWorkflowRunInput,
   type StartWorkflowRunInput,
   WORKFLOW_CREATE_RECORD_ACTION,
   WORKFLOW_DATA_FRESHNESS,
@@ -27,6 +30,8 @@ import {
   WORKFLOW_FIND_RECORDS_MAX,
   WORKFLOW_MAX_QUEUED_RUNS,
   WORKFLOW_READ_RECORD_ACTION,
+  WORKFLOW_SANDBOX_POLL_MS,
+  WORKFLOW_SANDBOX_TIMEOUT_MS,
   WORKFLOW_UPDATE_RECORD_ACTION,
   type WorkflowRecordSnapshot,
   type WorkflowRun,
@@ -131,7 +136,27 @@ export interface WorkflowWebhookCall {
   body: WorkflowStepInput;
   /** The step's own headers, such as `Authorization`. Never copied into the run's outputs. */
   headers: readonly { name: string; value: string }[];
+  /** Signs the request when set (`X-Busabase-Signature`). Never copied into the run's outputs. */
+  signingSecret: string | null;
 }
+
+/** A Function step's code to run on a sandbox machine instead of in the app. */
+export interface WorkflowSandboxCall {
+  stepId: string;
+  code: string;
+  language: "javascript" | "python";
+  /** As the step wrote it: package specs separated by spaces or commas. */
+  packages: string;
+  input: WorkflowStepInput;
+  /** How long the code itself may run once packages are installed. */
+  timeoutMs: number;
+}
+
+/** Where sandboxed code is: still going, or finished with what it returned or why it failed. */
+export type WorkflowSandboxPoll =
+  | { done: false }
+  | { done: true; ok: true; result: unknown; logs: string }
+  | { done: true; ok: false; message: string; logs: string };
 
 export type WorkflowWebhookCallResult =
   | { ok: true; status: number; body: unknown; durationMs: number }
@@ -181,8 +206,21 @@ export interface WorkflowRuntimeDeps {
   isNamedApprover: (approvers: readonly string[]) => Promise<boolean>;
   /** The saved graph. Called only after `authorizeWorkflow`. */
   loadDocument: (nodeId: string) => Promise<WorkflowDocument>;
+  /** A workflow's name, for lists that span workflows. Called only after `authorizeWorkflow`. */
+  describeWorkflow: (nodeId: string) => Promise<{ name: string }>;
   executeFunction: (call: WorkflowFunctionCall) => Promise<WorkflowFunctionCallResult>;
   sendWebhook: (call: WorkflowWebhookCall) => Promise<WorkflowWebhookCallResult>;
+  /**
+   * Code on a sandbox machine. `start` provisions and starts it and returns at
+   * once (it throws when this space cannot have one); the run then waits and
+   * the scheduler calls `poll` until the code is done; `stop` removes the
+   * machine and never throws.
+   */
+  sandbox: {
+    start: (call: WorkflowSandboxCall) => Promise<{ sandboxId: string }>;
+    poll: (sandboxId: string) => Promise<WorkflowSandboxPoll>;
+    stop: (sandboxId: string) => Promise<void>;
+  };
   createId: () => string;
   /**
    * Set fields on one record as the acting person. `merged: false` means the
@@ -812,6 +850,7 @@ const runWebhookStep = async (
       timeoutMs: document.settings.timeoutMs,
       body: stepInput(run, node, record),
       headers: node.headers ?? [],
+      signingSecret: node.signingSecret ?? null,
     });
   } catch (error) {
     outcome = {
@@ -875,6 +914,7 @@ const runFunctionStep = async (
   const loaded = await recordForStep(deps, run);
   if (loaded && "error" in loaded) return { kind: "fail", message: loaded.error };
   const record = loaded;
+  if (node.runIn === "sandbox") return startSandboxStep(deps, document, run, node, record);
 
   let outcome: WorkflowFunctionCallResult;
   try {
@@ -900,11 +940,7 @@ const runFunctionStep = async (
     });
   }
 
-  const data: Record<string, unknown> = {};
-  if (isPlainObject(outcome.result)) copyFunctionFields(data, outcome.result);
-  data.executed = true;
-  data.result = outcome.result ?? null;
-  data.logs = outcome.logs;
+  const data = functionOutput(outcome.result, outcome.logs);
   data.webhookRuleId = outcome.ruleId;
   data.functionName = outcome.functionName;
   return {
@@ -912,6 +948,136 @@ const runFunctionStep = async (
     branch: "success",
     output: captured(deps, "function", record, data),
   };
+};
+
+/** What a finished Function step stores: an object's fields copied up, and the raw value as `result`. */
+const functionOutput = (result: unknown, logs: string): Record<string, unknown> => {
+  const data: Record<string, unknown> = {};
+  if (isPlainObject(result)) copyFunctionFields(data, result);
+  data.executed = true;
+  data.result = result ?? null;
+  data.logs = logs;
+  return data;
+};
+
+/** Installing packages has five minutes of its own, and checks are a tick apart: past this, give up. */
+const SANDBOX_DEADLINE_MS = WORKFLOW_SANDBOX_TIMEOUT_MS + 6 * 60_000;
+
+/**
+ * Start a Function step's code on a sandbox machine and pause the run. The
+ * scheduler picks the run up every `WORKFLOW_SANDBOX_POLL_MS` (or its own tick,
+ * whichever is later) and `continueSandboxStep` carries on once the code is
+ * done, so nothing waits in a request while packages install.
+ */
+const startSandboxStep = async (
+  deps: WorkflowRuntimeDeps,
+  document: WorkflowDocument,
+  run: WorkflowRun,
+  node: Extract<WorkflowNode, { kind: "function" }>,
+  record: WorkflowRecordSnapshot | null,
+): Promise<StepResult> => {
+  const label = `Function step "${node.label}" (${node.id})`;
+  const code = node.code ?? "";
+  if (!code.trim()) {
+    return failOrContinue(deps, document, "function", record, `${label} has no code to run.`, {
+      error: "no code",
+      runIn: "sandbox",
+    });
+  }
+  let sandboxId: string;
+  try {
+    ({ sandboxId } = await deps.sandbox.start({
+      stepId: node.id,
+      code,
+      language: node.language ?? "javascript",
+      packages: node.packages ?? "",
+      input: stepInput(run, node, record),
+      timeoutMs: WORKFLOW_SANDBOX_TIMEOUT_MS,
+    }));
+  } catch (error) {
+    const reason = errorMessage(error, "Could not start a sandbox");
+    return failOrContinue(deps, document, "function", record, `${label} failed: ${reason}`, {
+      error: reason,
+      runIn: "sandbox",
+    });
+  }
+  const now = deps.now();
+  return {
+    kind: "pause",
+    status: "waiting",
+    pause: {
+      kind: "sandbox",
+      nodeId: node.id,
+      resumeAt: iso(now + WORKFLOW_SANDBOX_POLL_MS),
+      sandboxId,
+      deadlineAt: iso(now + SANDBOX_DEADLINE_MS),
+    },
+  };
+};
+
+/**
+ * Check on a run waiting for sandboxed code. The caller holds the run. Still
+ * going: look again later, unless the deadline passed. Done: remove the machine
+ * and continue from the step, with what the code returned or why it failed.
+ */
+const continueSandboxStep = async (
+  deps: WorkflowRuntimeDeps,
+  run: WorkflowRun,
+): Promise<WorkflowRun> => {
+  const pause = run.pause;
+  const sandboxId = pause?.sandboxId ?? "";
+  if (!pause || !sandboxId) return fail(deps, run, "This run lost track of its sandbox");
+  let document: WorkflowDocument;
+  try {
+    await deps.authorizeWorkflow(run.workflowNodeId, "write");
+    document = await deps.loadDocument(run.workflowNodeId);
+  } catch (error) {
+    await deps.sandbox.stop(sandboxId);
+    return fail(deps, run, `Could not resume: ${errorMessage(error, "workflow unavailable")}`);
+  }
+  const node = document.nodes.find((item) => item.id === pause.nodeId);
+  if (!node || node.kind !== "function") {
+    await deps.sandbox.stop(sandboxId);
+    return fail(deps, run, `Step "${pause.nodeId}" is no longer a Function step`);
+  }
+
+  let polled: WorkflowSandboxPoll;
+  try {
+    polled = await deps.sandbox.poll(sandboxId);
+  } catch {
+    // The provider did not answer this time. Look again, within the deadline.
+    polled = { done: false };
+  }
+  const now = deps.now();
+  if (!polled.done) {
+    if (!pause.deadlineAt || Date.parse(pause.deadlineAt) > now) {
+      run.pause = { ...pause, resumeAt: iso(now + WORKFLOW_SANDBOX_POLL_MS) };
+      return remember(deps, run);
+    }
+    polled = {
+      done: true,
+      ok: false,
+      message: `The code did not finish within ${WORKFLOW_SANDBOX_TIMEOUT_MS / 60_000} minutes`,
+      logs: "",
+    };
+  }
+  await deps.sandbox.stop(sandboxId);
+
+  if (polled.ok) {
+    return continueFrom(deps, document, run, node, "success", {
+      ...functionOutput(polled.result, polled.logs),
+      runIn: "sandbox",
+    });
+  }
+  if (document.settings.errorPolicy === "continue") {
+    return continueFrom(deps, document, run, node, "success", {
+      error: polled.message,
+      logs: polled.logs,
+      runIn: "sandbox",
+      executed: false,
+    });
+  }
+  return fail(deps, run, `Function step "${node.label}" (${node.id}) failed: ${polled.message}`);
 };
 
 const advance = async (
@@ -1110,20 +1276,22 @@ export const listWorkflowRuns = async (
   const pending = runs.filter(
     (run) => run.status === "waiting_approval" && run.pause?.kind === "approval",
   );
-  const decidableRunIds: string[] = [];
-  if (pending.length > 0) {
-    const document = await deps.loadDocument(workflowNodeId);
-    const verdicts = new Map<string, boolean>();
-    for (const run of pending) {
-      const node = document.nodes.find((item) => item.id === run.pause?.nodeId);
-      if (node?.kind !== "approval" || agentRefusal(deps, node)) continue;
-      const key = parseWorkflowApprovers(node.approver).join(",");
-      if (!verdicts.has(key)) {
-        verdicts.set(key, key ? await deps.isNamedApprover(key.split(",")) : canRun);
-      }
-      if (verdicts.get(key)) decidableRunIds.push(run.id);
+  const failed = canRun ? runs.filter((run) => run.status === "failed") : [];
+  // The graph is read once, for whichever of the two questions needs it.
+  let loaded: Promise<WorkflowDocument> | null = null;
+  const loadGraph = () => {
+    loaded ??= deps.loadDocument(workflowNodeId);
+    return loaded;
+  };
+  const retryableRunIds: string[] = [];
+  if (failed.length > 0) {
+    const document = await loadGraph();
+    for (const run of failed) {
+      if (retryPoint(document, run).ok) retryableRunIds.push(run.id);
     }
   }
+  const decidableRunIds =
+    pending.length > 0 ? await decidableAmong(deps, await loadGraph(), pending, canRun) : [];
   const actorNames = await deps.resolveActorNames([
     ...new Set(
       runs.flatMap((run) => (run.cancelledBy ? [run.startedBy, run.cancelledBy] : [run.startedBy])),
@@ -1133,10 +1301,84 @@ export const listWorkflowRuns = async (
     runs: runs.map(publish),
     canRun,
     decidableRunIds,
+    retryableRunIds,
     nextCursor,
     queuedCount,
     actorNames,
   };
+};
+
+/**
+ * Of runs paused on an approval in one workflow, the ones the caller may decide
+ * now: a named approver (or a space manager) for a step that names someone,
+ * write on the workflow when it names nobody, and for an agent a step that
+ * allows agents. `canRun` is write on the workflow.
+ */
+const decidableAmong = async (
+  deps: WorkflowRuntimeDeps,
+  document: WorkflowDocument,
+  pending: readonly WorkflowRun[],
+  canRun: boolean,
+): Promise<string[]> => {
+  const decidable: string[] = [];
+  const verdicts = new Map<string, boolean>();
+  for (const run of pending) {
+    const node = document.nodes.find((item) => item.id === run.pause?.nodeId);
+    if (node?.kind !== "approval" || agentRefusal(deps, node)) continue;
+    const key = parseWorkflowApprovers(node.approver).join(",");
+    if (!verdicts.has(key)) {
+      verdicts.set(key, key ? await deps.isNamedApprover(key.split(",")) : canRun);
+    }
+    if (verdicts.get(key)) decidable.push(run.id);
+  }
+  return decidable;
+};
+
+/** The most runs waiting on an approval that one call looks at, across the space. */
+const WAITING_APPROVAL_SCAN = 200;
+
+/**
+ * Runs waiting on a decision the caller may make, across every workflow they
+ * can read: what a phone shows as "waiting for me". Each workflow is judged on
+ * its own (a run in a workflow the caller cannot read is left out, never
+ * revealed), by the same rule as the Runs tab.
+ */
+export const listWaitingWorkflowRuns = async (
+  deps: WorkflowRuntimeDeps,
+  input: ListWaitingWorkflowRunsInput,
+): Promise<ListWaitingWorkflowRunsOutput> => {
+  const limit = input.limit ?? 50;
+  const waiting = await deps.store.listWaitingApproval(deps.spaceId, WAITING_APPROVAL_SCAN);
+  const byWorkflow = new Map<string, WorkflowRun[]>();
+  for (const run of waiting) {
+    byWorkflow.set(run.workflowNodeId, [...(byWorkflow.get(run.workflowNodeId) ?? []), run]);
+  }
+  const items: ListWaitingWorkflowRunsOutput["items"] = [];
+  for (const [workflowNodeId, runs] of byWorkflow) {
+    let document: WorkflowDocument;
+    let canRun: boolean;
+    let workflowName: string;
+    try {
+      await deps.authorizeWorkflow(workflowNodeId, "read");
+      document = await deps.loadDocument(workflowNodeId);
+      canRun = await deps.canDriveWorkflow(workflowNodeId);
+      workflowName = (await deps.describeWorkflow(workflowNodeId)).name;
+    } catch {
+      continue;
+    }
+    const decidable = new Set(await decidableAmong(deps, document, runs, canRun));
+    for (const run of runs) {
+      if (!decidable.has(run.id)) continue;
+      const step = document.nodes.find((node) => node.id === run.pause?.nodeId);
+      items.push({ run: publish(run), workflowName, stepLabel: step?.label ?? "" });
+    }
+  }
+  items.sort((a, b) => b.run.updatedAt.localeCompare(a.run.updatedAt));
+  const shown = items.slice(0, limit);
+  const actorNames = await deps.resolveActorNames([
+    ...new Set(shown.map((item) => item.run.startedBy)),
+  ]);
+  return { items: shown, actorNames };
 };
 
 const runCursor = (run: WorkflowRun): string => `${run.startedAt}|${run.id}`;
@@ -1293,6 +1535,107 @@ const handOff = async (
 };
 
 /**
+ * The step a failed run can run again from, or why it cannot. A run stopped on
+ * a step that never finished: its cursor is still on that step, which has no
+ * output. A failure after a step finished (no branch to take) leaves an output
+ * on the cursor's step, so retrying would only repeat the same failure.
+ */
+const retryPoint = (
+  document: WorkflowDocument,
+  run: WorkflowRun,
+): { ok: true; node: WorkflowNode } | { ok: false; reason: string } => {
+  if (run.status !== "failed") return { ok: false, reason: "Only a failed run can be retried" };
+  if (typeof run.payload.retriedAs === "string") {
+    return { ok: false, reason: `This run was already retried as ${run.payload.retriedAs}` };
+  }
+  const nodeId = run.cursorNodeId;
+  if (!nodeId || run.outputs[nodeId]) {
+    return { ok: false, reason: "This run did not stop on a step that can run again" };
+  }
+  const node = document.nodes.find((item) => item.id === nodeId);
+  if (!node) {
+    return {
+      ok: false,
+      reason: `Step "${nodeId}" is no longer in this workflow, so there is nothing to retry from`,
+    };
+  }
+  return { ok: true, node };
+};
+
+/**
+ * Run a failed run again from the step it stopped on. The new run carries the
+ * earlier steps' outputs exactly as the failed run stored them, so nothing
+ * before the failed step runs again (some of those steps may have sent mail),
+ * and it acts as whoever retries. The failed step runs again, with its current
+ * settings and the record's current values.
+ *
+ * A failed run is retried once: it keeps `retriedAs`, so a second click, a
+ * second tab, or an agent that retries on a timeout cannot send the step's
+ * request twice. If the new run fails too, that run is retried in turn.
+ */
+export const retryWorkflowRun = async (
+  deps: WorkflowRuntimeDeps,
+  input: RetryWorkflowRunInput,
+): Promise<WorkflowRun> => {
+  const stored = await loadInSpace(deps, input.runId);
+  const workflowNodeId = await deps.authorizeWorkflow(stored.workflowNodeId, "write");
+  await claim(deps, stored.id);
+  let document: WorkflowDocument;
+  let next: WorkflowRun;
+  let full: boolean;
+  try {
+    const failed = await loadInSpace(deps, stored.id);
+    document = await deps.loadDocument(workflowNodeId);
+    const point = retryPoint(document, failed);
+    if (!point.ok) {
+      throw typeof failed.payload.retriedAs === "string"
+        ? new ORPCError("CONFLICT", { message: point.reason })
+        : badRequest(point.reason);
+    }
+    const now = deps.now();
+    full = !(await hasFreeSlot(deps, workflowNodeId, document));
+    const { retriedAs: _earlier, ...payload } = structuredClone(failed.payload);
+    next = {
+      id: deps.createId(),
+      spaceId: deps.spaceId,
+      workflowNodeId,
+      status: full ? "queued" : "running",
+      trigger: failed.trigger,
+      startedBy: deps.actorId,
+      startedVia: deps.agent
+        ? {
+            apiKeyId: deps.agent.apiKeyId,
+            apiKeyName: deps.agent.apiKeyName,
+            channel: deps.agent.channel,
+          }
+        : null,
+      cancelledBy: null,
+      cursorNodeId: failed.cursorNodeId,
+      previousNodeId: failed.previousNodeId,
+      outputs: structuredClone(failed.outputs),
+      recordId: failed.recordId,
+      payload: { ...payload, retryOf: failed.id },
+      pause: null,
+      error: null,
+      freshness: WORKFLOW_DATA_FRESHNESS,
+      startedAt: iso(now),
+      updatedAt: iso(now),
+    };
+    await deps.store.insert(publish(next), now + WORKFLOW_RUN_LEASE_MS);
+    failed.payload = { ...failed.payload, retriedAs: next.id };
+    await remember(deps, failed);
+  } finally {
+    await deps.store.release(stored.id);
+  }
+  if (full) {
+    // Over the workflow's concurrency: the scheduler starts it, as this caller.
+    await deps.store.release(next.id);
+    return publish(next);
+  }
+  return advanceHeld(deps, document, next);
+};
+
+/**
  * Stop one run before it finishes. Only a run that is not executing a step can
  * be stopped: a step already sent (a webhook, a function) cannot be taken back,
  * and pretending otherwise would hide that it ran.
@@ -1319,11 +1662,15 @@ export const cancelWorkflowRun = async (
         message: "This run is executing a step right now. Cancel it once that step has finished.",
       });
     }
+    const sandboxId = run.pause?.kind === "sandbox" ? run.pause.sandboxId : undefined;
     run.status = "cancelled";
     run.cancelledBy = deps.actorId;
     run.pause = null;
     run.error = null;
-    return await remember(deps, run);
+    const cancelled = await remember(deps, run);
+    // The code would otherwise keep running, on a machine someone pays for.
+    if (sandboxId) await deps.sandbox.stop(sandboxId);
+    return cancelled;
   } finally {
     await deps.store.release(stored.id);
   }
@@ -1392,6 +1739,10 @@ export const continueDueWorkflowRun = async (
   try {
     const run = await loadInSpace(deps, runId);
     if (run.status === "queued") return await startQueuedRun(deps, run);
+    if (run.status === "waiting" && run.pause?.kind === "sandbox") {
+      if (!run.pause.resumeAt || Date.parse(run.pause.resumeAt) > now) return null;
+      return await continueSandboxStep(deps, run);
+    }
     if (
       run.status !== "waiting" ||
       run.pause?.kind !== "wait" ||
@@ -1462,7 +1813,10 @@ export const failWorkflowRunFromHost = async (
 export const resumeElapsedWorkflowRuns = async (
   deps: WorkflowRuntimeDeps,
 ): Promise<ResumeElapsedWorkflowRunsOutput> => {
-  const due = await deps.store.listElapsedWaits(deps.spaceId, deps.now());
+  // Sandboxed code is not a Wait: the scheduler checks on it, and it cannot be hurried.
+  const due = (await deps.store.listElapsedWaits(deps.spaceId, deps.now())).filter(
+    (run) => run.pause?.kind === "wait",
+  );
   const runs: WorkflowRun[] = [];
   const failed: ResumeElapsedWorkflowRunsOutput["failed"] = [];
   for (const run of due) {

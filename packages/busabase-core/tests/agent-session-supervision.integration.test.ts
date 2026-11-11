@@ -1,5 +1,9 @@
 import type { Stream } from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
+import {
+  createAgentPromptEnvelope,
+  createPromptResourceContext,
+} from "busabase-contract/domains/agents/prompt-context";
 import type { AgentSessionEventVO } from "busabase-contract/domains/agents/types";
 import { eq, inArray } from "drizzle-orm";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -77,6 +81,7 @@ interface ReceiptFixture {
 }
 
 interface EndpointOptions {
+  embeddedContext?: boolean;
   configOptions?: acp.SessionConfigOption[];
   modes?: acp.SessionModeState;
   loadSession?: boolean;
@@ -110,6 +115,7 @@ function endpoint(options: EndpointOptions, ordinal: number) {
   const creationEntered = gate();
   const loadingEntered = gate();
   const prompts: string[] = [];
+  const promptContents: acp.ContentBlock[][] = [];
   const decisions: acp.RequestPermissionOutcome[] = [];
   const cancellations: string[] = [];
   const loadedIds: string[] = [];
@@ -125,6 +131,7 @@ function endpoint(options: EndpointOptions, ordinal: number) {
     .onRequest(acp.methods.agent.initialize, async () => ({
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: {
+        promptCapabilities: { embeddedContext: options.embeddedContext ?? false },
         loadSession: options.loadSession !== false,
         ...(options.eventStream === false
           ? {}
@@ -275,6 +282,7 @@ function endpoint(options: EndpointOptions, ordinal: number) {
       return {};
     })
     .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
+      promptContents.push(structuredClone(ctx.params.prompt));
       const text = ctx.params.prompt.find((block) => block.type === "text");
       prompts.push(text?.type === "text" ? text.text : "");
       if (options.permission) {
@@ -319,6 +327,7 @@ function endpoint(options: EndpointOptions, ordinal: number) {
     creationEntered,
     loadingEntered,
     prompts,
+    promptContents,
     decisions,
     cancellations,
     loadedIds,
@@ -471,6 +480,86 @@ describe("session supervision through real manager, journals, ACP and PGLite", (
       ],
     },
   ];
+
+  it.each([undefined, "https://busabase.test"])(
+    "dispatches saved Cloud scenario context once when the background origin is %s",
+    async (backgroundOrigin) => {
+      const cloudScope = { ...scope, spaceId: "org_prompt_context_origin" };
+      const pageOrigin = "https://vikadata.busabase.test";
+      const runCloud = <T>(operation: () => Promise<T>) =>
+        runWithBusabaseContext(
+          { db, ...cloudScope, isSpaceManager: true, embedOrigin: pageOrigin },
+          operation,
+        );
+      await stopAgentSessionSupervisorHost();
+      startAgentSessionSupervisorHost({
+        database: async () => db,
+        runAs: (context, operation) =>
+          runWithBusabaseContext(
+            {
+              db,
+              ...context,
+              actorId: context.actorId ?? undefined,
+              isSpaceManager: true,
+              embedOrigin: backgroundOrigin,
+            },
+            operation,
+          ),
+      });
+      optionsQueue.push({ embeddedContext: true });
+      const session = await runCloud(() =>
+        createAgentSession({ slug: "buda:supervision-fixture", spaceId: cloudScope.spaceId }),
+      );
+      sessionIds.push(session.id);
+      const context = createPromptResourceContext(
+        createAgentPromptEnvelope({
+          scenario: { id: "community-ops", title: "Community Ops" },
+          target: { nodeId: "descriptive-skill", nodeName: "Community Ops", nodeType: "skill" },
+          source: { origin: pageOrigin, edition: "cloud", spaceId: cloudScope.spaceId },
+          segments: [{ kind: "task", text: "Keep the complete scenario. 保留全文  \nNext line." }],
+        }),
+        "supervised-scenario-context",
+      );
+      const commandId = "cmd_supervised_scenario_context";
+      const send = () =>
+        runCloud(() =>
+          promptAgentSession(session.id, "Go", undefined, {
+            commandId,
+            resourceContext: [context],
+          }),
+        );
+      await send();
+      await vi.waitFor(
+        async () => {
+          await wakeAgentSessionSupervisor();
+          const commands = await runCloud(() => loadSessionCommands(session.id, cloudScope));
+          expect(commands.find((command) => command.commandId === commandId)?.state).toBe(
+            "completed",
+          );
+        },
+        { timeout: 8_000, interval: 25 },
+      );
+      await send();
+      await wakeAgentSessionSupervisor();
+      const sent = endpoints.flatMap((connected) => connected.promptContents);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toEqual([
+        { type: "text", text: "Go" },
+        {
+          type: "resource",
+          resource: { uri: context.uri, mimeType: "text/plain", text: context.text },
+          _meta: { "acp-ui.resourceContext": { id: context.id, name: context.name } },
+        },
+      ]);
+      const events = await runCloud(() => loadSessionEvents(session.id, -1));
+      expect(updates(events, "user_message")).toHaveLength(1);
+      expect(updates(events, "user_message")[0]?.acpUpdate).toMatchObject({
+        text: "Go",
+        resourceContext: [context],
+        commandId,
+      });
+    },
+  );
 
   it.each([
     { configId: "model", value: "fast", previous: "balanced", property: "modelOption" },

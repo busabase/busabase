@@ -113,6 +113,67 @@ export const resolveEngineWithPlan = (
   return { kind: "unavailable" };
 };
 
+/**
+ * Why a run did not land on the engine its `airapp.json` prefers.
+ *
+ * - `plan`: the deployment has it, this space's plan leaves it out (a Free
+ *   space on Busabase Cloud and `preferredEngine: "site"`).
+ * - `deployment`: this deployment does not offer it at all.
+ * - `runtime`: offered, but it cannot execute this app's runtime.
+ */
+export type AirAppPreferredEngineFallbackReason = "plan" | "deployment" | "runtime";
+
+export interface AirAppPreferredEngineFallback {
+  /** What `airapp.json` asked for. */
+  preferred: AirAppRunnerKind;
+  /** What the run actually uses. */
+  engine: AirAppRunnerKind;
+  reason: AirAppPreferredEngineFallbackReason;
+}
+
+/**
+ * The preference a run set aside, or `null` when there is none to report.
+ *
+ * A preference is advisory, so a run quietly moves to an engine that can run
+ * the app. Quietly used to mean invisibly: on a Free space an app preferring
+ * `site` ran in the browser while neither the log nor the settings dialog said
+ * so, and the dialog went on naming the Website. Callers pass only the case
+ * where the FILE decided — a person's own override is reported separately.
+ */
+export const resolvePreferredEngineFallback = ({
+  preferred,
+  engine,
+  offer,
+}: {
+  preferred: AirAppRunnerKind | undefined;
+  engine: AirAppRunnerKind;
+  offer: AirAppEngineOffer;
+}): AirAppPreferredEngineFallback | null => {
+  if (!preferred || preferred === engine) return null;
+  const reason: AirAppPreferredEngineFallbackReason = offer.locked.includes(preferred)
+    ? "plan"
+    : offer.available.includes(preferred)
+      ? "runtime"
+      : "deployment";
+  return { preferred, engine, reason };
+};
+
+/**
+ * The Logs-tab line for a set-aside preference. English like every other
+ * `[busabase]` line: it is a record to quote in a bug report, not UI copy.
+ */
+export const preferredEngineFallbackLogLine = (
+  fallback: AirAppPreferredEngineFallback,
+  runtime: AirAppRuntimeKind,
+): string => {
+  const why = {
+    plan: "this space's plan does not include it",
+    deployment: "this deployment does not offer it",
+    runtime: `it cannot run a "${runtime}" app`,
+  }[fallback.reason];
+  return `[busabase] airapp.json prefers engine "${fallback.preferred}", but ${why}; running on engine "${fallback.engine}" instead\n`;
+};
+
 /** `data.reason` on the server's refusal, so a client can tell it apart from any other failure. */
 export const AIRAPP_ENGINE_PLAN_REQUIRED = "AIRAPP_ENGINE_PLAN_REQUIRED" as const;
 

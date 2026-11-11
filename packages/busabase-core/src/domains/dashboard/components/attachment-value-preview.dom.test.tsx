@@ -170,7 +170,7 @@ describe("attachment field previews", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("falls back to the current attachment when an open selection is removed", () => {
+  it("falls back to the current attachment when an open selection is removed", async () => {
     const result = show([file("first"), file("removed")], false);
     fireEvent.click(screen.getByRole("link", { name: "removed.png" }));
     result.rerender(
@@ -181,9 +181,9 @@ describe("attachment field previews", () => {
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "first.png" })).toBeTruthy();
     expect(within(dialog).queryByRole("img", { name: "removed.png" })).toBeNull();
-    expect(within(dialog).getByRole("img", { name: "first.png" }).getAttribute("src")).toBe(
-      "https://example.com/first",
-    );
+    expect(
+      (await within(dialog).findByRole("img", { name: "first.png" })).getAttribute("src"),
+    ).toBe("https://example.com/first");
   });
 
   it("keeps failed grid files identifiable and retries without opening the preview", () => {
@@ -223,7 +223,10 @@ describe("attachment field previews", () => {
       expect(within(dialog).getByRole("button", { name: item.fileName })).toBeTruthy();
     }
     fireEvent.click(within(dialog).getByRole("button", { name: "report.pdf" }));
-    expect(dialog.querySelector("iframe")?.getAttribute("src")).toBe(files[0]?.url);
+    expect(dialog.querySelector('[data-previewfile-type="pdf"]')).toBeTruthy();
+    expect(within(dialog).getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe(
+      files[0]?.url,
+    );
   });
 
   it("opens a picture without navigating and returns focus after close", async () => {
@@ -233,9 +236,9 @@ describe("attachment field previews", () => {
     expect(fireEvent.click(opener)).toBe(false);
     await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("img", { name: "photo.png" }).getAttribute("draggable")).toBe(
-      "false",
-    );
+    expect(
+      (await within(dialog).findByRole("img", { name: "photo.png" })).getAttribute("draggable"),
+    ).toBe("false");
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(opener));

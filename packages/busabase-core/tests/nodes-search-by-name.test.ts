@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * `nodes.searchByName` — the cheap, name/slug-only lookup backing the
  * dashboard quick-jump palette's `KnownNode` cache-miss path. Covers:
@@ -42,7 +43,7 @@ describe("nodes.searchByName", () => {
     // before a `file` create operation is accepted (mirrors
     // search-asset-content.test.ts's recipe).
     const content = "roadmap file body";
-    const hash = `sha256:${"a".repeat(64)}`;
+    const hash = `sha256:${createHash("sha256").update(content).digest("hex")}`;
     const sizeBytes = Buffer.byteLength(content, "utf8");
     const uploadReq = await raw.assets.createUploadUrl({
       fileName: "roadmap.txt",

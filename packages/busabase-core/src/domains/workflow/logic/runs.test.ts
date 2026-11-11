@@ -7,7 +7,10 @@ import {
   WORKFLOW_FIND_RECORDS_ACTION,
   WORKFLOW_MAX_QUEUED_RUNS,
   WORKFLOW_READ_RECORD_ACTION,
+  WORKFLOW_SANDBOX_POLL_MS,
+  WORKFLOW_SANDBOX_TIMEOUT_MS,
   WORKFLOW_UPDATE_RECORD_ACTION,
+  type WorkflowRun,
 } from "busabase-contract/domains/workflow/run";
 import { describe, expect, it } from "vitest";
 import type { BusabaseNotificationEvent } from "../../../context";
@@ -19,13 +22,17 @@ import {
   decideWorkflowRun,
   failWorkflowRunFromHost,
   getWorkflowRun,
+  listWaitingWorkflowRuns,
   listWorkflowRuns,
   resumeElapsedWorkflowRuns,
   resumeWorkflowRun,
+  retryWorkflowRun,
   startWorkflowRun,
   type WorkflowAccessLevel,
   type WorkflowFunctionCallResult,
   type WorkflowRuntimeDeps,
+  type WorkflowSandboxCall,
+  type WorkflowSandboxPoll,
 } from "./runs";
 
 const at = (x: number, y: number) => ({ x, y });
@@ -119,16 +126,27 @@ const harness = (document = freshnessGraph()) => {
   /** Whether the caller is one of an approval step's named approvers. */
   let namedApprover = false;
   const approverChecks: string[][] = [];
+  /** Workflows the caller cannot read at all, and the name each workflow shows in lists. */
+  const hiddenWorkflows = new Set<string>();
+  const workflowNames: Record<string, string> = {};
   const notifications: BusabaseNotificationEvent[] = [];
   const updates: { recordId: string; fields: Record<string, unknown>; message: string }[] = [];
   let updateOutcome: "merged" | "review" | "error" = "merged";
   const creates: { baseId: string; fields: Record<string, unknown>; message: string }[] = [];
   const deletes: string[] = [];
+  /** What the next Function steps answer, in order, and how many ran. */
+  const functionOutcomes: WorkflowFunctionCallResult[] = [];
+  let functionCalls = 0;
   let recordGone = false;
   /** What a Find records step finds, and how many matched in all (past its limit too). */
   let found: LiveRecord[] = [];
   let foundTotal: number | null = null;
   const finds: { baseId: string; viewId: string | null; limit: number }[] = [];
+  /** The fake sandbox: what was started, what each poll answers, what was removed. */
+  const sandboxStarts: WorkflowSandboxCall[] = [];
+  const sandboxStops: string[] = [];
+  let sandboxAnswer: WorkflowSandboxPoll = { done: false };
+  let sandboxRefusal: string | null = null;
   const deps: WorkflowRuntimeDeps = {
     spaceId: "spc_test",
     actorId: "usr_ada",
@@ -162,12 +180,12 @@ const harness = (document = freshnessGraph()) => {
     },
     authorizeWorkflow: async (nodeId, level) => {
       access.push({ nodeId, level });
-      if (grant === null)
+      if (grant === null || hiddenWorkflows.has(nodeId))
         throw new ORPCError("NOT_FOUND", { message: `Node not found: ${nodeId}` });
       if (level === "write" && grant === "read") {
         throw new ORPCError("FORBIDDEN", { message: "Requires write access on this node" });
       }
-      return "nod_workflow";
+      return nodeId;
     },
     canDriveWorkflow: async () => grant === "write",
     createRecord: async (baseId, fields, message) => {
@@ -204,11 +222,26 @@ const harness = (document = freshnessGraph()) => {
       return namedApprover;
     },
     loadDocument: async () => current,
+    describeWorkflow: async (nodeId) => ({ name: workflowNames[nodeId] ?? "Lead handoff" }),
     executeFunction: async () => {
-      throw new Error("executeFunction was not expected");
+      functionCalls += 1;
+      const next = functionOutcomes.shift();
+      if (!next) throw new Error("executeFunction was not expected");
+      return next;
     },
     sendWebhook: async () => {
       throw new Error("sendWebhook was not expected");
+    },
+    sandbox: {
+      start: async (call) => {
+        if (sandboxRefusal) throw new Error(sandboxRefusal);
+        sandboxStarts.push(structuredClone(call));
+        return { sandboxId: `sbx_${sandboxStarts.length}` };
+      },
+      poll: async () => structuredClone(sandboxAnswer),
+      stop: async (sandboxId) => {
+        sandboxStops.push(sandboxId);
+      },
     },
   };
   return {
@@ -222,11 +255,23 @@ const harness = (document = freshnessGraph()) => {
       namedApprover = value;
     },
     approverChecks,
+    hiddenWorkflows,
+    workflowNames,
     notifications,
     updates,
     creates,
     deletes,
+    functionOutcomes,
+    functionCalls: () => functionCalls,
     finds,
+    sandboxStarts,
+    sandboxStops,
+    answerSandbox: (answer: WorkflowSandboxPoll) => {
+      sandboxAnswer = answer;
+    },
+    refuseSandbox: (message: string | null) => {
+      sandboxRefusal = message;
+    },
     setFound: (records: LiveRecord[], total?: number) => {
       found = records;
       foundTotal = total ?? null;
@@ -466,6 +511,38 @@ const webhookGraph = (url: string, errorPolicy: "stop" | "continue" = "stop") =>
   });
 
 describe("workflow webhook steps", () => {
+  it("hands the step's signing secret to the sender and keeps it out of what the run stores", async () => {
+    const graph = webhookGraph("https://hooks.example.com/enrich");
+    const hook = graph.nodes.find((node) => node.id === "hook");
+    if (hook?.kind === "webhook") hook.signingSecret = "whsec_never_stored_in_a_run_0123";
+    const { deps, live } = harness(graph);
+    const sent: Array<Parameters<WorkflowRuntimeDeps["sendWebhook"]>[0]> = [];
+    deps.sendWebhook = async (call) => {
+      sent.push(call);
+      return { ok: true, status: 202, body: { accepted: true }, durationMs: 1 };
+    };
+
+    const finished = await startWorkflowRun(deps, {
+      nodeId: "nod_workflow",
+      recordId: live.recordId,
+    });
+
+    expect(sent[0]?.signingSecret).toBe("whsec_never_stored_in_a_run_0123");
+    expect(JSON.stringify(finished)).not.toContain("whsec_never_stored_in_a_run_0123");
+    expect(JSON.stringify(sent[0]?.body)).not.toContain("whsec_never_stored_in_a_run_0123");
+  });
+
+  it("sends no secret for a step that does not sign", async () => {
+    const { deps, live } = harness(webhookGraph("https://hooks.example.com/enrich"));
+    const sent: Array<Parameters<WorkflowRuntimeDeps["sendWebhook"]>[0]> = [];
+    deps.sendWebhook = async (call) => {
+      sent.push(call);
+      return { ok: true, status: 202, body: { accepted: true }, durationMs: 1 };
+    };
+    await startWorkflowRun(deps, { nodeId: "nod_workflow", recordId: live.recordId });
+    expect(sent[0]?.signingSecret).toBeNull();
+  });
+
   it("sends the run's data and branches on the response", async () => {
     const { deps, live } = harness(webhookGraph("https://hooks.example.com/enrich"));
     const sent: Array<Parameters<WorkflowRuntimeDeps["sendWebhook"]>[0]> = [];
@@ -1975,5 +2052,601 @@ describe("find records", () => {
     expect(run.status).toBe("failed");
     expect(run.error).toContain("needs a Base");
     expect(finds).toEqual([]);
+  });
+});
+
+describe("runs waiting for the caller, across workflows", () => {
+  const approvalGraph = (approver = "", allowAgents = false) =>
+    parseWorkflowDocument({
+      version: 2,
+      nodes: [
+        { id: "trigger", kind: "trigger", label: "Start", position: at(0, 0) },
+        {
+          id: "review",
+          kind: "approval",
+          label: "Sign off",
+          position: at(1, 0),
+          approver,
+          allowAgents,
+        },
+        { id: "end", kind: "end", label: "End", position: at(2, 0) },
+      ],
+      edges: [
+        { id: "e1", source: "trigger", target: "review" },
+        { id: "e2", source: "review", target: "end", outcome: "approved" },
+      ],
+      settings: { concurrency: 20 },
+    });
+
+  /** Start a run and move it into another workflow of the space, as if it had been started there. */
+  const startIn = async (
+    h: ReturnType<typeof harness>,
+    workflowNodeId: string,
+    startedAt: string,
+  ): Promise<WorkflowRun> => {
+    const run = await startWorkflowRun(h.deps, { nodeId: "nod_workflow" });
+    const moved = { ...run, workflowNodeId, startedAt, updatedAt: startedAt };
+    await h.deps.store.save(moved);
+    return moved;
+  };
+
+  it("lists each run the caller may decide, newest first, with its workflow and step", async () => {
+    const h = harness(approvalGraph());
+    h.workflowNames.nod_sales = "Sales handoff";
+    h.workflowNames.nod_hiring = "Hiring offer";
+    const older = await startIn(h, "nod_sales", "2026-10-29T08:00:00.000Z");
+    const newer = await startIn(h, "nod_hiring", "2026-10-29T09:00:00.000Z");
+
+    const waiting = await listWaitingWorkflowRuns(h.deps, {});
+
+    expect(waiting.items.map((item) => item.run.id)).toEqual([newer.id, older.id]);
+    expect(waiting.items[0]).toMatchObject({ workflowName: "Hiring offer", stepLabel: "Sign off" });
+    expect(waiting.items[1]).toMatchObject({
+      workflowName: "Sales handoff",
+      stepLabel: "Sign off",
+    });
+    expect(waiting.actorNames).toEqual({ usr_ada: "Name of usr_ada" });
+  });
+
+  it("orders runs across workflows by recency, not workflow by workflow", async () => {
+    // The store hands runs back newest first, but the answer is built one
+    // workflow at a time: without a final sort, every run of the workflow that
+    // happens to come first would be listed before another workflow's newer one.
+    const h = harness(approvalGraph(""));
+    const oldest = await startIn(h, "nod_sales", "2026-10-01T08:00:00.000Z");
+    const middle = await startIn(h, "nod_hiring", "2026-10-03T08:00:00.000Z");
+    const newest = await startIn(h, "nod_sales", "2026-10-05T08:00:00.000Z");
+
+    const waiting = await listWaitingWorkflowRuns(h.deps, {});
+
+    expect(waiting.items.map((item) => item.run.id)).toEqual([newest.id, middle.id, oldest.id]);
+  });
+
+  it("leaves out runs that are not waiting on an approval", async () => {
+    const h = harness(freshnessGraph());
+    const paused = await startWorkflowRun(h.deps, {
+      nodeId: "nod_workflow",
+      recordId: h.live.recordId,
+    });
+    expect(paused.status).toBe("waiting");
+
+    expect((await listWaitingWorkflowRuns(h.deps, {})).items).toEqual([]);
+  });
+
+  it("lists a named step only for a person it names, even one who can edit the workflow", async () => {
+    const h = harness(approvalGraph("lead@example.com"));
+    await startIn(h, "nod_sales", "2026-10-29T08:00:00.000Z");
+    expect(h.deps.actorId).toBe("usr_ada");
+
+    // An editor who is not named: nothing to decide.
+    h.setNamedApprover(false);
+    expect((await listWaitingWorkflowRuns(h.deps, {})).items).toEqual([]);
+    // The named approver sees it, though they can only read the workflow.
+    h.setNamedApprover(true);
+    h.setGrant("read");
+    expect((await listWaitingWorkflowRuns(h.deps, {})).items).toHaveLength(1);
+  });
+
+  it("lists a step that names nobody for anyone who can edit, and not for a reader", async () => {
+    const h = harness(approvalGraph(""));
+    await startIn(h, "nod_sales", "2026-10-29T08:00:00.000Z");
+
+    expect((await listWaitingWorkflowRuns(h.deps, {})).items).toHaveLength(1);
+    h.setGrant("read");
+    expect((await listWaitingWorkflowRuns(h.deps, {})).items).toEqual([]);
+  });
+
+  it("never shows a run from a workflow the caller cannot read", async () => {
+    const h = harness(approvalGraph(""));
+    h.workflowNames.nod_secret = "Board matters";
+    await startIn(h, "nod_secret", "2026-10-29T10:00:00.000Z");
+    await startIn(h, "nod_sales", "2026-10-29T08:00:00.000Z");
+    h.hiddenWorkflows.add("nod_secret");
+
+    const waiting = await listWaitingWorkflowRuns(h.deps, {});
+
+    expect(waiting.items.map((item) => item.workflowName)).toEqual(["Lead handoff"]);
+    expect(JSON.stringify(waiting)).not.toContain("Board matters");
+  });
+
+  it("shows an agent only the steps that let agents decide", async () => {
+    const closed = harness(approvalGraph("", false));
+    await startIn(closed, "nod_sales", "2026-10-29T08:00:00.000Z");
+    closed.deps.agent = { apiKeyId: "key_1", apiKeyName: "Bot", channel: "mcp", ceiling: "write" };
+    expect((await listWaitingWorkflowRuns(closed.deps, {})).items).toEqual([]);
+
+    const open = harness(approvalGraph("", true));
+    await startIn(open, "nod_sales", "2026-10-29T08:00:00.000Z");
+    open.deps.agent = { apiKeyId: "key_1", apiKeyName: "Bot", channel: "mcp", ceiling: "write" };
+    expect((await listWaitingWorkflowRuns(open.deps, {})).items).toHaveLength(1);
+  });
+
+  it("keeps to the limit, newest first", async () => {
+    const h = harness(approvalGraph(""));
+    for (let day = 1; day <= 5; day += 1) {
+      await startIn(h, `nod_w${day}`, `2026-10-0${day}T08:00:00.000Z`);
+    }
+
+    const waiting = await listWaitingWorkflowRuns(h.deps, { limit: 2 });
+
+    expect(waiting.items.map((item) => item.run.startedAt.slice(0, 10))).toEqual([
+      "2026-10-05",
+      "2026-10-04",
+    ]);
+  });
+});
+
+describe("retry from the failed step", () => {
+  const ok = (result: unknown): WorkflowFunctionCallResult => ({
+    ok: true,
+    ruleId: "",
+    functionName: "",
+    result,
+    logs: "",
+  });
+  const down: WorkflowFunctionCallResult = { ok: false, message: "partner is down" };
+
+  /** Trigger → create a record → call the partner (a Function step) → End. */
+  const partnerGraph = (concurrency = 1) =>
+    parseWorkflowDocument({
+      version: 2,
+      nodes: [
+        { id: "trigger", kind: "trigger", label: "Start", position: at(0, 0) },
+        {
+          id: "log",
+          kind: "action",
+          label: "Log the order",
+          position: at(1, 0),
+          actionName: WORKFLOW_CREATE_RECORD_ACTION,
+          baseId: "bas_log",
+          fields: { title: "order" },
+        },
+        {
+          id: "partner",
+          kind: "function",
+          label: "Call the partner",
+          position: at(2, 0),
+          code: "return 1",
+        },
+        { id: "end", kind: "end", label: "End", position: at(3, 0) },
+      ],
+      edges: [
+        { id: "e1", source: "trigger", target: "log" },
+        { id: "e2", source: "log", target: "partner", outcome: "success" },
+        { id: "e3", source: "partner", target: "end", outcome: "success" },
+      ],
+      settings: { concurrency },
+    });
+
+  const failedAtPartner = async (graph = partnerGraph()) => {
+    const h = harness(graph);
+    h.functionOutcomes.push(down);
+    const failed = await startWorkflowRun(h.deps, {
+      nodeId: "nod_workflow",
+      payload: { order: 7 },
+    });
+    expect(failed.status).toBe("failed");
+    expect(failed.cursorNodeId).toBe("partner");
+    return { ...h, failed };
+  };
+
+  it("runs again from the step that failed, and not the steps before it", async () => {
+    const { deps, failed, creates, functionOutcomes, functionCalls } = await failedAtPartner();
+    expect(creates).toHaveLength(1);
+    functionOutcomes.push(ok({ accepted: true }));
+
+    const retried = await retryWorkflowRun(deps, { runId: failed.id });
+
+    expect(retried.status).toBe("completed");
+    expect(retried.id).not.toBe(failed.id);
+    expect(retried.payload).toMatchObject({ order: 7, retryOf: failed.id });
+    // The step before it did not run again, and its output is the failed run's, unchanged.
+    expect(creates).toHaveLength(1);
+    expect(retried.outputs.log).toEqual(failed.outputs.log);
+    expect(retried.outputs.trigger).toEqual(failed.outputs.trigger);
+    expect(retried.outputs.partner?.data).toMatchObject({ accepted: true, executed: true });
+    expect(functionCalls()).toBe(2);
+    // The failed run is left as it was, plus a pointer to the retry.
+    const after = await deps.store.get(failed.id);
+    expect(after).toMatchObject({ status: "failed", error: failed.error });
+    expect(after?.payload.retriedAs).toBe(retried.id);
+  });
+
+  it("acts as whoever retries, not whoever started the failed run", async () => {
+    const { deps, failed, functionOutcomes } = await failedAtPartner();
+    functionOutcomes.push(ok(1));
+    deps.actorId = "usr_bea";
+
+    const retried = await retryWorkflowRun(deps, { runId: failed.id });
+
+    expect(retried.startedBy).toBe("usr_bea");
+    expect(failed.startedBy).toBe("usr_ada");
+  });
+
+  it("retries a run once: a second try says so and sends nothing again", async () => {
+    const { deps, failed, functionOutcomes, functionCalls } = await failedAtPartner();
+    functionOutcomes.push(ok(1), ok(2));
+    const retried = await retryWorkflowRun(deps, { runId: failed.id });
+
+    await expect(retryWorkflowRun(deps, { runId: failed.id })).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: `This run was already retried as ${retried.id}`,
+    });
+    expect(functionCalls()).toBe(2);
+  });
+
+  it("lets a retry that fails again be retried in turn", async () => {
+    const { deps, failed, functionOutcomes } = await failedAtPartner();
+    functionOutcomes.push(down, ok(1));
+    const second = await retryWorkflowRun(deps, { runId: failed.id });
+    expect(second.status).toBe("failed");
+    expect(second.payload.retryOf).toBe(failed.id);
+
+    const third = await retryWorkflowRun(deps, { runId: second.id });
+
+    expect(third.status).toBe("completed");
+    expect(third.payload.retryOf).toBe(second.id);
+  });
+
+  it("refuses a run that has not failed", async () => {
+    const h = harness(partnerGraph());
+    h.functionOutcomes.push(ok(1));
+    const done = await startWorkflowRun(h.deps, { nodeId: "nod_workflow" });
+    expect(done.status).toBe("completed");
+
+    await expect(retryWorkflowRun(h.deps, { runId: done.id })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Only a failed run can be retried",
+    });
+  });
+
+  it("refuses when the step it stopped on is gone from the workflow", async () => {
+    const { deps, failed, replaceDocument } = await failedAtPartner();
+    replaceDocument(
+      parseWorkflowDocument({
+        version: 2,
+        nodes: [
+          { id: "trigger", kind: "trigger", label: "Start", position: at(0, 0) },
+          { id: "end", kind: "end", label: "End", position: at(1, 0) },
+        ],
+        edges: [{ id: "e1", source: "trigger", target: "end" }],
+        settings: {},
+      }),
+    );
+
+    await expect(retryWorkflowRun(deps, { runId: failed.id })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: expect.stringContaining('Step "partner" is no longer in this workflow'),
+    });
+    const listed = await listWorkflowRuns(deps, { nodeId: "nod_workflow" });
+    expect(listed.retryableRunIds).toEqual([]);
+  });
+
+  it("runs the step with its current settings, so a fix to the step takes effect", async () => {
+    const { deps, failed, functionOutcomes, replaceDocument, functionCalls } =
+      await failedAtPartner();
+    const fixed = partnerGraph();
+    const partner = fixed.nodes.find((node) => node.id === "partner");
+    if (partner?.kind === "function") partner.code = "return 2";
+    replaceDocument(fixed);
+    functionOutcomes.push(ok(2));
+
+    const retried = await retryWorkflowRun(deps, { runId: failed.id });
+
+    expect(retried.status).toBe("completed");
+    expect(functionCalls()).toBe(2);
+  });
+
+  it("refuses a run that failed after its step finished, where retrying would only fail the same way", async () => {
+    const h = harness(
+      parseWorkflowDocument({
+        version: 2,
+        nodes: [
+          { id: "trigger", kind: "trigger", label: "Start", position: at(0, 0) },
+          {
+            id: "check",
+            kind: "condition",
+            label: "Always true",
+            position: at(1, 0),
+            expression: "true == true",
+          },
+          { id: "end", kind: "end", label: "End", position: at(2, 0) },
+        ],
+        // Only a `false` branch exists, so the true answer has nowhere to go.
+        edges: [
+          { id: "e1", source: "trigger", target: "check" },
+          { id: "e2", source: "check", target: "end", outcome: "false" },
+        ],
+        settings: {},
+      }),
+    );
+    const failed = await startWorkflowRun(h.deps, { nodeId: "nod_workflow" });
+    expect(failed.status).toBe("failed");
+    expect(failed.error).toContain("No branch");
+
+    await expect(retryWorkflowRun(h.deps, { runId: failed.id })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "This run did not stop on a step that can run again",
+    });
+  });
+
+  it("needs write on the workflow", async () => {
+    const { deps, failed, setGrant, functionCalls } = await failedAtPartner();
+    setGrant("read");
+
+    await expect(retryWorkflowRun(deps, { runId: failed.id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    expect(functionCalls()).toBe(1);
+  });
+
+  it("waits its turn when the workflow is at its concurrency, keeping the earlier steps", async () => {
+    const { deps, failed, creates, functionOutcomes } = await failedAtPartner();
+    // Another run of the workflow is executing a step right now.
+    await deps.store.insert({ ...failed, id: "wfr_busy", status: "running", error: null }, 0);
+    functionOutcomes.push(ok(1));
+
+    const retried = await retryWorkflowRun(deps, { runId: failed.id });
+
+    expect(retried.status).toBe("queued");
+    expect(retried.cursorNodeId).toBe("partner");
+    expect(retried.outputs.log).toEqual(failed.outputs.log);
+    expect(creates).toHaveLength(1);
+
+    await deps.store.save({ ...(await deps.store.get("wfr_busy")), status: "cancelled" } as never);
+    const started = await continueDueWorkflowRun(deps, retried.id);
+    expect(started?.status).toBe("completed");
+    expect(creates).toHaveLength(1);
+  });
+
+  it("keeps retry and approval permissions separate when both kinds of run are listed", async () => {
+    const graph = partnerGraph(5);
+    graph.nodes.push({
+      id: "review",
+      kind: "approval",
+      label: "Sign off",
+      description: "",
+      position: at(3, 0),
+      approver: "lead@example.com",
+      allowAgents: false,
+    });
+    graph.edges = [
+      ...graph.edges.filter((edge) => edge.target !== "end"),
+      { id: "review-in", source: "partner", target: "review", label: "", outcome: "success" },
+      { id: "review-out", source: "review", target: "end", label: "", outcome: "approved" },
+    ];
+    const h = await failedAtPartner(graph);
+    h.functionOutcomes.push(ok(1));
+    const pending = await startWorkflowRun(h.deps, { nodeId: "nod_workflow" });
+    expect(pending.status).toBe("waiting_approval");
+
+    const list = () => listWorkflowRuns(h.deps, { nodeId: "nod_workflow" });
+    const forEditor = await list();
+    expect(forEditor.retryableRunIds).toEqual([h.failed.id]);
+    expect(forEditor.decidableRunIds).toEqual([]);
+    expect((await listWaitingWorkflowRuns(h.deps, {})).items).toEqual([]);
+
+    h.setNamedApprover(true);
+    const forNamedEditor = await list();
+    expect(forNamedEditor.retryableRunIds).toEqual([h.failed.id]);
+    expect(forNamedEditor.decidableRunIds).toEqual([pending.id]);
+
+    h.setGrant("read");
+    const forNamedReader = await list();
+    expect(forNamedReader.retryableRunIds).toEqual([]);
+    expect(forNamedReader.decidableRunIds).toEqual([pending.id]);
+    expect((await listWaitingWorkflowRuns(h.deps, {})).items.map((item) => item.run.id)).toEqual([
+      pending.id,
+    ]);
+  });
+
+  it("marks only runs that can run again as retryable in the list", async () => {
+    const { deps, failed, functionOutcomes, setGrant } = await failedAtPartner();
+    let listed = await listWorkflowRuns(deps, { nodeId: "nod_workflow" });
+    expect(listed.retryableRunIds).toEqual([failed.id]);
+
+    setGrant("read");
+    listed = await listWorkflowRuns(deps, { nodeId: "nod_workflow" });
+    expect(listed.retryableRunIds).toEqual([]);
+
+    setGrant("write");
+    functionOutcomes.push(ok(1));
+    await retryWorkflowRun(deps, { runId: failed.id });
+    listed = await listWorkflowRuns(deps, { nodeId: "nod_workflow" });
+    expect(listed.retryableRunIds).toEqual([]);
+  });
+});
+
+describe("code in a sandbox", () => {
+  /** Trigger → Function in a sandbox → Condition on what it returned → End. */
+  const sandboxGraph = (errorPolicy: "stop" | "continue" = "stop") =>
+    parseWorkflowDocument({
+      version: 2,
+      nodes: [
+        { id: "trigger", kind: "trigger", label: "Start", position: at(0, 0) },
+        {
+          id: "decrypt",
+          kind: "function",
+          label: "Decrypt",
+          position: at(1, 0),
+          code: "import json\nreturn {'text': 'hi'}",
+          runIn: "sandbox",
+          language: "python",
+          packages: "pycryptodome",
+        },
+        {
+          id: "check",
+          kind: "condition",
+          label: "Got text?",
+          position: at(2, 0),
+          expression: 'steps.decrypt.text == "hi"',
+        },
+        { id: "yes", kind: "end", label: "Yes", position: at(3, 0), outcome: "yes" },
+        { id: "no", kind: "end", label: "No", position: at(3, 1), outcome: "no" },
+      ],
+      edges: [
+        { id: "e1", source: "trigger", target: "decrypt" },
+        { id: "e2", source: "decrypt", target: "check", outcome: "success" },
+        { id: "e3", source: "check", target: "yes", outcome: "true" },
+        { id: "e4", source: "check", target: "no", outcome: "false" },
+      ],
+      settings: { errorPolicy },
+    });
+
+  it("starts the code on a machine and waits for it, without holding the request", async () => {
+    const { deps, sandboxStarts } = harness(sandboxGraph());
+
+    const run = await startWorkflowRun(deps, { nodeId: "nod_workflow", payload: { body: "x" } });
+
+    expect(run.status).toBe("waiting");
+    expect(run.pause).toMatchObject({
+      kind: "sandbox",
+      nodeId: "decrypt",
+      sandboxId: "sbx_1",
+      resumeAt: new Date(deps.now() + WORKFLOW_SANDBOX_POLL_MS).toISOString(),
+    });
+    expect(sandboxStarts).toHaveLength(1);
+    expect(sandboxStarts[0]).toMatchObject({
+      stepId: "decrypt",
+      language: "python",
+      packages: "pycryptodome",
+      timeoutMs: WORKFLOW_SANDBOX_TIMEOUT_MS,
+      input: { payload: { body: "x" } },
+    });
+  });
+
+  it("is picked up by the scheduler once its next check is due, like a Wait", async () => {
+    const { deps, now } = harness(sandboxGraph());
+    const started = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+
+    expect((await deps.store.listDue(now(), 10)).map((run) => run.id)).toEqual([]);
+    expect(
+      (await deps.store.listDue(now() + WORKFLOW_SANDBOX_POLL_MS, 10)).map((run) => run.id),
+    ).toEqual([started.id]);
+  });
+
+  it("looks again while the code runs, then carries on with what it returned", async () => {
+    const { deps, sandboxStops, answerSandbox, setNow, now } = harness(sandboxGraph());
+    const started = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+
+    // Not yet due: the scheduler leaves it alone.
+    expect(await continueDueWorkflowRun(deps, started.id)).toBeNull();
+
+    setNow(now() + WORKFLOW_SANDBOX_POLL_MS);
+    const still = await continueDueWorkflowRun(deps, started.id);
+    expect(still?.status).toBe("waiting");
+    expect(Date.parse(still?.pause?.resumeAt ?? "")).toBe(now() + WORKFLOW_SANDBOX_POLL_MS);
+    expect(sandboxStops).toEqual([]);
+
+    answerSandbox({ done: true, ok: true, result: { text: "hi" }, logs: "decrypted" });
+    setNow(now() + WORKFLOW_SANDBOX_POLL_MS);
+    const done = await continueDueWorkflowRun(deps, started.id);
+
+    expect(done?.status).toBe("completed");
+    expect(done?.outputs.decrypt?.data).toMatchObject({
+      text: "hi",
+      result: { text: "hi" },
+      logs: "decrypted",
+      runIn: "sandbox",
+      executed: true,
+    });
+    expect(done?.outputs.yes).toBeDefined();
+    expect(sandboxStops).toEqual(["sbx_1"]);
+  });
+
+  it("fails the run with the code's own error, and removes the machine", async () => {
+    const { deps, sandboxStops, answerSandbox, setNow, now } = harness(sandboxGraph());
+    const started = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+    answerSandbox({ done: true, ok: false, message: "ValueError: bad padding", logs: "" });
+    setNow(now() + WORKFLOW_SANDBOX_POLL_MS);
+
+    const failed = await continueDueWorkflowRun(deps, started.id);
+
+    expect(failed?.status).toBe("failed");
+    expect(failed?.error).toBe('Function step "Decrypt" (decrypt) failed: ValueError: bad padding');
+    expect(sandboxStops).toEqual(["sbx_1"]);
+  });
+
+  it("under error policy continue, records the error and takes the success branch", async () => {
+    const { deps, answerSandbox, setNow, now } = harness(sandboxGraph("continue"));
+    const started = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+    answerSandbox({ done: true, ok: false, message: "boom", logs: "partial" });
+    setNow(now() + WORKFLOW_SANDBOX_POLL_MS);
+
+    const done = await continueDueWorkflowRun(deps, started.id);
+
+    expect(done?.status).toBe("completed");
+    expect(done?.outputs.decrypt?.data).toMatchObject({ error: "boom", executed: false });
+    expect(done?.outputs.no).toBeDefined();
+  });
+
+  it("stops code that runs past its deadline", async () => {
+    const { deps, sandboxStops, setNow, now } = harness(sandboxGraph());
+    const started = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+    setNow(Date.parse(started.pause?.deadlineAt ?? "") + 1);
+
+    const failed = await continueDueWorkflowRun(deps, started.id);
+
+    expect(failed?.status).toBe("failed");
+    expect(failed?.error).toContain(
+      `did not finish within ${WORKFLOW_SANDBOX_TIMEOUT_MS / 60_000} minutes`,
+    );
+    expect(sandboxStops).toEqual(["sbx_1"]);
+    expect(now()).toBeGreaterThan(Date.parse(started.startedAt));
+  });
+
+  it("removes the machine when someone cancels the run", async () => {
+    const { deps, sandboxStops } = harness(sandboxGraph());
+    const started = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+
+    const cancelled = await cancelWorkflowRun(deps, { runId: started.id });
+
+    expect(cancelled.status).toBe("cancelled");
+    expect(sandboxStops).toEqual(["sbx_1"]);
+  });
+
+  it("fails the step, provisioning nothing, when the space may not have a sandbox", async () => {
+    const { deps, refuseSandbox, sandboxStarts } = harness(sandboxGraph());
+    refuseSandbox("Running code in a sandbox needs the Plus plan.");
+
+    const run = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+
+    expect(run.status).toBe("failed");
+    expect(run.error).toBe(
+      'Function step "Decrypt" (decrypt) failed: Running code in a sandbox needs the Plus plan.',
+    );
+    expect(sandboxStarts).toEqual([]);
+  });
+
+  it("is not hurried by resume-elapsed, which only continues Waits", async () => {
+    const { deps, sandboxStops, setNow, now } = harness(sandboxGraph());
+    const started = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+    setNow(now() + WORKFLOW_SANDBOX_POLL_MS * 2);
+
+    const resumed = await resumeElapsedWorkflowRuns(deps);
+
+    expect(resumed).toEqual({ runs: [], failed: [] });
+    expect((await deps.store.get(started.id))?.status).toBe("waiting");
+    expect(sandboxStops).toEqual([]);
   });
 });

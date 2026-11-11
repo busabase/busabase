@@ -188,13 +188,24 @@ interface SecretRule {
 // ~8 rules, deliberately small and high-signal rather than exhaustive. Names
 // only (never the matched substring) are ever surfaced in an error — see
 // `scanForSecrets` below.
+// Exact documentation placeholders, not a general exemption for Markdown or
+// values containing words such as "example". Other token-specific rules still run.
+const GENERIC_KEY_PLACEHOLDERS = [
+  "YOUR_API_KEY_HERE",
+  "__PASTE_YOUR_API_TOKEN_FROM_USER_SETTING__",
+];
+const GENERIC_KEY_ASSIGNMENT_PATTERN = new RegExp(
+  String.raw`(api[_-]?key|secret|token)['"]?\s*[:=]\s*['"](?!(?:${GENERIC_KEY_PLACEHOLDERS.join("|")})['"])[0-9A-Za-z_-]{16,}['"]`,
+  "i",
+);
+
 const SECRET_RULES: SecretRule[] = [
   { name: "aws-access-key", pattern: /(AKIA|ASIA|AGPA|AIDA|AROA)[0-9A-Z]{16}/ },
   { name: "gcp-api-key", pattern: /AIza[0-9A-Za-z\-_]{35}/ },
   { name: "stripe-key", pattern: /sk_(live|test)_[0-9a-zA-Z]{16,}/ },
   {
     name: "generic-api-key-assignment",
-    pattern: /(api[_-]?key|secret|token)['"]?\s*[:=]\s*['"][0-9A-Za-z_-]{16,}['"]/i,
+    pattern: GENERIC_KEY_ASSIGNMENT_PATTERN,
   },
   { name: "jwt", pattern: /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/ },
   { name: "pem-private-key", pattern: /-----BEGIN\s?(RSA|EC|OPENSSH|DSA|PGP)?\s?PRIVATE KEY-----/ },

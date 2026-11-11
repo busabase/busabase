@@ -11,6 +11,7 @@
  */
 
 /** Where a desktop install runs its local server. The bootstrap doc targets this host. */
+import { RECORD_PAGE_FIELD_GUIDANCE } from "busabase-contract/tasks";
 import { PLAYBOOK_RULE_SECTION_TITLE, renderPlaybookRuleMarkdown } from "./playbook-rule";
 import {
   URL_LOCATOR_RULE_MARKDOWN,
@@ -588,7 +589,10 @@ Read canonical records:
 
 \`\`\`bash
 curl ${base}/api/v1/records${H}
+# → { "records": [ { "id": "rec_…", "headCommit": { "payload": { "title": "…" } } } ], "nextCursor": null }
 \`\`\`
+
+${RECORD_PAGE_FIELD_GUIDANCE} The same shape comes back from \`busabase-cli records list --output json\` and from \`record_query\`.
 
 ## Full API reference & MCP
 
@@ -606,7 +610,7 @@ It is large — **do not load the whole file into context.** Pull out only the p
 \`jq '.components.schemas.ChangeRequest'\`). Or browse the
 interactive docs at \`${base}/api/v1/doc\`. MCP-capable agents can skip docs entirely and
 connect to \`${base}/api/mcp\` (Streamable HTTP) — the most context-efficient path.
-
+${isLocal ? "" : buildInviteTeammatesSection(base, authLine)}
 ## Status codes & errors
 
 Responses are JSON. On any non-2xx, read the human \`error\` plus stable \`data.reason\` when
@@ -633,12 +637,18 @@ to \`changes_requested\` and waits for you. Poll your work queue, then revise; t
 ChangeRequest automatically returns to \`in_review\` for re-review.
 
 Poll the agent work queue (ChangeRequests awaiting revision — request-changes or
-\`@ai\` mentions). Each task carries the ChangeRequest, the requested-changes
-\`reviewReason\`, and the \`aiComments\` directing the revision:
+\`@ai\` mentions), oldest first. Each task carries a preview of the ChangeRequest, the
+requested-changes \`reviewReason\`, and the \`aiComments\` directing the revision:
 
 \`\`\`bash
 curl ${base}/api/v1/agent/tasks${H}
 \`\`\`
+
+The preview holds at most 20 operations and replaces any field value over 4 KB with
+\`[long text omitted from the list view - open the change request to view]\`. When a task
+says \`"truncated": true\`, read its \`changeRequestPath\` (\`GET /api/v1/change-requests/:id\`)
+for every operation with full values before revising — a placeholder sent back as a value
+is refused. More than 100 tasks: pass \`?limit=50\`, then \`&cursor=<last task id>\`.
 
 Revise an operation in response (a new commit; returns the CR to \`in_review\`):
 
@@ -662,13 +672,23 @@ ${
 3. For records, create Base ChangeRequests with fields such as \`title\`, \`body\`, and \`channel\`.
 4. For folders and Skill nodes, create node ChangeRequests.
 5. For Skill files, create Skill file ChangeRequests instead of writing files directly.
-6. Don't choose a merge policy. Omit \`autoMerge\` and read the response's \`status\`: with write
-   access on the target the change is already merged; otherwise it is waiting for a human.
-   Pass an explicit \`autoMerge: false\` only when YOU judge a specific change risky enough to
-   deserve a second pair of eyes anyway.
+6. Don't choose a merge policy by default. Omit \`autoMerge\` and check the response: \`materialized: true\`
+   returns the landed object; \`materialized: false\` returns a CR, possibly already merged on an
+   idempotent retry. For every CR, \`status: merged\` means landed; \`in_review\` or \`approved\` still
+   waits for a decision or merge. Report other statuses accurately.
+   Pass an explicit \`autoMerge: false\` when YOU judge a specific change risky enough to deserve a second
+   pair of eyes, and also when the user explicitly asks to only propose and wait for a person. A write-capable
+   key would otherwise publish immediately. Do not approve or merge that proposal unless they ask.
 7. If it IS waiting and changes are requested, poll \`/api/v1/agent/tasks\`, revise the
    operation(s), and wait for re-review. Approving it is the user's decision, never yours.
-8. Once it is merged, read records, nodes, or Skill files again to confirm canonical state.
+8. Check the target and required results in the write response, including every item in a batch.
+   Stop when it confirms the task succeeded; a short acknowledgement or merged CR can be sufficient.
+   Do not add a GET to repeat that evidence. Read only missing required data, an uncertain outcome
+   (timeout, disconnect, or an error after a possible commit), asynchronous completion status, or
+   information the user explicitly asked to verify. Query the specific operation or target before
+   retrying an uncertain write. Keep needed pre-write reads, version checks, and upload confirmations.
+   Check attachment references and needed metadata; do not download files or add extra hash verification by
+   default, including historical attachments when appending files.
 
 ## Write for the reviewer — readability rules
 
@@ -801,6 +821,46 @@ The canonical document carries \`editionConfirmed=1\`, so it skips this choice a
 edition-specific connection workflow. Stop using this dispatcher as soon as the new document is
 loaded; do not combine its contents with the new workflow. If loading fails, tell the user and retry
 the chosen URL. Never fall back to the website preference or execute setup from this document.
+`;
+}
+
+/**
+ * Cloud only — the open-source / Desktop edition is single-user and has no members. The rules
+ * are the ones a person would want from an assistant holding their admin rights: an invitation
+ * email reaches someone outside the workspace the moment it is sent, so the recipients are
+ * confirmed first, and a link is the default when the user names nobody.
+ */
+function buildInviteTeammatesSection(base: string, authLine: string): string {
+  return `
+## Invite teammates
+
+The space's Members settings, over the API. The user must be an owner or admin of the space; a
+\`write\` key invites as \`member\`, and inviting or approving an \`admin\` needs a \`manage\` key.
+
+- **Before sending any invitation email**, list the exact addresses and the role back to the user
+  and get an explicit yes. Never send silently, never guess an address.
+- **No addresses given?** Create an invite link (web defaults: \`member\`, never expires, no
+  approval) and give the user its \`url\` to share.
+- Invite as \`admin\` only when the user explicitly asks. A 403 naming \`manage\` means this key
+  cannot grant admin — say so, and offer \`member\` or a manage-level key instead.
+- One address per call; re-inviting a pending address re-sends its email.
+
+\`\`\`bash
+${BUSABASE_CLI} members invite --email ada@example.com   # --role admin needs a manage key
+${BUSABASE_CLI} members create-invite-link               # → { url, … }
+${BUSABASE_CLI} members list-invitations
+${BUSABASE_CLI} members review-join-request --join-request-id <id> --decision approve
+curl -X POST ${base}/api/v1/members/invitations \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{"email": "ada@example.com", "role": "member"}'
+curl -X POST ${base}/api/v1/members/invite-links \\
+${authLine}  -H 'content-type: application/json' --data '{}'
+\`\`\`
+
+Also \`members list-invite-links\`, \`revoke-invite-link\`, \`cancel-invitation\` and
+\`list-join-requests\`. A \`404\` on \`/api/v1/members\` means an older server or the open-source /
+Desktop edition (no members): send the user to the web instead —
+\`${base}/dashboard?settings=space&tab=people\` (Members settings).
 `;
 }
 
@@ -947,8 +1007,8 @@ On MCP, resolve the target Space from the verification result: ${
           ? `it must match \`${preselectedSpaceId}\`.`
           : `use one result; ask the user when there are several.`
       } Then follow \`bootstrapRequired\`: \`false\` goes to Step 3 with no writes; \`true\` goes to
-Step 1. Before the first write, require write access plus capabilities to inspect, propose, read
-back, and complete bootstrap. If anything is missing, stop before writing; ask the user to reconnect
+Step 1. Before the first write, require write access plus capabilities to inspect, propose, check
+results, and complete bootstrap. If anything is missing, stop before writing; ask the user to reconnect
 with more access or approve CLI fallback. Keep the same transport for the rest of the run.`
     : `## Step 0 — Connect to Busabase Personal Desktop
 
@@ -1086,6 +1146,25 @@ in a few seconds); a fresh install returns \`[]\`, which sends you to Step 2:
 until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo "Busabase is up."
 \`\`\``;
 
+  // Optional, after the Space is verified — it never blocks or undoes initialization, and
+  // existing Spaces never reach it (they jump straight to the skills step).
+  const inviteStep = `
+**3d. Offer to invite teammates — optional, ask once**, only after completion returned version 1:
+"Your Space is ready — want to invite teammates?" **A.** By email **B.** A link to share **C.** Not now.
+
+- **A** → ask for any missing address (never guess one), repeat the exact addresses and roles
+  (\`member\` unless they ask for admin), get a yes, then one call per address:
+  \`${BUSABASE_CLI} members invite --email <address>\` (\`--role admin\` needs a \`manage\` key;
+  device login gives \`write\`).
+- **B** → \`${BUSABASE_CLI} members create-invite-link\`; give them its \`url\`.
+- **C** → skip; never ask again.
+
+On MCP, the integration's member-invitation tools do the same. On either path, 403 = not an
+owner/admin, or the key cannot grant admin: say which and offer \`member\` or the Members page —
+never downgrade silently. 404 = this server cannot invite over the API: point to the Members page,
+${site}/dashboard?settings=space&tab=people (Members settings). Either way, continue to Step 3.
+`;
+
   const spaceNote = isCloud
     ? "(Every call carries `x-busabase-space: $BUSABASE_SPACE_ID` — the space picked in Step 0. The API key is user-scoped, so do not omit the header.)"
     : "(No `spaceId` in local mode.)";
@@ -1172,14 +1251,14 @@ with connection. Do not welcome them again and do not ask them to choose an edit
 
 ## The journey at a glance — and how to run it
 
-You are guiding the user through four milestones. Existing users skip initialization entirely:
+You are guiding the user through ${isCloud ? "five milestones (one optional)" : "four milestones"}. Existing users skip initialization entirely:
 
 | # | Milestone | Covered by | Done when |
 | - | --------- | ---------- | --------- |
 | 1 | 🔌 **Connect** | ${isCloud ? "Step 0" : "Step 0 + Step 1"} | ${isCloud ? "a verified MCP integration, or device login, returns the selected Space" : "the local API responds and the connection is saved"} |
 | 2 | 🏗️ **Initialize if required** | ${isCloud ? "Step 1 + Step 2" : "Step 2 + Step 3"} | version-0 Space gets starter data |
-| 3 | ✅ **Verify** | Step ${isCloud ? 2 : 3} | starter records read back and marker becomes version 1 |
-| 4 | 🎓 **Skills installed** | Step ${isCloud ? 3 : 4} | both skills available in the agent's persistent skill store, 🎉 |
+| 3 | ✅ **Verify** | Step ${isCloud ? 2 : 3} | ${isCloud ? "starter writes confirmed and completion returns version 1" : "starter writes and completion confirmed"} |
+${isCloud ? "| 4 | 👥 **Invite teammates** (optional) | Step 2 (3d) | offered once after a new Space is verified |\n" : ""}| ${isCloud ? 5 : 4} | 🎓 **Skills installed** | Step ${isCloud ? 3 : 4} | both skills available in the agent's persistent skill store, 🎉 |
 
 **Conduct rules — these create the step-by-step feel; follow them at every turn:**
 
@@ -1255,9 +1334,9 @@ identity so retries cannot duplicate data.
 ${
   isCloud
     ? `**MCP path:** skip the shell examples and have the Harness run the same sequence: inspect,
-create missing structure/views, seed with stable idempotency keys, read back, then complete
-bootstrap. Require merged structure/records and \`materialized: true\` views; otherwise stop for
-approval and resume only after a canonical View read confirms materialization. The shell examples
+create missing structure/views, seed with stable idempotency keys, check the write responses, then
+complete bootstrap. Require merged structure/records and \`materialized: true\` views; otherwise stop for
+approval and resume only after the approval result or a targeted View read confirms materialization. The shell examples
 below are for CLI only.
 
 `
@@ -1295,7 +1374,8 @@ ${authLine}  -H 'content-type: application/json' \\
     ],
     "submittedBy": "system-onboarding"
   }'
-# Read back the folder node id and use it as parentNodeId below.
+# Use the folder node id from the merged response as parentNodeId below.
+# Fetch that folder only if the response does not supply the required id.
 \`\`\`
 
 \`\`\`bash
@@ -1375,24 +1455,24 @@ ${authLine}  -H 'content-type: application/json' \\
   }'
 \`\`\`
 
-${spaceNote} Repeat with distinct stable keys for the other sample rows. The endpoint records the
-audited ChangeRequest and merges it immediately, leaving no \`in_review\` onboarding items.
+${spaceNote} Repeat with distinct stable keys for the other sample rows; confirm each write landed.
 
-**3c. Read back canonical data, then mark bootstrap complete.** Never mark completion before all
-expected nodes, Bases, and records have been read back successfully:
+**3c. Check responses, then mark bootstrap complete.** Require every expected node, Base, View and
+sample record/batch to have landed; pending CRs are incomplete. Fetch only missing required data
+or uncertain outcomes, not all records after success:
 
 \`\`\`bash
-curl "${api}/api/v1/records"${H}
 curl -X POST "${api}/api/v1/onboarding/bootstrap-complete"${H}
 \`\`\`
 
-The completion call is idempotent and changes \`agentBootstrapVersion\` from 0 to 1 while preserving
-the rest of the Space onboarding state. ${
-    isCloud
-      ? `Recheck through the active transport; \`bootstrapRequired\` must now be false.`
-      : `Re-run \`whoami\`; \`bootstrapRequired\` must now be false.`
-  }
-
+${
+  isCloud
+    ? `Completion is idempotent and preserves other onboarding state. Its response confirms
+\`completed: true\` and \`agentBootstrapVersion: 1\`; no follow-up \`whoami\` is needed.`
+    : `Use the Desktop completion response; fetch completion status only if required information
+is missing.`
+}
+${isCloud ? inviteStep : ""}
 ### Custom blueprint (any scenario — this is what keeps it general)
 
 If the user picks *Something else*, don't hunt for a matching template — **design one**:
@@ -1402,7 +1482,7 @@ If the user picks *Something else*, don't hunt for a matching template — **des
    choices, \`markdown\`/\`html\` for bodies, \`attachment\` for files, \`embed\` for YouTube/Google Drive
    previews, \`email\`/\`url\`/\`date\` for
    typed values), following the same shape as the starter blueprints.
-3. Run the same idempotent **structure → sample records → read-back → mark complete** sequence.
+3. Run the same idempotent **structure → sample records → check responses → mark complete** sequence.
 
 The starter blueprints are only calibrated examples — the real capability is that you can model
 *whatever the user actually has*. Later changes work exactly the same way: submit them, let the

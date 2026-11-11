@@ -2,7 +2,6 @@
 
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import {
-  type InstallCollisionVO,
   InstallFailureVOSchema,
   type InstallPlanNodeVO,
   type InstallPlanVO,
@@ -17,11 +16,11 @@ import { Input } from "kui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { CircleCheck, LoaderCircle, Sparkles, TriangleAlert } from "lucide-react";
 import { iStringParse } from "openlib/i18n/i-string";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
-import { presentCoreError } from "../../../i18n/localize-error";
 import { GithubIcon } from "../helpers/brand-icons";
 import { nodeIconForType } from "../helpers/node-icons";
+import { presentInstallError } from "../utils/install-error";
 import { AgentInstallPanel, type AgentIntegrationTarget } from "./agent-install-panel";
 import { DialogContent } from "./localized-dialog-content";
 
@@ -103,8 +102,9 @@ function PlanTree({
           <li key={`${entry.node.type}:${entry.node.path}`}>
             <div className="flex min-w-0 items-center gap-2 py-0.5 text-sm">
               <Icon className="size-4 shrink-0 text-muted-foreground" />
-              <span className="truncate text-foreground">{entry.node.name}</span>
-              <span className="shrink-0 text-muted-foreground text-xs">{entry.node.slug}</span>
+              <bdi className="truncate text-foreground" dir="auto">
+                {entry.node.name}
+              </bdi>
               {summary ? (
                 <span className="shrink-0 text-muted-foreground text-xs">· {summary}</span>
               ) : null}
@@ -142,13 +142,14 @@ interface InstallFromGithubModalProps {
    */
   onReviewChangeRequests?: () => void;
   /**
-   * Pre-fill the URL and target folder, and go straight to the preview.
+   * Pre-fill the URL and go straight to the preview.
    *
    * Set by the Template Center: the user already chose a template from a card,
    * so making them look at an empty URL field — for a URL they never typed and
    * would have to be told — turns one decision into two.
    */
   initialRepoUrl?: string;
+  /** @deprecated UI installs always create their own folder; kept for host compatibility. */
   initialIntoFolder?: string;
   /** Package name already known by catalog entry points, used in the title and to omit repeated details. */
   initialPackageName?: string;
@@ -173,7 +174,6 @@ export function InstallFromGithubModal({
   onInstalled,
   onReviewChangeRequests,
   initialRepoUrl,
-  initialIntoFolder,
   initialPackageName,
   agentIntegration,
   onCreateNode,
@@ -183,8 +183,18 @@ export function InstallFromGithubModal({
   const [repoUrl, setRepoUrl] = useState(initialRepoUrl ?? "");
   const [plan, setPlan] = useState<InstallPlanVO | null>(null);
   const [planning, setPlanning] = useState(false);
-  const [intoFolder, setIntoFolder] = useState(initialIntoFolder ?? "");
-  const [rename, setRename] = useState(false);
+  const [folderName, setFolderName] = useState("");
+  const [nameError, setNameError] = useState(false);
+  const [failureState, setFailureState] = useState<"unchanged" | "changed" | "unknown" | null>(
+    null,
+  );
+  const folderNameId = useId();
+  const folderNameInput = useRef<HTMLInputElement>(null);
+  const folderNameValue = useRef<string | null>(null);
+  const newFolderSlug = useRef<string | undefined>(undefined);
+  const planRequest = useRef(0);
+  const intent = useRef(0);
+  const installingNow = useRef(false);
   /**
    * Opt-in, not opt-out. Left alone, `autoMerge` is omitted and the server
    * decides by permission like every other write — and only a space manager can
@@ -226,13 +236,20 @@ export function InstallFromGithubModal({
   /** So the tab is only auto-corrected on the FIRST plan, never under the user. */
   const planSeen = useRef(false);
   const autoPlanned = useRef(false);
+  const binding = useRef({ apiClient, initialRepoUrl });
 
   const reset = () => {
     setRepoUrl(initialRepoUrl ?? "");
     setPlan(null);
     setPlanning(false);
-    setIntoFolder(initialIntoFolder ?? "");
-    setRename(false);
+    setFolderName("");
+    setNameError(false);
+    setFailureState(null);
+    folderNameValue.current = null;
+    newFolderSlug.current = undefined;
+    planRequest.current += 1;
+    intent.current += 1;
+    installingNow.current = false;
     setRequireReview(false);
     setInstalling(false);
     setInstallProgress(null);
@@ -243,54 +260,65 @@ export function InstallFromGithubModal({
     setTab("agent");
     setAgentAfterInstall(false);
     planSeen.current = false;
+    autoPlanned.current = false;
   };
 
-  /**
-   * Ask the server what this URL would create. Re-run whenever an input that
-   * changes the answer changes (the target folder decides which node slugs
-   * collide; `rename` decides whether a collision is resolved and under what
-   * slug), so the preview on screen is never a stale answer to a different
-   * question.
-   */
-  const runPlan = async (overrides?: { intoFolder?: string; rename?: boolean }) => {
-    const trimmedUrl = repoUrl.trim();
+  /** A preview allocates the internal address once; the user only edits its display name. */
+  const runPlan = async (urlOverride?: string) => {
+    const trimmedUrl = (urlOverride ?? repoUrl).trim();
     if (!trimmedUrl) {
       setError(messages.install.repoUrlRequired);
       return;
     }
-    const nextFolder = (overrides?.intoFolder ?? intoFolder).trim();
-    const nextRename = overrides?.rename ?? rename;
+    const request = ++planRequest.current;
     setPlanning(true);
     setError(null);
     setErrorDetail(null);
+    setFailureState(null);
     try {
       const next = await apiClient.planInstallFromGithub({
         repoUrl: trimmedUrl,
-        ...(nextFolder ? { intoFolder: nextFolder } : {}),
-        rename: nextRename,
+        newFolder: {
+          ...(newFolderSlug.current ? { slug: newFolderSlug.current } : {}),
+          ...(folderNameValue.current?.trim() ? { name: folderNameValue.current.trim() } : {}),
+        },
       });
+      if (request !== planRequest.current) return;
+      if (!next.newFolder) {
+        setPlan(null);
+        setError(messages.install.installUnavailable);
+        return;
+      }
+      newFolderSlug.current = next.newFolder.slug;
       setPlan(next);
+      if (folderNameValue.current === null) {
+        const defaultName = next.package.displayName
+          ? iStringParse(next.package.displayName, locale) || next.package.name
+          : next.package.name;
+        folderNameValue.current = defaultName;
+        setFolderName(defaultName);
+      }
       if (!planSeen.current) {
         planSeen.current = true;
-        // A package with no skill node carries no manual, so "Agent install"
-        // would open on an apology. Land on the tab that can do something —
-        // once, and never again afterwards: re-planning happens when the target
-        // folder or `rename` changes, and yanking the user back to another tab
-        // then would be the dialog arguing with them.
-        if (next.counts.skills === 0) {
-          setTab("ui");
-        }
+        if (next.counts.skills === 0) setTab("ui");
       }
-      // Seed the target-folder field from the plan's own suggestion (the
-      // manifest name) the first time; afterwards the user's value wins.
-      setIntoFolder(nextFolder || next.targetFolderSlug);
     } catch (caught) {
-      const primary = presentCoreError(messages, locale, caught, messages.install.previewFailed);
-      setError(primary);
-      setErrorDetail(errorDetailFor(caught, primary));
+      if (request !== planRequest.current) return;
+      const visible = presentInstallError(
+        messages,
+        locale,
+        caught,
+        messages.install.previewFailed,
+        {
+          slug: newFolderSlug.current,
+          name: folderNameValue.current ?? undefined,
+        },
+      );
+      setError(visible);
+      setErrorDetail(errorDetailFor(caught, visible));
       setPlan(null);
     } finally {
-      setPlanning(false);
+      if (request === planRequest.current) setPlanning(false);
     }
   };
 
@@ -305,64 +333,117 @@ export function InstallFromGithubModal({
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once per opened dialog; runPlan is re-created every render and is not a trigger
   useEffect(() => {
-    if (!open || !initialRepoUrl || autoPlanned.current) {
+    if (
+      binding.current.apiClient !== apiClient ||
+      binding.current.initialRepoUrl !== initialRepoUrl
+    ) {
+      binding.current = { apiClient, initialRepoUrl };
+      reset();
+    }
+    if (!open) {
+      reset();
+      return;
+    }
+    if (!initialRepoUrl || autoPlanned.current) {
       return;
     }
     autoPlanned.current = true;
-    void runPlan();
-  }, [open, initialRepoUrl]);
+    void runPlan(initialRepoUrl);
+  }, [open, initialRepoUrl, apiClient]);
+
+  useEffect(() => {
+    if (nameError && !installing) folderNameInput.current?.focus();
+  }, [nameError, installing]);
 
   const submitInstall = async () => {
-    if (!plan) {
+    if (!plan?.newFolder || planning || installingNow.current) return;
+    const name = (folderNameValue.current ?? folderName).trim();
+    if (!name) {
+      setError(null);
+      setErrorDetail(null);
+      setFailureState(null);
+      setNameError(true);
       return;
     }
-    const trimmedFolder = intoFolder.trim();
+    const currentIntent = intent.current;
+    installingNow.current = true;
     setInstalling(true);
     setError(null);
     setErrorDetail(null);
+    setFailureState(null);
     setWorkspaceTouchedByFailure(false);
     setInstallProgress(null);
     try {
-      // Streamed, not awaited as one response: a big template takes long enough
-      // that a single silent request is closed by whatever proxy sits in front
-      // of the app — the install then finishes server-side while the user is
-      // told it failed. The events also give them something true to look at.
       const events = await apiClient.installFromGithubStream({
         repoUrl: repoUrl.trim(),
-        ...(trimmedFolder ? { intoFolder: trimmedFolder } : {}),
-        rename,
+        newFolder: { slug: plan.newFolder.slug, name },
         ...(requireReview ? { autoMerge: false } : {}),
       });
       let installed: InstallResultVO | null = null;
       for await (const event of events) {
+        if (currentIntent !== intent.current) return;
         if (event.kind === "progress") {
           setInstallProgress(event.message);
-        } else installed = event.result;
+        } else {
+          installed = event.result;
+          break;
+        }
       }
-      if (!installed) throw new Error(messages.install.installFailed);
+      if (currentIntent !== intent.current) return;
+      if (!installed) {
+        setError(messages.install.installUnknown);
+        setFailureState("unknown");
+        setWorkspaceTouchedByFailure(true);
+        return;
+      }
       setResult(installed);
     } catch (caught) {
-      const primary = presentCoreError(messages, locale, caught, messages.install.installFailed);
-      setError(primary);
-      setErrorDetail(errorDetailFor(caught, primary));
-      // The server reports a PARTIAL install as structured `data` beside the
-      // message (`InstallFailureVOSchema`). Parsed rather than trusted: this
-      // crossed the network, and a collision or a validation refusal — which
-      // creates nothing — carries no such payload at all.
+      if (currentIntent !== intent.current) return;
+      const issues = (caught as { data?: { issues?: unknown } } | null)?.data?.issues;
+      const nameRejected =
+        Array.isArray(issues) &&
+        issues.some(
+          (issue) =>
+            Array.isArray(issue?.path) &&
+            issue.path.length === 2 &&
+            issue.path[0] === "newFolder" &&
+            issue.path[1] === "name",
+        );
+      if (nameRejected) {
+        setNameError(true);
+        return;
+      }
       const failure = InstallFailureVOSchema.safeParse(
         (caught as { data?: unknown } | null)?.data ?? undefined,
       );
-      if (failure.success && installFailureTouchedWorkspace(failure.data)) {
+      const visible = presentInstallError(
+        messages,
+        locale,
+        caught,
+        failure.success ? messages.install.installFailed : messages.install.installUnknown,
+        { slug: newFolderSlug.current, name: folderNameValue.current ?? undefined },
+      );
+      setError(visible);
+      setErrorDetail(errorDetailFor(caught, visible));
+      if (failure.success) {
+        const touched = installFailureTouchedWorkspace(failure.data);
+        setFailureState(touched ? "changed" : "unchanged");
+        setWorkspaceTouchedByFailure(touched);
+      } else {
+        setFailureState("unknown");
         setWorkspaceTouchedByFailure(true);
       }
     } finally {
-      setInstalling(false);
+      if (currentIntent === intent.current) {
+        installingNow.current = false;
+        setInstalling(false);
+      }
     }
   };
 
   const close = () => {
     const finished = result;
-    const touched = workspaceTouchedByFailure;
+    const touched = workspaceTouchedByFailure || installingNow.current;
     reset();
     onOpenChange(false);
     if (finished) {
@@ -391,11 +472,12 @@ export function InstallFromGithubModal({
   // keeps the button in sync with the box on the same tick.
   const autoMergeUnmet = Boolean(plan?.requiresAutoMerge) && requireReview;
   const canInstall =
-    plan !== null &&
+    plan?.newFolder !== undefined &&
     !planning &&
     !installing &&
     unresolvedCollisions.length === 0 &&
-    !autoMergeUnmet;
+    !autoMergeUnmet &&
+    failureState !== "unknown";
 
   /**
    * A card-supplied URL is not editable: changing it here would silently turn
@@ -417,11 +499,6 @@ export function InstallFromGithubModal({
     return null;
   };
 
-  const collisionLine = (collision: InstallCollisionVO): string =>
-    collision.kind === "base"
-      ? fmt(messages.install.collisionBase, { slug: collision.slug })
-      : fmt(messages.install.collisionNode, { slug: collision.slug, path: collision.path });
-
   return (
     <Dialog
       open={open}
@@ -433,7 +510,7 @@ export function InstallFromGithubModal({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {initialPackageName ? (
@@ -457,7 +534,7 @@ export function InstallFromGithubModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           {result && agentAfterInstall && plan ? (
             // Installed, and now asked for the manual as well. The two installs
             // are complementary rather than alternatives — the UI tab says so,
@@ -476,17 +553,26 @@ export function InstallFromGithubModal({
               }
               onReviewChangeRequests={onReviewChangeRequests}
               result={result}
+              folderName={result.targetFolderName ?? folderName.trim()}
             />
           ) : (
             <>
               {urlLocked ? null : (
                 <div className="flex flex-col gap-1.5 text-sm">
-                  <span className="text-muted-foreground">{messages.install.repoUrl}</span>
+                  <label className="text-muted-foreground" htmlFor={`${folderNameId}-repo`}>
+                    {messages.install.repoUrl}
+                  </label>
                   <Input
                     autoFocus
+                    id={`${folderNameId}-repo`}
                     disabled={planning || installing}
                     onChange={(event) => {
                       setRepoUrl(event.target.value);
+                      planRequest.current += 1;
+                      newFolderSlug.current = undefined;
+                      folderNameValue.current = null;
+                      setFolderName("");
+                      setFailureState(null);
                       // The plan on screen describes the previous URL — drop it
                       // rather than let it look like an answer for this one.
                       setPlan(null);
@@ -537,6 +623,38 @@ export function InstallFromGithubModal({
                     <TabsContent className="mt-4 flex flex-col gap-4" value="ui">
                       <p className="text-muted-foreground text-sm">{messages.install.uiIntro}</p>
 
+                      <div className="flex flex-col gap-1.5 text-sm">
+                        <label className="text-muted-foreground" htmlFor={folderNameId}>
+                          {messages.install.folderName}
+                        </label>
+                        <Input
+                          aria-describedby={`${folderNameId}-hint${nameError ? ` ${folderNameId}-error` : ""}`}
+                          aria-invalid={nameError}
+                          dir="auto"
+                          disabled={installing}
+                          id={folderNameId}
+                          onChange={(event) => {
+                            folderNameValue.current = event.target.value;
+                            setFolderName(event.target.value);
+                            if (event.target.value.trim()) setNameError(false);
+                          }}
+                          ref={folderNameInput}
+                          value={folderName}
+                        />
+                        <span className="text-muted-foreground text-xs" id={`${folderNameId}-hint`}>
+                          {messages.install.folderNameHint}
+                        </span>
+                        {nameError ? (
+                          <p
+                            className="text-destructive text-xs"
+                            id={`${folderNameId}-error`}
+                            role="alert"
+                          >
+                            {messages.install.folderNameRequired}
+                          </p>
+                        ) : null}
+                      </div>
+
                       <section className="flex flex-col gap-2">
                         <span className="font-medium text-foreground text-sm">
                           {messages.install.contents}
@@ -563,87 +681,24 @@ export function InstallFromGithubModal({
                         )}
                       </section>
 
-                      {plan.collisions.length > 0 ? (
-                        <Alert
-                          variant={unresolvedCollisions.length > 0 ? "destructive" : "default"}
-                        >
+                      {unresolvedCollisions.length > 0 ? (
+                        <Alert variant="destructive">
                           <TriangleAlert className="size-4" />
-                          <AlertTitle>{messages.install.collisionsTitle}</AlertTitle>
-                          <AlertDescription>
-                            <p>{messages.install.collisionsBody}</p>
-                            <ul className="mt-2 flex flex-col gap-1">
-                              {plan.collisions.map((collision) => (
-                                <li key={`${collision.kind}:${collision.path}:${collision.slug}`}>
-                                  <span>{collisionLine(collision)}</span>
-                                  {collision.renamedTo ? (
-                                    <span className="text-muted-foreground">
-                                      {" "}
-                                      {fmt(messages.install.collisionRenamedTo, {
-                                        renamedTo: collision.renamedTo,
-                                      })}
-                                    </span>
-                                  ) : null}
-                                </li>
-                              ))}
-                            </ul>
-                          </AlertDescription>
+                          <AlertTitle>{messages.install.installUnavailable}</AlertTitle>
                         </Alert>
                       ) : null}
 
                       {plan.warnings.length > 0 ? (
-                        <Alert>
-                          <TriangleAlert className="size-4" />
-                          <AlertTitle>{messages.install.warningsTitle}</AlertTitle>
-                          <AlertDescription>
-                            <ul className="flex flex-col gap-1">
-                              {plan.warnings.map((warning) => (
-                                <li key={warning}>{warning}</li>
-                              ))}
-                            </ul>
-                          </AlertDescription>
-                        </Alert>
-                      ) : null}
-
-                      <div className="flex flex-col gap-1.5 text-sm">
-                        <span className="text-muted-foreground">
-                          {messages.install.targetFolder}
-                        </span>
-                        <Input
-                          disabled={planning || installing}
-                          onBlur={() => {
-                            // The target folder decides which node slugs collide, so
-                            // a changed value makes the preview stale — re-ask.
-                            if (intoFolder.trim() && intoFolder.trim() !== plan.targetFolderSlug) {
-                              void runPlan();
-                            }
-                          }}
-                          onChange={(event) => setIntoFolder(event.target.value)}
-                          value={intoFolder}
-                        />
-                        <span className="text-muted-foreground text-xs">
-                          {messages.install.targetFolderHint}
-                        </span>
-                      </div>
-
-                      {plan.collisions.length > 0 ? (
-                        <label className="flex items-start gap-2 text-sm" htmlFor="install-rename">
-                          <Checkbox
-                            checked={rename}
-                            disabled={planning || installing}
-                            id="install-rename"
-                            onCheckedChange={(checked) => {
-                              const next = checked === true;
-                              setRename(next);
-                              void runPlan({ rename: next });
-                            }}
-                          />
-                          <span className="flex flex-col gap-0.5">
-                            <span className="text-foreground">{messages.install.rename}</span>
-                            <span className="text-muted-foreground text-xs">
-                              {messages.install.renameHint}
-                            </span>
-                          </span>
-                        </label>
+                        <details className="rounded-md border border-border p-3 text-sm">
+                          <summary className="cursor-pointer">
+                            {messages.install.warningsTitle}
+                          </summary>
+                          <ul className="mt-2 flex flex-col gap-1 text-muted-foreground text-xs">
+                            {plan.warnings.map((warning) => (
+                              <li key={warning}>{warning}</li>
+                            ))}
+                          </ul>
+                        </details>
                       ) : null}
 
                       {/* A package whose records link to each other cannot be held for
@@ -682,39 +737,44 @@ export function InstallFromGithubModal({
                   </Tabs>
                 </>
               ) : null}
-
-              {error ? (
-                <div className="flex flex-col gap-1">
-                  <p className="text-destructive text-sm">{error}</p>
-                  {errorDetail ? (
-                    <p className="break-words text-muted-foreground text-xs">{errorDetail}</p>
-                  ) : null}
-                </div>
-              ) : null}
-              {plan && tab === "ui" ? (
-                <div
-                  aria-hidden={!installing}
-                  className={`min-h-10 text-muted-foreground text-sm sm:min-h-5 ${
-                    installing ? "visible" : "invisible"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <LoaderCircle className={installing ? "size-4 animate-spin" : "size-4"} />
-                    {locale === "en"
-                      ? (installProgress ?? messages.install.installingHint)
-                      : messages.install.installingHint}
-                  </div>
-                  {locale !== "en" && installProgress ? (
-                    <p className="ml-6 break-words text-xs">{installProgress}</p>
-                  ) : null}
-                </div>
-              ) : null}
             </>
           )}
         </div>
 
+        {error || (installing && tab === "ui") ? (
+          <div className="flex max-h-[35dvh] shrink-0 flex-col gap-2 overflow-y-auto border-t border-border pt-3">
+            {error ? (
+              <div className="flex flex-col gap-1" role="alert">
+                <p className="break-words text-destructive text-sm">{error}</p>
+                {failureState && error !== messages.install.installUnknown ? (
+                  <p className="text-muted-foreground text-sm">
+                    {failureState === "unchanged"
+                      ? messages.install.installNoChanges
+                      : failureState === "changed"
+                        ? messages.install.installPartial
+                        : messages.install.installUnknown}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-muted-foreground text-sm" role="status">
+                <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+                {messages.install.installingHint}
+              </div>
+            )}
+            {errorDetail || installProgress ? (
+              <details className="max-h-28 overflow-y-auto text-muted-foreground text-xs">
+                <summary className="cursor-pointer">{messages.install.technicalDetails}</summary>
+                <p className="mt-1 whitespace-pre-wrap break-words">
+                  {errorDetail ?? installProgress}
+                </p>
+              </details>
+            ) : null}
+          </div>
+        ) : null}
+
         {result || !plan || tab === "ui" ? (
-          <DialogFooter className="flex-col gap-2 sm:flex-row">
+          <DialogFooter className="shrink-0 flex-col gap-2 sm:flex-row">
             {result ? (
               <Button onClick={close}>{messages.install.done}</Button>
             ) : (
@@ -827,19 +887,21 @@ function ResultStep({
   onAgentInstall,
   onReviewChangeRequests,
   result,
+  folderName,
 }: {
   messages: ReturnType<typeof useCoreI18n>;
   /** Offered only when the package actually carries a manual to hand over. */
   onAgentInstall?: () => void;
   onReviewChangeRequests?: () => void;
   result: InstallResultVO;
+  folderName: string;
 }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <CircleCheck className="size-4 text-primary" />
         <span className="font-medium text-foreground text-sm">
-          {fmt(messages.install.resultTitle, { folder: result.targetFolderSlug })}
+          {fmt(messages.install.resultTitle, { folder: folderName })}
         </span>
       </div>
       <span className="text-muted-foreground text-sm">
@@ -873,17 +935,14 @@ function ResultStep({
       )}
 
       {result.warnings.length > 0 ? (
-        <Alert>
-          <TriangleAlert className="size-4" />
-          <AlertTitle>{messages.install.warningsTitle}</AlertTitle>
-          <AlertDescription>
-            <ul className="flex flex-col gap-1">
-              {result.warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
-          </AlertDescription>
-        </Alert>
+        <details className="rounded-md border border-border p-3 text-sm">
+          <summary className="cursor-pointer">{messages.install.warningsTitle}</summary>
+          <ul className="mt-2 flex flex-col gap-1 text-muted-foreground text-xs">
+            {result.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </details>
       ) : null}
 
       {onAgentInstall ? (

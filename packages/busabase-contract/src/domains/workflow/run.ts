@@ -20,6 +20,11 @@ export const WORKFLOW_FIND_RECORDS_ACTION = "find_records";
 export const WORKFLOW_FIND_RECORDS_DEFAULT_LIMIT = 50;
 /** The most records one Find records step may return, and so the most runs it may start. */
 export const WORKFLOW_FIND_RECORDS_MAX = 200;
+/** How long code in a sandbox may run, package install included, before it is stopped. */
+export const WORKFLOW_SANDBOX_TIMEOUT_MS = 10 * 60_000;
+/** How soon a run waiting on a sandbox is checked again. The scheduler's own tick can make it later. */
+export const WORKFLOW_SANDBOX_POLL_MS = 10_000;
+
 /**
  * A Find records step that runs the next steps once per record does not start
  * more while this many runs of the workflow are still waiting their turn.
@@ -103,10 +108,15 @@ export const WorkflowStepOutputSchema = z.object({
 export type WorkflowStepOutput = z.infer<typeof WorkflowStepOutputSchema>;
 
 export const WorkflowPauseSchema = z.object({
-  kind: z.enum(["wait", "approval"]),
+  /** `sandbox`: a Function step's code is running on a sandbox machine. */
+  kind: z.enum(["wait", "approval", "sandbox"]),
   nodeId: z.string(),
-  /** ISO time the wait may resume. Null for an approval pause. */
+  /** ISO time the wait may resume, or a sandbox is next checked. Null for an approval pause. */
   resumeAt: z.string().nullable(),
+  /** For a sandbox pause: the machine running the code. */
+  sandboxId: z.string().optional(),
+  /** For a sandbox pause: when the code is stopped if it has not finished. */
+  deadlineAt: z.string().optional(),
 });
 export type WorkflowPause = z.infer<typeof WorkflowPauseSchema>;
 
@@ -209,6 +219,12 @@ export const ListWorkflowRunsOutputSchema = z.object({
    * the step names nobody.
    */
   decidableRunIds: z.array(z.string()),
+  /**
+   * Runs in this page that stopped on a step which can run again: failed, still
+   * in the workflow, not retried yet, and the caller may write. See
+   * `workflows.retry`.
+   */
+  retryableRunIds: z.array(z.string()).default([]),
   /** Opaque cursor for older runs, or null on the last page. */
   nextCursor: z.string().nullable(),
   /** Queued runs of this workflow, on any page: what "cancel all queued" would stop. */
@@ -220,6 +236,34 @@ export type ListWorkflowRunsOutput = z.infer<typeof ListWorkflowRunsOutputSchema
 
 export const CancelWorkflowRunInputSchema = z.object({ runId: z.string().min(1) });
 export type CancelWorkflowRunInput = z.infer<typeof CancelWorkflowRunInputSchema>;
+
+export const ListWaitingWorkflowRunsInputSchema = z
+  .object({
+    limit: z.number().int().min(1).max(100).optional().describe("At most this many. Default 50."),
+  })
+  .strict();
+export type ListWaitingWorkflowRunsInput = z.infer<typeof ListWaitingWorkflowRunsInputSchema>;
+
+/** A run waiting for a decision the caller may make, with where it belongs. */
+export const WaitingWorkflowRunSchema = z.object({
+  run: WorkflowRunSchema,
+  /** The workflow's name, so the run can be listed without opening the workflow. */
+  workflowName: z.string(),
+  /** The approval step it is waiting on. */
+  stepLabel: z.string(),
+});
+export type WaitingWorkflowRun = z.infer<typeof WaitingWorkflowRunSchema>;
+
+export const ListWaitingWorkflowRunsOutputSchema = z.object({
+  /** Newest first. Only runs the caller may decide now. */
+  items: z.array(WaitingWorkflowRunSchema),
+  /** Display names for the `startedBy` ids in `items`. */
+  actorNames: z.record(z.string(), z.string()),
+});
+export type ListWaitingWorkflowRunsOutput = z.infer<typeof ListWaitingWorkflowRunsOutputSchema>;
+
+export const RetryWorkflowRunInputSchema = z.object({ runId: z.string().min(1) });
+export type RetryWorkflowRunInput = z.infer<typeof RetryWorkflowRunInputSchema>;
 
 export const CancelQueuedWorkflowRunsInputSchema = z.object({ nodeId: z.string().min(1) }).strict();
 export type CancelQueuedWorkflowRunsInput = z.infer<typeof CancelQueuedWorkflowRunsInputSchema>;

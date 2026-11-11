@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -29,7 +30,6 @@ import { busabaseRouter } from "../src/router";
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
-const HASH = (byte: string) => `sha256:${byte.repeat(64)}`;
 
 const expectDefined = <T>(value: T | undefined | null): T => {
   expect(value).toBeDefined();
@@ -64,13 +64,15 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
 
   /** Upload+confirm+putText a small text asset, returning its assetId. */
   const seedFile = async (opts: { fileName: string; hashByte: string; text: string }) => {
-    const contentHash = HASH(opts.hashByte);
+    const bytes = Buffer.alloc(100, opts.hashByte);
+    const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
     const req = await client.assets.createUploadUrl({
       fileName: opts.fileName,
       mimeType: "text/plain",
       sizeBytes: 100,
       contentHash,
     });
+    await storage.uploadFileToKey(bytes, req.storageKey, "text/plain");
     const confirmed = await client.assets.confirm({
       storageKey: req.storageKey,
       fileName: opts.fileName,

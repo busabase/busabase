@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 import { renderAgentAttachment } from "./agent-attachment-preview";
 
+vi.mock(
+  "previewfile-core/client/embedded/lazy",
+  () => import("../../../../tests/mocks/embedded-file-viewer"),
+);
+
 const originalCreateObjectURL = URL.createObjectURL;
 const originalRevokeObjectURL = URL.revokeObjectURL;
 const files = new Map<string, Blob>();
@@ -61,7 +66,10 @@ describe("agent composer attachment previews", () => {
     fireEvent.click(opener);
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "photo.png" })).toBeTruthy();
-    expect(within(dialog).getByRole("img").getAttribute("src")).toBe(localUrl);
+    expect(within(dialog).getByTestId("embedded-file-preview").getAttribute("data-url")).toBe(
+      localUrl,
+    );
+    expect(dialog.querySelector('[data-previewfile-type="image"]')).toBeTruthy();
     expect(within(dialog).getByRole("link", { name: "Download file" }).getAttribute("href")).toBe(
       localUrl,
     );
@@ -106,7 +114,10 @@ describe("agent composer attachment previews", () => {
     upload("brief.pdf", "application/pdf");
     fireEvent.click(screen.getByRole("button", { name: "File preview: brief.pdf" }));
     const dialog = screen.getByRole("dialog");
-    expect(dialog.querySelector("iframe")?.getAttribute("src")).toMatch(/^blob:/);
+    expect(within(dialog).getByTestId("embedded-file-preview").getAttribute("data-url")).toMatch(
+      /^blob:/,
+    );
+    expect(dialog.querySelector('[data-previewfile-type="pdf"]')).toBeTruthy();
     expect(onSend).not.toHaveBeenCalled();
     unmount();
     expect(screen.queryByRole("dialog")).toBeNull();

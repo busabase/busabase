@@ -134,8 +134,16 @@ describeIfPresent("install.fromGithub — the real busa-email template", () => {
     }
   });
 
-  it("installs the whole app without a warning", () => {
-    expect(result.warnings).toEqual([]);
+  it("installs the app and reports only prompts waiting for their reviewed nodes", () => {
+    // Content nodes are deliberately still in review. Their custom prompts
+    // cannot be attached until those nodes have materialized.
+    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings.length).toBeLessThanOrEqual(result.pendingChangeRequests);
+    for (const warning of result.warnings) {
+      expect(warning).toMatch(
+        /^"[^"]+" installs as a change request, so its \d+ agent prompt\(s\) were not applied\. After merging it, run `busabase-cli nodes set-agent-prompts`/,
+      );
+    }
     expect(result.created.bases).toBe(3);
   });
 

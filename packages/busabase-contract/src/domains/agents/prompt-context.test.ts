@@ -109,8 +109,19 @@ describe("Agent prompt envelope", () => {
     ).toBe(false);
   });
 
+  it("accepts a different destination origin in the same Cloud workspace", () => {
+    const envelope = makeEnvelope();
+    expect(
+      decodeAgentPromptClipboard(
+        JSON.stringify(envelope),
+        joinAgentPromptSegments(envelope.segments),
+        { ...source, origin: "https://another.example" },
+        "cross-origin",
+      ),
+    ).toEqual(createPromptResourceContext(envelope, "cross-origin"));
+  });
+
   it.each([
-    { ...source, origin: "https://another.example" },
     { ...source, edition: "desktop" as const },
     { ...source, spaceId: "spc_two" },
     { ...source, spaceId: undefined },

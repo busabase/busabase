@@ -142,6 +142,7 @@ const listRuns = vi.fn(async () => ({
   runs: [waitingRun],
   canRun: true,
   decidableRunIds: [],
+  retryableRunIds: [],
   nextCursor: null,
   queuedCount: 0,
   actorNames: {},
@@ -183,6 +184,7 @@ const orpc = {
     resume: { mutationOptions: () => ({ mutationFn: vi.fn() }) },
     decide: { mutationOptions: () => ({ mutationFn: vi.fn() }) },
     cancel: { mutationOptions: () => ({ mutationFn: vi.fn() }) },
+    retry: { mutationOptions: () => ({ mutationFn: vi.fn() }) },
     cancelQueued: { mutationOptions: () => ({ mutationFn: vi.fn() }) },
   },
 } as unknown as BusabaseQueryUtils;

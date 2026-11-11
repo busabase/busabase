@@ -24,7 +24,11 @@ import type {
   ViewType,
   ViewVO,
 } from "busabase-contract/types";
-import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "busabase-contract/types";
+import {
+  isGridRowHeight,
+  VIEW_FIELD_MAX_WIDTH,
+  VIEW_FIELD_MIN_WIDTH,
+} from "busabase-contract/types";
 import { iStringFromText } from "openlib/i18n/i-string";
 import type {
   AuditEventPO,
@@ -72,6 +76,7 @@ export const VALUE_TEXT_INDEX_LIMIT = 8_000;
 const JSON_LIKE_FIELD_TYPES = new Set<FieldType>([
   "json",
   "attachment",
+  "drive",
   "relation",
   "member",
   "whiteboard",
@@ -186,6 +191,9 @@ export const normalizeViewConfig = (config: ViewPO["config"] | ViewConfigVO): Vi
   hiddenFieldSlugs: (config as ViewConfigVO).hiddenFieldSlugs,
   autoShowNewFields: (config as ViewConfigVO).autoShowNewFields,
   fieldWidths: normalizeFieldWidths((config as ViewConfigVO).fieldWidths),
+  rowHeight: isGridRowHeight((config as ViewConfigVO).rowHeight)
+    ? (config as ViewConfigVO).rowHeight
+    : undefined,
   // Per-view-type presentation config — passed through untouched for the types
   // that don't use a given field (a table ignores coverFieldSlug, etc.).
   // `undefined` means Auto (first attachment field), while `null` explicitly

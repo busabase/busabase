@@ -225,6 +225,93 @@ describe("install.fromGithub — server-side install (real PGLite + synthetic zi
   });
 
   // ── fromGithubStream: the same install, but it speaks while it works ────────
+  it("allocates one preview identity and installs Unicode names into independent folders", async () => {
+    const spaceId = "space_install_unicode";
+    const names = [
+      "Kelvin企业邮箱工作台",
+      "チームの受信箱",
+      "팀 받은편지함",
+      "صندوق بريد الفريق",
+      "Командная почта",
+      "Café e\u0301 📬",
+    ];
+    const slugs = new Set<string>();
+    for (const name of names) {
+      const plan = await inSpace(spaceId, () =>
+        client.install.planFromGithub({
+          repoUrl: "https://github.com/acme/test-kb",
+          newFolder: {},
+        }),
+      );
+      expect(plan.newFolder?.slug).toMatch(/^f-[a-f0-9-]{36}$/);
+      expect(slugs.has(plan.targetFolderSlug)).toBe(false);
+      slugs.add(plan.targetFolderSlug);
+      const replanned = await inSpace(spaceId, () =>
+        client.install.planFromGithub({
+          repoUrl: "https://github.com/acme/test-kb",
+          newFolder: { slug: plan.targetFolderSlug, name },
+        }),
+      );
+      expect(replanned.newFolder).toEqual({ slug: plan.targetFolderSlug, name });
+      const result = await inSpace(spaceId, () =>
+        client.install.fromGithub({
+          repoUrl: "https://github.com/acme/test-kb",
+          newFolder: { slug: plan.targetFolderSlug, name },
+        }),
+      );
+      expect(result.targetFolderName).toBe(name);
+      expect(result.targetFolderSlug).toBe(plan.targetFolderSlug);
+      const installed = await inSpace(spaceId, () =>
+        client.nodes.get({ nodeId: result.targetFolderNodeId, type: "folder" }),
+      );
+      expect(installed.node.name).toBe(name);
+      expect(installed.node.slug).toBe(plan.targetFolderSlug);
+    }
+  });
+
+  it("rejects invalid or ambiguous targets before downloading or creating anything", async () => {
+    const spaceId = "space_install_invalid_target";
+    const before = codeloadRequests;
+    for (const input of [
+      { intoFolder: "Kelvin企业邮箱工作台" },
+      { newFolder: { slug: "Uppercase" } },
+      { newFolder: { name: "  " } },
+      { newFolder: {}, intoFolder: "existing" },
+    ]) {
+      await expect(
+        inSpace(spaceId, () =>
+          client.install.fromGithub({ repoUrl: "https://github.com/acme/test-kb", ...input }),
+        ),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    }
+    expect(codeloadRequests).toBe(before);
+    const nodes = await inSpace(spaceId, () => client.nodes.list());
+    expect(nodes.flatMap((node) => node.children ?? [])).toEqual([]);
+  });
+
+  it("never reuses an existing folder in the independent installation flow", async () => {
+    const spaceId = "space_install_new_target_conflict";
+    const original = await inSpace(spaceId, () =>
+      client.install.fromGithub({
+        repoUrl: "https://github.com/acme/test-kb",
+        newFolder: { slug: "f-owned", name: "Original" },
+      }),
+    );
+    await expect(
+      inSpace(spaceId, () =>
+        client.install.fromGithub({
+          repoUrl: "https://github.com/acme/test-kb",
+          newFolder: { slug: "f-owned", name: "Must not rename or reuse" },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const folder = await inSpace(spaceId, () =>
+      client.nodes.get({ nodeId: original.targetFolderNodeId, type: "folder" }),
+    );
+    expect(folder.node.name).toBe("Original");
+    expect(folder.node.slug).toBe("f-owned");
+  });
+
   //
   // The bug this route exists for: `fromGithub` does the whole install inside one
   // silent request, and a proxy in front of the app closes a connection that has

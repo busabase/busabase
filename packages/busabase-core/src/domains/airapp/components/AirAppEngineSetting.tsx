@@ -12,6 +12,8 @@ import {
 } from "kui/select";
 import { ArrowUpCircle, Lock } from "lucide-react";
 import { fmt, useCoreI18n } from "../../../i18n";
+import type { AirAppRuntimeKind } from "../utils/airapp-runtime-descriptor";
+import { resolveEngineWithPlan } from "../utils/engine-plan-gate";
 import type { ResolvedAirAppEnginePlanGate } from "./engine-availability-context";
 import type { AirAppRunnerKind } from "./runners/types";
 
@@ -38,6 +40,36 @@ export const resolveEffectiveEngineChoice = (
 ): AirAppRunnerKind | null =>
   appRequired ?? (choice === FOLLOW_APP ? (appPreferred ?? null) : choice);
 
+/**
+ * The engine "follow the app" really runs on here — what a run resolves from
+ * `airapp.json`'s `preferredEngine`, not what the file asks for.
+ *
+ * The two differ whenever the preference is out of reach: a Free Cloud space
+ * whose app prefers the Website runs it in the browser. Naming the preference
+ * there told the person the opposite of what was happening. When nothing
+ * unlocked can run the app at all (the run stops at the upgrade or
+ * "can't run this" state instead), the preference is still the honest name.
+ * `undefined` when the app prefers nothing: then the default decides.
+ */
+export const resolveFollowedAppEngine = ({
+  appPreferred,
+  appRuntime = "node",
+  availableEngines,
+  lockedEngines = [],
+}: {
+  appPreferred?: AirAppRunnerKind;
+  appRuntime?: AirAppRuntimeKind;
+  availableEngines: readonly AirAppRunnerKind[];
+  lockedEngines?: readonly AirAppRunnerKind[];
+}): AirAppRunnerKind | undefined => {
+  if (!appPreferred) return undefined;
+  const resolution = resolveEngineWithPlan(appRuntime, appPreferred, {
+    available: [...availableEngines],
+    locked: [...lockedEngines],
+  });
+  return resolution.kind === "run" ? resolution.engine : appPreferred;
+};
+
 interface AirAppEngineSettingProps {
   availableEngines: readonly AirAppRunnerKind[];
   disabled?: boolean;
@@ -53,6 +85,12 @@ interface AirAppEngineSettingProps {
    */
   appPreferred?: AirAppRunnerKind;
   appRequired?: AirAppRunnerKind;
+  /**
+   * The app's runtime, resolved from its files the way a run resolves it, so
+   * "follow the app" can name the engine a run would actually land on (a
+   * Python app cannot fall back to the browser). Defaults to `node`.
+   */
+  appRuntime?: AirAppRuntimeKind;
   /**
    * The host's plan gate (Busabase Cloud). Its locked engines name the plan
    * that unlocks them and open the host's upgrade flow when available, without
@@ -119,6 +157,7 @@ export function AirAppEngineSetting({
   value,
   appPreferred,
   appRequired,
+  appRuntime,
   planGate,
   notConfiguredEngines = [],
 }: AirAppEngineSettingProps) {
@@ -140,11 +179,25 @@ export function AirAppEngineSetting({
   // a choice — it is also the only place that says whether this node follows its
   // `airapp.json` or overrides it, and that is worth showing even when there is
   // nothing to switch to.
-  const followLabel = appPreferred
-    ? fmt(messages.airapp.engineFollowAppNamed, { engine: engineLabel[appPreferred] })
-    : messages.airapp.engineFollowApp;
-
   const lockedEngines = planGate?.lockedEngines ?? [];
+  // Named after the engine a run lands on, not the one the file asks for —
+  // see `resolveFollowedAppEngine`. The hint below says when those differ.
+  const followedEngine = resolveFollowedAppEngine({
+    appPreferred,
+    appRuntime,
+    availableEngines,
+    lockedEngines,
+  });
+  const followLabel = followedEngine
+    ? fmt(messages.airapp.engineFollowAppNamed, { engine: engineLabel[followedEngine] })
+    : messages.airapp.engineFollowApp;
+  const followHint =
+    appPreferred && followedEngine && followedEngine !== appPreferred
+      ? fmt(messages.airapp.engineFollowAppFallback, {
+          preferred: engineLabel[appPreferred],
+          engine: engineLabel[followedEngine],
+        })
+      : messages.airapp.engineFollowAppHint;
   const engineRows: EngineRow[] = [
     ...availableEngines.map((engine) => ({ engine })),
     ...(planGate
@@ -216,7 +269,11 @@ export function AirAppEngineSetting({
         }}
         value={value}
       >
-        <SelectTrigger className="w-full" id="node-settings-airapp-engine">
+        <SelectTrigger
+          className="w-full"
+          data-airapp-engine-followed={value === FOLLOW_APP ? followedEngine : undefined}
+          id="node-settings-airapp-engine"
+        >
           <SelectValue>{value === FOLLOW_APP ? followLabel : engineLabel[value]}</SelectValue>
         </SelectTrigger>
         <SelectContent>
@@ -229,7 +286,7 @@ export function AirAppEngineSetting({
         </SelectContent>
       </Select>
       <p className="text-muted-foreground text-xs">
-        {value === FOLLOW_APP ? messages.airapp.engineFollowAppHint : engineHint[value]}
+        {value === FOLLOW_APP ? followHint : engineHint[value]}
       </p>
       {planGate
         ? lockedEngines.map((engine) => (

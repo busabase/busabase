@@ -20,6 +20,7 @@
  */
 
 import { z } from "zod";
+import { FolderBodyFormatSchema } from "../domains/folder/types";
 import {
   HtmlDocumentSchema,
   WhiteboardDocumentSchema,
@@ -53,7 +54,15 @@ export type NodeContentType = (typeof NODE_CONTENT_TYPES)[number];
  */
 const NODE_CONTENT_VARIANTS = {
   doc: z.object({ kind: z.literal("doc"), body: z.string() }),
-  folder: z.object({ kind: z.literal("folder"), body: z.string() }),
+  // `bodyFormat` omitted means Markdown, which is what every folder write meant
+  // before HTML readmes existed — an older client keeps writing Markdown.
+  folder: z.object({
+    kind: z.literal("folder"),
+    body: z.string(),
+    bodyFormat: FolderBodyFormatSchema.optional().describe(
+      'How `body` is written: "markdown" (default) or "html". An HTML readme replaces a Markdown one and vice versa — a folder keeps one readme.',
+    ),
+  }),
   whiteboard: z.object({ kind: z.literal("whiteboard"), document: WhiteboardDocumentSchema }),
   workflow: z.object({ kind: z.literal("workflow"), document: WorkflowDocumentSchema }),
   html: z.object({ kind: z.literal("html"), document: HtmlDocumentSchema }),

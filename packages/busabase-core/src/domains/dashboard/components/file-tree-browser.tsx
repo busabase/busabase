@@ -240,9 +240,15 @@ export interface SkillTreeNode {
   children: SkillTreeNode[];
 }
 
-// Build a nested tree from the file-tree node's flat file list, synthesizing any parent
-// folders that have no explicit entry. Folders sort before files, then by name.
-export function buildFileTree(files: FileTreeNodeVO["files"]): SkillTreeNode[] {
+// Build a nested tree from a flat file list (a file-tree node's files, or a
+// `drive` cell's refs — only `path` is read), synthesizing any parent folders
+// that have no explicit entry. `emptyFolders` adds folders with no file under
+// them yet (the drive field editor's just-created target folder). Folders sort
+// before files, then by name.
+export function buildFileTree(
+  files: ReadonlyArray<{ path: string }>,
+  emptyFolders: ReadonlyArray<string> = [],
+): SkillTreeNode[] {
   const roots: SkillTreeNode[] = [];
   const byPath = new Map<string, SkillTreeNode>();
   const ensureDir = (dirPath: string): SkillTreeNode[] => {
@@ -269,6 +275,9 @@ export function buildFileTree(files: FileTreeNodeVO["files"]): SkillTreeNode[] {
     const name = segments[segments.length - 1] ?? file.path;
     const parentPath = segments.slice(0, -1).join("/");
     ensureDir(parentPath).push({ name, path: file.path, type: "file", children: [] });
+  }
+  for (const folder of emptyFolders) {
+    if (folder) ensureDir(folder);
   }
   const sortNodes = (nodes: SkillTreeNode[]) => {
     nodes.sort((a, b) =>
@@ -609,6 +618,8 @@ interface DriveFileTreeContextType {
   onRemoveFolder?: (path: string) => void;
   onRenameFile?: (path: string) => void;
   onRenameFolder?: (path: string) => void;
+  renameFileLabel?: string;
+  renameFolderLabel?: string;
 }
 
 // oxlint-disable-next-line eslint(no-empty-function)
@@ -639,6 +650,12 @@ export interface DriveFileTreeProps {
   onRemoveFolder?: (path: string) => void;
   onRenameFile?: (path: string) => void;
   onRenameFolder?: (path: string) => void;
+  /**
+   * Menu labels for the rename actions. A Drive node renames in place; a
+   * `drive` field's path editor also moves, and says so.
+   */
+  renameFileLabel?: string;
+  renameFolderLabel?: string;
   onExpandedChange?: (expanded: Set<string>) => void;
   children?: ReactNode;
 }
@@ -659,6 +676,8 @@ export function DriveFileTree({
   onRemoveFolder,
   onRenameFile,
   onRenameFolder,
+  renameFileLabel,
+  renameFolderLabel,
   onExpandedChange,
   className,
   children,
@@ -693,6 +712,8 @@ export function DriveFileTree({
       onRenameFolder,
       onSelect,
       onToggleSelection,
+      renameFileLabel,
+      renameFolderLabel,
       selectedKeys,
       selectedPath,
       selectionMode,
@@ -708,6 +729,8 @@ export function DriveFileTree({
       onRenameFolder,
       onSelect,
       onToggleSelection,
+      renameFileLabel,
+      renameFolderLabel,
       selectedKeys,
       selectedPath,
       selectionMode,
@@ -776,6 +799,7 @@ export function DriveFileTreeFolder({
     onDownloadFolder,
     onRemoveFolder,
     onRenameFolder,
+    renameFolderLabel,
   } = useContext(DriveFileTreeContext);
   const isExpanded = expandedPaths.has(path);
   const isSelected = selectedPath === path;
@@ -845,7 +869,7 @@ export function DriveFileTreeFolder({
               {onRenameFolder ? (
                 <DropdownMenuItem onSelect={() => onRenameFolder(path)}>
                   <Pencil aria-hidden />
-                  {messages.nodeDetail.renameFolder}
+                  {renameFolderLabel ?? messages.nodeDetail.renameFolder}
                 </DropdownMenuItem>
               ) : null}
               {onDownloadFolder ? (
@@ -900,6 +924,7 @@ export function DriveFileTreeFile({
     onDownloadFile,
     onRemoveFile,
     onRenameFile,
+    renameFileLabel,
   } = useContext(DriveFileTreeContext);
   const isSelected = selectedPath === path;
   const isChecked = selectedKeys.has(fileTreeSelectionKey("file", path));
@@ -958,7 +983,7 @@ export function DriveFileTreeFile({
             {onRenameFile ? (
               <DropdownMenuItem onSelect={() => onRenameFile(path)}>
                 <Pencil aria-hidden />
-                {messages.nodeDetail.renameFile}
+                {renameFileLabel ?? messages.nodeDetail.renameFile}
               </DropdownMenuItem>
             ) : null}
             {onDownloadFile ? (

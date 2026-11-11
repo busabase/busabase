@@ -49,6 +49,7 @@ import {
   Filter,
   GitBranch,
   GripVertical,
+  HardDrive,
   Hash,
   Link2,
   ListChecks,
@@ -137,6 +138,7 @@ export const FIELD_TYPE_ICONS: Record<FieldType, LucideIcon> = {
   member: Users,
   lookup: Binoculars,
   attachment: Paperclip,
+  drive: HardDrive,
   ai_summary: Sparkles,
   ai_tags: Sparkles,
   created_time: CalendarDays,
@@ -156,7 +158,7 @@ export const getFieldFilterOperators = (type: FieldType): readonly ViewFilterOpe
   if (type === "checkbox") {
     return FILTER_OPERATORS_BY_KIND.checkbox;
   }
-  if (type === "attachment" || type === "relation") {
+  if (type === "attachment" || type === "drive" || type === "relation") {
     return FILTER_OPERATORS_BY_KIND.emptyOnly;
   }
   return FILTER_OPERATORS_BY_KIND.value;
@@ -174,9 +176,17 @@ interface ViewConfigToolbarProps {
   config: ViewConfigVO;
   fields: BaseFieldVO[];
   onOpen: (section: ViewConfigEditorSection) => void;
+  children?: ReactNode;
+  trailingControl?: ReactNode;
 }
 
-export function ViewConfigToolbar({ config, fields, onOpen }: ViewConfigToolbarProps) {
+export function ViewConfigToolbar({
+  config,
+  fields,
+  onOpen,
+  children,
+  trailingControl,
+}: ViewConfigToolbarProps) {
   const messages = useCoreI18n();
   const visible = getVisibleViewFieldSlugs(config, fields);
   const schemaOrder = fields.map((field) => field.slug);
@@ -211,30 +221,35 @@ export function ViewConfigToolbar({ config, fields, onOpen }: ViewConfigToolbarP
   return (
     <div
       aria-label={messages.base.viewControlsTitle}
-      className="mb-3 flex min-w-0 items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="@container/view-controls mb-3 flex h-7 min-w-0 items-center gap-1.5 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:gap-0"
       data-testid="view-control-toolbar"
       role="toolbar"
     >
-      {items.map((item) => (
-        <button
-          className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 font-medium text-xs transition-colors ${
-            item.active
-              ? `${ACTIVE_VIEW_CONTROL_CLASS_NAME} hover:bg-muted`
-              : "border-border/70 bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
-          }`}
-          data-testid={`view-control-${item.section}`}
-          key={item.section}
-          onClick={() => onOpen(item.section)}
-          title={`${item.label}: ${item.count}`}
-          type="button"
-        >
-          <item.icon className="size-3.5" />
-          <span>{item.label}</span>
-          <span className="min-w-4 rounded bg-muted/70 px-1 text-center text-[10px] leading-4 text-muted-foreground">
-            {item.count}
-          </span>
-        </button>
-      ))}
+      <div className="flex shrink-0 items-center gap-1.5 [@media(pointer:coarse)]:gap-0">
+        {items.map((item) => (
+          <button
+            aria-label={`${item.label}: ${item.count}`}
+            className={`inline-flex size-7 shrink-0 items-center justify-center gap-1.5 rounded-md border font-medium text-xs transition-colors @min-[640px]/view-controls:w-auto @min-[640px]/view-controls:px-2 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-w-11 ${
+              item.active
+                ? `${ACTIVE_VIEW_CONTROL_CLASS_NAME} hover:bg-muted`
+                : "border-border/70 bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
+            }`}
+            data-testid={`view-control-${item.section}`}
+            key={item.section}
+            onClick={() => onOpen(item.section)}
+            title={`${item.label}: ${item.count}`}
+            type="button"
+          >
+            <item.icon aria-hidden className="size-3.5" />
+            <span className="hidden @min-[640px]/view-controls:inline">{item.label}</span>
+            <span className="hidden min-w-4 rounded bg-muted/70 px-1 text-center text-[10px] leading-4 text-muted-foreground @min-[640px]/view-controls:inline">
+              {item.count}
+            </span>
+          </button>
+        ))}
+        {children}
+      </div>
+      {trailingControl}
     </div>
   );
 }

@@ -14,6 +14,7 @@ import {
   type PreviewFullscreenState,
   usePreviewFullscreen,
 } from "./preview-fullscreen";
+import { createPreviewFileHostViewer } from "./previewfile-host-viewer";
 
 function Providers({ children }: { children: ReactNode }) {
   return <CoreI18nProvider locale="en">{children}</CoreI18nProvider>;
@@ -381,6 +382,17 @@ describe("FilePreviewSurface text File nodes", () => {
       expect(container.querySelector('[data-file-text-preview="code"]')).not.toBeNull(),
     );
     expect(container.textContent).toContain("def greet(name):");
+  });
+
+  it("keeps the File node's server-backed text surface when Cloud registers the shared viewer", async () => {
+    const { container } = renderText(
+      { name: "notes.md", mimeType: "text/markdown" },
+      { lines: ["# Complete File node source", "", "Preserve the inline reader"] },
+      createPreviewFileHostViewer({ locale: "en", officeConversion: true }),
+    );
+    expect(await screen.findByRole("heading", { name: "Complete File node source" })).toBeTruthy();
+    expect(container.querySelector('[data-file-text-preview="markdown"]')).toBeTruthy();
+    expect(container.querySelector('[data-asset-preview="host"]')).toBeNull();
   });
 
   it("lets a host viewer that claims the file go first", () => {

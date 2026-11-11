@@ -17,6 +17,7 @@ import { getNodeDetail } from "../../../logic/node-detail";
 import { resolveVisibleNode } from "../../../logic/node-resolve";
 import { ensureReady } from "../../../logic/seed";
 import { resolveAssetContent } from "../../assets/logic/asset-content-logic";
+import { isFileFieldType } from "../../base/field-types";
 import { getBase, listRecordsPaged } from "../../base/logic/queries";
 import { getFileTreeKind, readFileTreeFile } from "../../filetree/handlers";
 import { getFormByNodeId } from "../../form/logic/form-ops";
@@ -53,7 +54,8 @@ const attachmentSummary = (value: unknown): unknown => {
     if (!item || typeof item !== "object") return item;
     const record = item as Record<string, unknown>;
     return Object.fromEntries(
-      ["assetId", "id", "name", "fileName", "mimeType", "size"].flatMap((key) =>
+      // `path` is a drive cell's folder structure — the point of the column.
+      ["assetId", "id", "name", "fileName", "path", "mimeType", "size"].flatMap((key) =>
         key in record ? [[key, record[key]]] : [],
       ),
     );
@@ -114,7 +116,7 @@ async function snapshotNode(
         options,
       }));
       const attachmentFields = new Set(
-        base.fields.filter((field) => field.type === "attachment").map((field) => field.slug),
+        base.fields.filter((field) => isFileFieldType(field.type)).map((field) => field.slug),
       );
       const records = page.records.map((record) => ({
         id: record.id,

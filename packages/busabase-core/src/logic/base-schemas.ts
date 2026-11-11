@@ -5,6 +5,7 @@ import {
   lookupRollupSchema,
 } from "busabase-contract/domains/base/contract/base-schemas";
 import {
+  gridRowHeightSchema,
   viewFilterConjunctionSchema,
   viewFiltersSchema,
 } from "busabase-contract/domains/base/contract/view-schemas";
@@ -17,6 +18,7 @@ const fieldTypeSchema = z.enum([
   "markdown",
   "html",
   "attachment",
+  "drive",
   "relation",
   "member",
   "number",
@@ -241,6 +243,7 @@ const viewConfigObjectSchema = z.object({
   fieldWidths: z
     .record(z.string().min(1), z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH))
     .optional(),
+  rowHeight: gridRowHeightSchema.optional(),
   coverFieldSlug: z.string().nullable().optional(),
   coverFit: z.enum(["cover", "fit"]).optional(),
   cardSize: z.enum(["small", "medium", "large"]).optional(),

@@ -44,8 +44,10 @@ import {
 } from "../utils/airapp-runtime-descriptor";
 import {
   type AirAppEngineLockState,
+  preferredEngineFallbackLogLine,
   readAirAppEnginePlanRefusal,
   resolveEngineWithPlan,
+  resolvePreferredEngineFallback,
 } from "../utils/engine-plan-gate";
 import { NodepodServiceWorkerError } from "../utils/nodepod-service-worker";
 import { AIRAPP_PREVIEW_IFRAME_SANDBOX } from "../utils/preview-sandbox";
@@ -137,6 +139,49 @@ export const createEligibleAirAppRunner = <T,>({
   return { runnerKind: resolution.engine, runner: createRunner(resolution.engine) };
 };
 
+/**
+ * The `[busabase]` line a run opens with when it is not on the engine anyone
+ * would assume, or `null` when there is nothing to say.
+ *
+ * Two different facts, worded differently. When `airapp.json` decided (nobody
+ * overrode it) and the run moved off its `preferredEngine`, the line names the
+ * preference and why it was set aside — on a Free Cloud space an app preferring
+ * the Website runs in the browser, and before this line the log never said so,
+ * because "browser" is also the default it was compared against. Otherwise the
+ * long-standing "engine selected" line reports a run that moved off the
+ * person's choice or the default.
+ */
+export const airAppEngineNote = ({
+  runtime,
+  preferredEngine,
+  userChose,
+  wantedKind,
+  runnerKind,
+  availableEngines,
+  lockedEngines = [],
+}: {
+  runtime: AirAppRuntimeKind;
+  preferredEngine?: AirAppRunnerKind;
+  userChose: boolean;
+  wantedKind: AirAppRunnerKind;
+  runnerKind: AirAppRunnerKind;
+  availableEngines: readonly AirAppRunnerKind[];
+  lockedEngines?: readonly AirAppRunnerKind[];
+}): string | null => {
+  const fallback = userChose
+    ? null
+    : resolvePreferredEngineFallback({
+        preferred: preferredEngine,
+        engine: runnerKind,
+        offer: { available: [...availableEngines], locked: [...lockedEngines] },
+      });
+  if (fallback) return preferredEngineFallbackLogLine(fallback, runtime);
+  if (runnerKind !== wantedKind) {
+    return `[busabase] engine "${runnerKind}" selected for runtime "${runtime}"\n`;
+  }
+  return null;
+};
+
 export const noEligibleAirAppEngineMessage = (
   messages: ReturnType<typeof useCoreI18n>,
   runtime: AirAppRuntimeKind,
@@ -163,6 +208,13 @@ export const airAppRunErrorText = (
       )
     : entry.error;
 
+const airAppFilesRevision = (files: AirAppVO["files"]): string =>
+  JSON.stringify(
+    files
+      .map((file) => [file.path, file.updatedAt] as const)
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
+
 /**
  * Owns the AirApp runner lifecycle (mount/install/start, log streaming,
  * preview URL) independent of which tab is currently visible. Called once at
@@ -185,6 +237,8 @@ export function useAirAppRunner({
 }) {
   const messages = useCoreI18n();
   const nodeId = airapp?.node.id ?? null;
+  // Sorting makes a refetch that only reorders the listing a no-op.
+  const filesRevision = useMemo(() => airAppFilesRevision(airapp?.files ?? []), [airapp?.files]);
 
   const selectEntry = useCallback(
     (state: ReturnType<typeof useAirAppRunnerStore.getState>) =>
@@ -295,11 +349,17 @@ export function useAirAppRunner({
     // separate concern now: `node.settings.airappEngine` is what was asked for
     // (and only a person writes it), `lastEffectiveKinds` is what happened.
     store.recordEffectiveRunnerKind(currentNodeId, runnerKind);
-    if (runnerKind !== wantedKind) {
-      // The log is the honest place to report a fallback.
-      engineNote = `[busabase] engine "${runnerKind}" selected for runtime "${plan.runtime}"\n`;
-    }
-    store.beginRun(currentNodeId, runner, runnerKind);
+    // The log is the honest place to report a fallback.
+    engineNote = airAppEngineNote({
+      runtime: plan.runtime,
+      preferredEngine: plan.preferredEngine,
+      userChose,
+      wantedKind,
+      runnerKind,
+      availableEngines,
+      lockedEngines: planGate?.lockedEngines,
+    });
+    store.beginRun(currentNodeId, runner, runnerKind, airAppFilesRevision(airapp.files));
     if (engineNote) {
       useAirAppRunnerStore.getState().appendLog(currentNodeId, runner, engineNote);
     }
@@ -442,6 +502,66 @@ export function useAirAppRunner({
         );
     }
   }, [messages, airapp, orpc, availableEngines, planGate]);
+
+  useEffect(() => {
+    if (!nodeId) return;
+    const store = useAirAppRunnerStore.getState();
+    const current = store.entries[nodeId];
+    if (
+      current !== entry ||
+      current?.runnerKind !== "site" ||
+      (current.status !== "error" && current.status !== "ready")
+    )
+      return;
+    const recoverable =
+      current.siteBlockers || (current.recoveringSite && current.status === "ready");
+    if (!recoverable || current.filesRevision === filesRevision) {
+      if (current.recoveringSite && current.runner) {
+        store.finishSiteRecovery(nodeId, current.runner);
+      }
+      return;
+    }
+    // Detail uses the slug, while the side panel uses the id: their query
+    // snapshots can lag each other. A stale surface must neither retry an old
+    // listing nor end recovery while another surface has a newer edit pending.
+    if (current.siteCheckedRevisions.includes(filesRevision)) return;
+    if (!availableEngines.includes("site") || planGate?.lockedEngines.includes("site")) return;
+
+    // Claim synchronously, before any await: detail and side-panel surfaces
+    // share this entry and must not deploy the same file revision twice.
+    // Stay on the website engine; an edited manifest must never start a paid
+    // runtime. SiteRunner's mount/install are no-ops, so only start is needed.
+    const runner = createAirAppRunner("site", { orpc, nodeId });
+    store.beginRun(nodeId, runner, "site", filesRevision, true);
+    runner.onLog((chunk) => useAirAppRunnerStore.getState().appendLog(nodeId, runner, chunk));
+    runner.onReady((url) => useAirAppRunnerStore.getState().setPreviewUrl(nodeId, runner, url));
+    void runner.start().catch((caught: unknown) => {
+      const blockers = caught instanceof AirAppSiteBlockedError ? caught.blockers : undefined;
+      const refusal = readAirAppEnginePlanRefusal(caught);
+      const lock = refusal
+        ? {
+            engine: refusal.engine,
+            planLabel: planGate?.planLabel ?? refusal.planLabel,
+          }
+        : undefined;
+      useAirAppRunnerStore
+        .getState()
+        .setError(
+          nodeId,
+          runner,
+          blockers
+            ? messages.airapp.site.blockedTitle
+            : lock
+              ? fmt(messages.airapp.enginePlan.lockedTitle, { plan: lock.planLabel })
+              : caught instanceof Error
+                ? caught.message
+                : messages.airapp.runFailed,
+          undefined,
+          lock,
+          blockers,
+        );
+    });
+  }, [nodeId, filesRevision, entry, orpc, availableEngines, planGate, messages]);
 
   // Auto-run: opening an AirApp starts it immediately — the header button is
   // then only a restart. Reads the store directly (not the rendered `status`)
@@ -600,7 +720,7 @@ export function AirAppRunControls({
   // the guest iframe under the same boundary.
   return (
     <div
-      className="notranslate flex items-center gap-1.5"
+      className="notranslate flex min-w-0 items-center gap-1.5"
       data-airapp-node-id={airapp?.node.id}
       data-airapp-run-status={status}
       translate="no"

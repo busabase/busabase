@@ -143,6 +143,91 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
   });
 
   describe("Layer 3 â€” secret content scan (hard reject, aggregated, never echoes the match)", () => {
+    it("accepts exact SDK documentation placeholders without rewriting the file", async () => {
+      const content = [
+        "# SDK usage example",
+        'const client = new Client({apiKey: "YOUR_API_KEY_HERE"});',
+        'const legacy = new Bika({apiKey: "__PASTE_YOUR_API_TOKEN_FROM_USER_SETTING__"});',
+      ].join("\n");
+      const created = await client.fileTrees.create({
+        type: "drive",
+        autoMerge: true,
+        slug: "sdk-documentation-placeholder",
+        name: "SDK documentation placeholder",
+        files: [{ path: "README.md", content }],
+      });
+      const file = await client.fileTrees.readFile({
+        type: "drive",
+        nodeId: created.node.id,
+        filePath: "README.md",
+      });
+      expect(file.content).toBe(content);
+    });
+
+    it("rejects a realistic generic assignment after a known placeholder in the same file", async () => {
+      const candidate = "AbCdEf0123456789GhIjKlMn";
+      let caught: unknown;
+      try {
+        await client.fileTrees.create({
+          type: "skill",
+          autoMerge: true,
+          slug: "sdk-placeholder-with-secret",
+          name: "SDK placeholder with secret",
+          files: [
+            {
+              path: "README.md",
+              content: `apiKey = "YOUR_API_KEY_HERE";\ntoken = "${candidate}";`,
+            },
+          ],
+        });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toMatchObject({
+        code: "SECRET_DETECTED",
+        data: { findings: [{ path: "README.md", ruleName: "generic-api-key-assignment" }] },
+      });
+      expect(JSON.stringify(caught)).not.toContain(candidate);
+    });
+
+    it("does not exempt an unrecognized placeholder-shaped value", async () => {
+      const candidate = "YOUR_API_KEY_HERE_WITH_MORE_CHARACTERS";
+      let caught: unknown;
+      try {
+        await client.fileTrees.create({
+          type: "drive",
+          autoMerge: true,
+          slug: "unrecognized-placeholder",
+          name: "Unrecognized placeholder",
+          files: [{ path: "README.md", content: `apiKey = "${candidate}";` }],
+        });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toMatchObject({
+        code: "SECRET_DETECTED",
+        data: { findings: [{ path: "README.md", ruleName: "generic-api-key-assignment" }] },
+      });
+      expect(JSON.stringify(caught)).not.toContain(candidate);
+    });
+
+    it("still applies token-specific rules beside SDK placeholders", async () => {
+      await expect(
+        client.fileTrees.create({
+          type: "drive",
+          autoMerge: true,
+          slug: "sdk-placeholder-with-aws-key",
+          name: "SDK placeholder with AWS key",
+          files: [
+            { path: "README.md", content: `apiKey = "YOUR_API_KEY_HERE";\nkey = ${FAKE_AWS_KEY}` },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        code: "SECRET_DETECTED",
+        data: { findings: [{ path: "README.md", ruleName: "aws-access-key" }] },
+      });
+    });
+
     it("rejects a file whose content matches an AWS-key-shaped string with SECRET_DETECTED, and never echoes the matched value", async () => {
       let caught: unknown;
       try {

@@ -128,7 +128,6 @@ export function TemplateCenter({
           open
           apiClient={apiClient}
           initialRepoUrl={installing.install.repoUrl}
-          initialIntoFolder={installing.install.intoFolder}
           initialPackageName={installing.name}
           onOpenChange={(open) => {
             if (!open) setInstalling(null);

@@ -10,6 +10,7 @@ import {
   describeDateFieldValue,
   getDateFieldOptions,
 } from "../../base/utils/date-value";
+import { withDrivePaths } from "../../base/utils/drive-field-value";
 import { resolveEmbedPreview } from "../../base/utils/embed";
 import {
   EMPTY_WHITEBOARD_FIELD_VALUE,
@@ -128,6 +129,13 @@ export const getFieldPreviewText = (
   if (field.type === "attachment") {
     return getAttachmentRefs(value)
       .map((item) => item.fileName)
+      .join(", ");
+  }
+  // A drive cell's text is where each file sits (`contracts/2026/main.pdf`),
+  // so a moved file reads differently from one that stayed put.
+  if (field.type === "drive") {
+    return getDriveFieldEntries(value)
+      .map((item) => item.path)
       .join(", ");
   }
   if (field.type === "number" && field.options.number?.format === "currency") {
@@ -272,9 +280,15 @@ export const getLinkedRecordIds = (records: RecordVO[], visibleBaseIds: Set<stri
 type AnyAttachmentRef = AttachmentRef & {
   attachmentId?: string;
   assetId?: string;
+  /** Only `drive` refs carry one: where the file sits in the cell's folder tree. */
+  path?: string;
 };
 
-/** Parse an `attachment` field value (array of denormalized refs) defensively. */
+/**
+ * Parse a file field value (array of denormalized refs) defensively. Serves
+ * both `attachment` and `drive` cells: a drive ref's `path` is kept when it is
+ * a string, so reading and re-saving a drive cell never flattens its folders.
+ */
 export const getAttachmentRefs = (value: unknown): AnyAttachmentRef[] => {
   if (!Array.isArray(value)) {
     return [];
@@ -297,19 +311,36 @@ export const getAttachmentRefs = (value: unknown): AnyAttachmentRef[] => {
         fileName: ref.fileName,
         mimeType: typeof ref.mimeType === "string" ? ref.mimeType : "application/octet-stream",
         size: typeof ref.size === "number" && Number.isFinite(ref.size) ? ref.size : 0,
+        ...(typeof ref.path === "string" ? { path: ref.path } : {}),
       });
     }
   }
   return refs;
 };
 
+/**
+ * A `drive` cell's refs, each with an explicit, unique `path` — a ref stored
+ * without one sits at the root under its file name. What the drive editor and
+ * the record page's folder tree work on.
+ */
+export const getDriveFieldEntries = (value: unknown) => withDrivePaths(getAttachmentRefs(value));
+
 export const getSafeAttachmentUrl = (item: AttachmentRef & { assetId?: string }): string | null =>
   item.assetId ? buildAssetContentUrl(item.assetId) : safeFetchableUrl(item.url);
 
 export const isRecordLongField = (field: BaseFieldVO) =>
-  ["longtext", "markdown", "html", "code", "json", "yaml", "ai_summary", "whiteboard"].includes(
-    field.type,
-  );
+  [
+    "longtext",
+    "markdown",
+    "html",
+    "code",
+    "json",
+    "yaml",
+    "ai_summary",
+    "whiteboard",
+    // Its folder tree needs the full width of the record page.
+    "drive",
+  ].includes(field.type);
 
 export const getFieldName = (changeRequest: ChangeRequestVO, fieldSlug: string) => {
   const name = changeRequest.base?.fields.find((field) => field.slug === fieldSlug)?.name;
@@ -403,7 +434,11 @@ const looksLikeJson = (value: string) => {
   }
 };
 
-/** Default value for a field that's never had a value entered — used on the create form. */
+/**
+ * Default value for a field that's never had a value entered — used on the create form.
+ * File fields (`attachment`, `drive`) start as "" like text; their editors read
+ * it as no files and `normalizeEditorFieldValue` sends `[]`.
+ */
 export const defaultNewFieldValue = (fieldType: FieldType): unknown => {
   if (fieldType === "relation" || fieldType === "member") return [];
   if (fieldType === "whiteboard") return structuredClone(EMPTY_WHITEBOARD_FIELD_VALUE);
@@ -413,6 +448,9 @@ export const defaultNewFieldValue = (fieldType: FieldType): unknown => {
 export const getEditorFieldValue = (field: BaseFieldVO, value: unknown) => {
   if (field.type === "attachment") {
     return getAttachmentRefs(value);
+  }
+  if (field.type === "drive") {
+    return getDriveFieldEntries(value);
   }
   if (field.type === "relation") {
     const relationIds = getRelationRecordIds(value);
@@ -439,3 +477,83 @@ export const getEditorFieldValue = (field: BaseFieldVO, value: unknown) => {
   }
   return fieldValueToString(value);
 };
+
+/**
+ * Coerce ONE editor value into the shape the server stores for that field type.
+ *
+ * The record edit form runs every field through this before it validates and
+ * submits; bulk edit and the grid's in-cell editors run their one field through
+ * it too, so all three send the same stored shape. Per-field (rather than only
+ * the form's whole-record pass) because a bulk edit or a cell edit patches a
+ * SUBSET of fields: filling every untouched field with its default would
+ * overwrite data the user never looked at.
+ */
+export const normalizeEditorFieldValue = (field: BaseFieldVO, value: unknown): unknown => {
+  if (field.type === "attachment") {
+    return getAttachmentRefs(value);
+  }
+  if (field.type === "drive") {
+    return getDriveFieldEntries(value);
+  }
+  if (field.type === "number") {
+    // An empty input clears the field; it is distinct from an explicit zero.
+    if (value == null || (typeof value === "string" && value.trim() === "")) return null;
+    // Keep invalid input intact so field validation can report it instead of
+    // silently clearing it or coercing booleans/arrays into a numeric value.
+    if (typeof value !== "string" && typeof value !== "number") return value;
+    const numberValue = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(numberValue) ? numberValue : value;
+  }
+  if (field.type === "checkbox") {
+    return value === true || value === "true";
+  }
+  if (field.type === "multiselect" || field.type === "relation" || field.type === "ai_tags") {
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
+      : typeof value === "string" && value
+        ? [value]
+        : [];
+  }
+  if (field.type === "whiteboard") {
+    // Re-validate/reshape defensively at submit time, same spirit as the
+    // other structured types above — guarantees the server always
+    // receives a well-formed { scene, previewSvg } value.
+    return parseWhiteboardFieldValue(value);
+  }
+  return value ?? "";
+};
+
+type FieldChoice = NonNullable<BaseFieldVO["options"]["choices"]>[number];
+
+/** A stored select value resolved against the field's options. */
+export interface ResolvedChoice {
+  raw: string;
+  choice?: FieldChoice;
+  issue?: "unavailable" | "ambiguous";
+}
+
+/**
+ * Resolve one stored select value. IDs are authoritative; a historical option
+ * NAME resolves only when it identifies exactly one option. Shared by the record
+ * form's option picker and the grid's in-cell picker, so both read a legacy
+ * value the same way.
+ */
+export const resolveChoiceValue = (
+  raw: string,
+  choices: readonly FieldChoice[],
+): ResolvedChoice => {
+  const byId = choices.find((choice) => choice.id === raw);
+  if (byId) return { raw, choice: byId };
+  const byName = choices.filter((choice) => choice.name === raw);
+  return byName.length === 1
+    ? { raw, choice: byName[0] }
+    : { raw, issue: byName.length > 1 ? "ambiguous" : "unavailable" };
+};
+
+/** The non-empty option values a select/multiselect editor value holds, in order. */
+export const getChoiceRawValues = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
+    : typeof value === "string" && value
+      ? [value]
+      : [];

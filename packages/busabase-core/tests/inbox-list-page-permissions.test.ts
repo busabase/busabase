@@ -182,7 +182,9 @@ describe("inbox listPage permissions", () => {
       pageRows: 5,
       responseBytes: expect.any(Number),
     });
-    expect(metrics[0]?.candidateRows).toBeGreaterThan(metrics[0]?.visibleRows ?? 0);
+    // Access is decided in SQL now, so the candidates ARE the visible rows (a
+    // flagged row could still drop out in JS, hence >=).
+    expect(metrics[0]?.candidateRows).toBeGreaterThanOrEqual(metrics[0]?.visibleRows ?? 0);
     expect(metrics[0]?.visibleRows).toBeGreaterThanOrEqual(VISIBLE_PENDING);
   });
 

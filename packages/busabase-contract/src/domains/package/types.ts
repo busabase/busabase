@@ -21,6 +21,7 @@ import {
   lookupRollupSchema,
 } from "../base/contract/base-schemas";
 import {
+  gridRowHeightSchema,
   viewFilterConjunctionSchema,
   viewFilterOperatorSchema,
   viewFiltersSchema,
@@ -103,6 +104,14 @@ export const PACKAGE_COMPUTED_FIELD_TYPES: readonly string[] = [
   "lookup",
   ...PACKAGE_AI_FIELD_TYPES,
 ];
+
+/**
+ * Field types whose values are file refs (`attachment`, and `drive`, which adds
+ * a folder path per file). `busabase-package@1` carries no file bytes, so their
+ * field DEFINITIONS are exported and their values are dropped — a ref would
+ * point at an asset that does not exist in the target space.
+ */
+export const PACKAGE_FILE_FIELD_TYPES: readonly string[] = ["attachment", "drive"];
 
 /**
  * Field types deferred to install's pass 2. `relation` because
@@ -215,6 +224,11 @@ const packageNodeAgentPromptsSchema = customAgentPromptsSchema.optional();
 /** `_node.json` — marks a directory as a verbatim-content file-tree node. */
 export const PackageFileTreeNodeMetaSchema = z.object({
   type: z.enum(PACKAGE_FILE_TREE_NODE_TYPES),
+  /** Node identity when the on-disk directory needs a disambiguating suffix. */
+  slug: z
+    .string()
+    .regex(/^[a-z0-9-]+$/)
+    .optional(),
   name: z.string().min(1),
   description: z.string().default(""),
   position: z.number().int().optional(),
@@ -224,6 +238,10 @@ export type PackageFileTreeNodeMeta = z.infer<typeof PackageFileTreeNodeMetaSche
 
 /** `_folder.json` — optional; also how an empty folder survives git. */
 export const PackageFolderMetaSchema = z.object({
+  slug: z
+    .string()
+    .regex(/^[a-z0-9-]+$/)
+    .optional(),
   /** Defaults to the humanized slug when absent. */
   name: z.string().optional(),
   description: z.string().default(""),
@@ -233,7 +251,13 @@ export const PackageFolderMetaSchema = z.object({
 export type PackageFolderMeta = z.infer<typeof PackageFolderMetaSchema>;
 
 /** `<filename>.node.json` — optional display metadata for a `file` node. */
-export const PackageFileNodeMetaSchema = PackageFolderMetaSchema;
+export const PackageFileNodeMetaSchema = PackageFolderMetaSchema.extend({
+  /** Distinguishes a carried Markdown file from a Doc node. */
+  type: z.literal("file").optional(),
+  /** The original asset filename, independent of the package's safe node path. */
+  fileName: z.string().min(1).optional(),
+  mimeType: z.string().min(1).optional(),
+});
 export type PackageFileNodeMeta = z.infer<typeof PackageFileNodeMetaSchema>;
 
 /**
@@ -257,6 +281,10 @@ export type PackageDocAssetMeta = z.infer<typeof PackageDocAssetMetaSchema>;
 
 /** YAML frontmatter of a `*.md` doc node. */
 export const PackageDocFrontmatterSchema = z.object({
+  slug: z
+    .string()
+    .regex(/^[a-z0-9-]+$/)
+    .optional(),
   name: z.string().min(1),
   description: z.string().default(""),
   position: z.number().int().optional(),
@@ -415,6 +443,7 @@ export const PackageViewConfigSchema = z.object({
   fieldWidths: z
     .record(z.string().min(1), z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH))
     .optional(),
+  rowHeight: gridRowHeightSchema.optional(),
 });
 export type PackageViewConfig = z.infer<typeof PackageViewConfigSchema>;
 
@@ -428,6 +457,10 @@ export const PackageViewSchema = z.object({
 export type PackageView = z.infer<typeof PackageViewSchema>;
 
 export const PackageBaseSchema = z.object({
+  slug: z
+    .string()
+    .regex(/^[a-z0-9-]+$/)
+    .optional(),
   name: z.string().min(1),
   description: z.string().default(""),
   position: z.number().int().optional(),

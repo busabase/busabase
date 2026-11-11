@@ -8,6 +8,7 @@ import {
   AirAppRunError,
   AirAppServiceWorkerUnsupported,
   airAppAutoRunDelay,
+  airAppEngineNote,
   airAppRunErrorText,
   createEligibleAirAppRunner,
   noEligibleAirAppEngineMessage,
@@ -255,6 +256,92 @@ describe("AirApp runtime engine eligibility", () => {
     expect(noEligibleAirAppEngineMessage(coreMessagesByLocale.ja, "node", "remote")).toBe(
       "この AirApp にはクラウドサンドボックスが必要ですが、このデプロイでは Sandock が設定されていません。",
     );
+  });
+});
+
+describe("the engine line a run opens its log with", () => {
+  /**
+   * The same steps `run()` takes: resolve the runner, then word the note from
+   * what was asked for and what actually ran.
+   */
+  const runOn = ({
+    availableEngines,
+    lockedEngines = [],
+    preferredEngine,
+    userChose = false,
+    wantedKind = "browser",
+  }: {
+    availableEngines: ("browser" | "remote" | "site")[];
+    lockedEngines?: ("browser" | "remote" | "site")[];
+    preferredEngine?: "browser" | "remote" | "site";
+    userChose?: boolean;
+    wantedKind?: "browser" | "remote" | "site";
+  }) => {
+    const resolved = createEligibleAirAppRunner({
+      runtime: "node",
+      preferredEngine,
+      userChose,
+      wantedKind,
+      availableEngines,
+      lockedEngines,
+      createRunner: (kind) => ({ kind }),
+    });
+    if (!resolved.runnerKind) throw new Error("expected a runner");
+    return {
+      runnerKind: resolved.runnerKind,
+      note: airAppEngineNote({
+        runtime: "node",
+        preferredEngine,
+        userChose,
+        wantedKind,
+        runnerKind: resolved.runnerKind,
+        availableEngines,
+        lockedEngines,
+      }),
+    };
+  };
+
+  it("says a Free space ran a Website-preferring app in the browser, and why", () => {
+    // Before, this printed nothing: the run landed on "browser", which is also
+    // the default the old line compared against.
+    expect(
+      runOn({
+        availableEngines: ["browser"],
+        lockedEngines: ["remote", "site"],
+        preferredEngine: "site",
+      }),
+    ).toEqual({
+      runnerKind: "browser",
+      note: '[busabase] airapp.json prefers engine "site", but this space\'s plan does not include it; running on engine "browser" instead\n',
+    });
+  });
+
+  it("keeps the Plus run's line exactly as it was", () => {
+    expect(
+      runOn({ availableEngines: ["browser", "remote", "site"], preferredEngine: "site" }),
+    ).toEqual({
+      runnerKind: "site",
+      note: '[busabase] engine "site" selected for runtime "node"\n',
+    });
+  });
+
+  it("does not blame the file when a person chose the engine", () => {
+    expect(
+      runOn({
+        availableEngines: ["browser"],
+        lockedEngines: ["remote", "site"],
+        preferredEngine: "site",
+        userChose: true,
+        wantedKind: "browser",
+      }),
+    ).toEqual({ runnerKind: "browser", note: null });
+  });
+
+  it("prints nothing when the app prefers nothing and runs on the default", () => {
+    expect(runOn({ availableEngines: ["browser"], lockedEngines: ["site"] })).toEqual({
+      runnerKind: "browser",
+      note: null,
+    });
   });
 });
 

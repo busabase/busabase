@@ -12,9 +12,10 @@ import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 import { CoreI18nProvider } from "../../../i18n";
 import { validateRecordFields } from "../../base/field-rules";
+import { normalizeEditorFieldValue } from "../helpers/field";
 import { DashboardOrpcProvider } from "../orpc-context";
 import { DashboardVisitorProvider } from "../visitor-context";
-import { normalizeEditorFieldValue, RecordDetailView, RecordEditorView } from "./record-views";
+import { RecordDetailView, RecordEditorView } from "./record-views";
 
 Object.assign(globalThis, { React });
 

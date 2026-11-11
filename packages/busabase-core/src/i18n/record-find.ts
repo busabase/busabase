@@ -1,0 +1,198 @@
+import type { CoreLocale } from "./locales";
+
+const en = {
+  label: "Find records in this view",
+  placeholder: "Find records…",
+  field: "Find in field",
+  common: "Common fields",
+  clear: "Clear find",
+  searching: "Finding records…",
+  empty: "No matching records in this view.",
+  hidden: "Not shown in this view",
+  hiddenHint: "Fields not shown in this view can be searched without showing their columns.",
+  filter: "Use filters",
+  dynamic: "Computed values are not supported yet",
+  relationTitle: "The linked record's primary field cannot be searched yet. Choose another field.",
+  reverse: "Reverse relations are not supported yet",
+  unsupported: "Not supported for find",
+  removed: "Choose a field again",
+};
+type RecordFindMessages = { [K in keyof typeof en]: string };
+export const recordFindMessages: Record<CoreLocale, RecordFindMessages> = {
+  en,
+  "zh-CN": {
+    label: "在当前视图查找记录",
+    placeholder: "查找记录…",
+    field: "查找字段",
+    common: "常用字段",
+    clear: "清除查找",
+    searching: "正在查找记录…",
+    empty: "当前视图中没有匹配记录。",
+    hidden: "当前视图未显示",
+    hiddenHint: "当前视图未显示的字段也可以查找，无需先显示对应的列。",
+    filter: "请使用筛选",
+    dynamic: "暂不支持查找计算结果",
+    relationTitle: "关联记录的主字段暂不支持查找，请选择其他字段。",
+    reverse: "暂不支持反向关联",
+    unsupported: "暂不支持查找此字段",
+    removed: "请重新选择字段",
+  },
+  "zh-TW": {
+    label: "在目前檢視尋找記錄",
+    placeholder: "尋找記錄…",
+    field: "尋找欄位",
+    common: "常用欄位",
+    clear: "清除尋找",
+    searching: "正在尋找記錄…",
+    empty: "目前檢視中沒有符合的記錄。",
+    hidden: "目前檢視未顯示",
+    hiddenHint: "目前檢視未顯示的欄位也可以搜尋，無需先顯示對應的欄。",
+    filter: "請使用篩選",
+    dynamic: "暫不支援尋找計算結果",
+    relationTitle: "關聯記錄的主欄位暫不支援尋找，請選擇其他欄位。",
+    reverse: "暫不支援反向關聯",
+    unsupported: "暫不支援尋找此欄位",
+    removed: "請重新選擇欄位",
+  },
+  ja: {
+    label: "現在のビューでレコードを検索",
+    placeholder: "レコードを検索…",
+    field: "検索フィールド",
+    common: "よく使うフィールド",
+    clear: "検索をクリア",
+    searching: "検索中…",
+    empty: "このビューに一致するレコードはありません。",
+    hidden: "このビューでは非表示",
+    hiddenHint: "このビューで非表示のフィールドも、列を表示せずに検索できます。",
+    filter: "フィルターを使用",
+    dynamic: "計算値の検索は未対応です",
+    relationTitle: "関連レコードの主フィールドの検索は未対応です。別のフィールドを選んでください。",
+    reverse: "逆方向の関連は未対応です",
+    unsupported: "検索未対応のフィールド",
+    removed: "フィールドを選び直してください",
+  },
+  ko: {
+    label: "현재 보기에서 레코드 찾기",
+    placeholder: "레코드 찾기…",
+    field: "검색 필드",
+    common: "일반 필드",
+    clear: "찾기 지우기",
+    searching: "찾는 중…",
+    empty: "현재 보기에 일치하는 레코드가 없습니다.",
+    hidden: "현재 보기에 표시되지 않음",
+    hiddenHint: "현재 보기에 표시되지 않는 필드도 열을 표시하지 않고 검색할 수 있습니다.",
+    filter: "필터 사용",
+    dynamic: "계산 값 검색은 아직 지원하지 않습니다",
+    relationTitle:
+      "연결된 레코드의 기본 필드 검색은 아직 지원하지 않습니다. 다른 필드를 선택하세요.",
+    reverse: "역방향 관계는 아직 지원하지 않습니다",
+    unsupported: "검색을 지원하지 않는 필드",
+    removed: "필드를 다시 선택하세요",
+  },
+  es: {
+    label: "Buscar registros en esta vista",
+    placeholder: "Buscar registros…",
+    field: "Campo de búsqueda",
+    common: "Campos habituales",
+    clear: "Borrar búsqueda",
+    searching: "Buscando registros…",
+    empty: "No hay registros coincidentes en esta vista.",
+    hidden: "No se muestra en esta vista",
+    hiddenHint:
+      "Puedes buscar en campos que no se muestran en esta vista sin mostrar sus columnas.",
+    filter: "Usa los filtros",
+    dynamic: "Valores calculados aún no disponibles",
+    relationTitle:
+      "El campo principal del registro vinculado aún no admite búsquedas. Elige otro campo.",
+    reverse: "Relaciones inversas aún no disponibles",
+    unsupported: "Campo no compatible",
+    removed: "Vuelve a elegir un campo",
+  },
+  pt: {
+    label: "Buscar registros nesta visualização",
+    placeholder: "Buscar registros…",
+    field: "Campo de busca",
+    common: "Campos comuns",
+    clear: "Limpar busca",
+    searching: "Buscando registros…",
+    empty: "Nenhum registro correspondente nesta visualização.",
+    hidden: "Não exibido nesta visualização",
+    hiddenHint:
+      "Você pode buscar em campos não exibidos nesta visualização sem mostrar suas colunas.",
+    filter: "Use os filtros",
+    dynamic: "Valores calculados ainda não suportados",
+    relationTitle:
+      "O campo principal do registro vinculado ainda não permite busca. Escolha outro campo.",
+    reverse: "Relações inversas ainda não suportadas",
+    unsupported: "Campo não suportado",
+    removed: "Escolha um campo novamente",
+  },
+  vi: {
+    label: "Tìm bản ghi trong chế độ xem này",
+    placeholder: "Tìm bản ghi…",
+    field: "Trường tìm kiếm",
+    common: "Trường thông dụng",
+    clear: "Xóa tìm kiếm",
+    searching: "Đang tìm bản ghi…",
+    empty: "Không có bản ghi phù hợp trong chế độ xem này.",
+    hidden: "Không hiển thị trong chế độ xem này",
+    hiddenHint:
+      "Bạn có thể tìm trong các trường không hiển thị ở chế độ xem này mà không cần hiện cột.",
+    filter: "Dùng bộ lọc",
+    dynamic: "Chưa hỗ trợ giá trị tính toán",
+    relationTitle:
+      "Chưa hỗ trợ tìm trong trường chính của bản ghi liên kết. Vui lòng chọn trường khác.",
+    reverse: "Chưa hỗ trợ liên kết ngược",
+    unsupported: "Chưa hỗ trợ trường này",
+    removed: "Vui lòng chọn lại trường",
+  },
+  fr: {
+    label: "Rechercher dans cette vue",
+    placeholder: "Rechercher des enregistrements…",
+    field: "Champ de recherche",
+    common: "Champs courants",
+    clear: "Effacer la recherche",
+    searching: "Recherche en cours…",
+    empty: "Aucun enregistrement correspondant dans cette vue.",
+    hidden: "Non affiché dans cette vue",
+    hiddenHint:
+      "Vous pouvez rechercher dans les champs non affichés dans cette vue sans afficher leurs colonnes.",
+    filter: "Utilisez les filtres",
+    dynamic: "Valeurs calculées non prises en charge",
+    relationTitle:
+      "La recherche dans le champ principal de l’enregistrement lié n’est pas encore prise en charge. Choisissez un autre champ.",
+    reverse: "Relations inverses non prises en charge",
+    unsupported: "Champ non pris en charge",
+    removed: "Choisissez à nouveau un champ",
+  },
+  de: {
+    label: "Datensätze in dieser Ansicht suchen",
+    placeholder: "Datensätze suchen…",
+    field: "Suchfeld",
+    common: "Übliche Felder",
+    clear: "Suche löschen",
+    searching: "Datensätze werden gesucht…",
+    empty: "Keine passenden Datensätze in dieser Ansicht.",
+    hidden: "In dieser Ansicht nicht angezeigt",
+    hiddenHint:
+      "Sie können Felder durchsuchen, die in dieser Ansicht nicht angezeigt werden, ohne ihre Spalten einzublenden.",
+    filter: "Filter verwenden",
+    dynamic: "Berechnete Werte noch nicht unterstützt",
+    relationTitle:
+      "Das Primärfeld des verknüpften Datensatzes kann noch nicht durchsucht werden. Wählen Sie ein anderes Feld.",
+    reverse: "Rückverknüpfungen noch nicht unterstützt",
+    unsupported: "Feld nicht unterstützt",
+    removed: "Feld erneut auswählen",
+  },
+};
+
+export function recordFindErrorMessage(locale: CoreLocale, error: unknown): string | undefined {
+  if (!error || typeof error !== "object" || !("data" in error)) return undefined;
+  const data = error.data;
+  if (!data || typeof data !== "object" || !("reason" in data)) return undefined;
+  const messages = recordFindMessages[locale];
+  if (data.reason === "unknown_find_field") return messages.removed;
+  if (data.reason === "unsupported_find_relation_title") return messages.relationTitle;
+  if (data.reason === "unsupported_find_field") return messages.unsupported;
+  return undefined;
+}

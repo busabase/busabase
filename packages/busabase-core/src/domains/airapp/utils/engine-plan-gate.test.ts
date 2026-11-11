@@ -2,9 +2,11 @@ import { ORPCError } from "@orpc/client";
 import { describe, expect, it } from "vitest";
 import {
   AIRAPP_ENGINE_PLAN_REQUIRED,
+  preferredEngineFallbackLogLine,
   readAirAppEnginePlanRefusal,
   resolveAirAppEngineOffer,
   resolveEngineWithPlan,
+  resolvePreferredEngineFallback,
 } from "./engine-plan-gate";
 
 /** Busabase Cloud with Sandock configured — what busabase.com runs. */
@@ -175,5 +177,72 @@ describe("a required site on a plan that leaves it out", () => {
         "site",
       ),
     ).toEqual({ kind: "run", engine: "site" });
+  });
+});
+
+describe("a preferred engine the run set aside", () => {
+  const must = <T>(value: T | null): T => {
+    if (value === null) throw new Error("expected a fallback");
+    return value;
+  };
+  /** A Free space on Busabase Cloud with the site host configured. */
+  const FREE = { available: ["browser"], locked: ["remote", "site"] } as const;
+  /** The same deployment on Plus. */
+  const PLUS = { available: ["browser", "remote", "site"], locked: [] } as const;
+  const offer = (o: typeof FREE | typeof PLUS) => ({
+    available: [...o.available],
+    locked: [...o.locked],
+  });
+
+  it("names the plan when a Free space runs a Website-preferring app in the browser", () => {
+    const fallback = resolvePreferredEngineFallback({
+      preferred: "site",
+      engine: "browser",
+      offer: offer(FREE),
+    });
+    expect(fallback).toEqual({ preferred: "site", engine: "browser", reason: "plan" });
+    expect(preferredEngineFallbackLogLine(must(fallback), "node")).toBe(
+      '[busabase] airapp.json prefers engine "site", but this space\'s plan does not include it; running on engine "browser" instead\n',
+    );
+  });
+
+  it("says nothing on Plus, where the app runs on the Website it asked for", () => {
+    expect(
+      resolvePreferredEngineFallback({ preferred: "site", engine: "site", offer: offer(PLUS) }),
+    ).toBeNull();
+  });
+
+  it("says nothing when the app prefers nothing", () => {
+    expect(
+      resolvePreferredEngineFallback({
+        preferred: undefined,
+        engine: "browser",
+        offer: offer(FREE),
+      }),
+    ).toBeNull();
+  });
+
+  it("tells a missing engine apart from a locked one", () => {
+    const fallback = resolvePreferredEngineFallback({
+      preferred: "remote",
+      engine: "browser",
+      offer: { available: ["browser"], locked: [] },
+    });
+    expect(fallback?.reason).toBe("deployment");
+    expect(preferredEngineFallbackLogLine(must(fallback), "node")).toContain(
+      "this deployment does not offer it",
+    );
+  });
+
+  it("names the runtime when the preferred engine is offered but cannot run the app", () => {
+    const fallback = resolvePreferredEngineFallback({
+      preferred: "browser",
+      engine: "remote",
+      offer: { available: ["browser", "remote"], locked: [] },
+    });
+    expect(fallback?.reason).toBe("runtime");
+    expect(preferredEngineFallbackLogLine(must(fallback), "python")).toContain(
+      'it cannot run a "python" app',
+    );
   });
 });

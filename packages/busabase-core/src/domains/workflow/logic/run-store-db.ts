@@ -6,15 +6,19 @@ import {
   WorkflowRunSchema,
   type WorkflowStepOutput,
 } from "busabase-contract/domains/workflow/run";
-import { and, asc, count, desc, eq, inArray, isNull, lt, lte, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, lt, lte, notInArray, or } from "drizzle-orm";
 import type { BusabaseDatabase } from "../../../context";
+import { selectOutsideRestoringSpaces } from "../../dump/logic/restore-activity";
 import { busabaseWorkflowRuns, type WorkflowRunPO } from "../schema/workflow-runs";
 import { FINISHED_WORKFLOW_RUN_STATUSES, type WorkflowRunStore } from "./run-store";
 
 const toDate = (value: string | null | undefined): Date | null => (value ? new Date(value) : null);
 
+/** When the scheduler should look at a waiting run again: a Wait's end, or a sandbox's next check. */
 const resumeAtOf = (run: WorkflowRun): Date | null =>
-  run.status === "waiting" && run.pause?.kind === "wait" ? toDate(run.pause.resumeAt) : null;
+  run.status === "waiting" && (run.pause?.kind === "wait" || run.pause?.kind === "sandbox")
+    ? toDate(run.pause.resumeAt)
+    : null;
 
 const toVO = (row: WorkflowRunPO): WorkflowRun =>
   WorkflowRunSchema.parse({
@@ -39,6 +43,10 @@ const toVO = (row: WorkflowRunPO): WorkflowRun =>
   });
 
 const mutableColumns = (run: WorkflowRun) => ({
+  // Written on every save, not only on insert: a failed run is stamped with
+  // `retriedAs` after the fact, and a stamp that is not stored does not stop a
+  // second retry.
+  payload: run.payload,
   status: run.status,
   cancelledBy: run.cancelledBy,
   cursorNodeId: run.cursorNodeId,
@@ -67,7 +75,6 @@ export const createDbWorkflowRunStore = (
       startedBy: run.startedBy,
       startedVia: run.startedVia,
       recordId: run.recordId,
-      payload: run.payload,
       startedAt: new Date(run.startedAt),
       leaseUntil: new Date(leaseUntil),
       ...mutableColumns(run),
@@ -142,16 +149,19 @@ export const createDbWorkflowRunStore = (
   },
   async purgeFinished(before, limit) {
     const client = await db();
-    const stale = await client
-      .select({ id: busabaseWorkflowRuns.id })
-      .from(busabaseWorkflowRuns)
-      .where(
-        and(
-          inArray(busabaseWorkflowRuns.status, [...FINISHED_WORKFLOW_RUN_STATUSES]),
-          lt(busabaseWorkflowRuns.updatedAt, new Date(before)),
-        ),
-      )
-      .limit(limit);
+    const stale = await selectOutsideRestoringSpaces((excluded) =>
+      client
+        .select({ id: busabaseWorkflowRuns.id, spaceId: busabaseWorkflowRuns.spaceId })
+        .from(busabaseWorkflowRuns)
+        .where(
+          and(
+            inArray(busabaseWorkflowRuns.status, [...FINISHED_WORKFLOW_RUN_STATUSES]),
+            excluded.length > 0 ? notInArray(busabaseWorkflowRuns.spaceId, excluded) : undefined,
+            lt(busabaseWorkflowRuns.updatedAt, new Date(before)),
+          ),
+        )
+        .limit(limit),
+    );
     if (stale.length === 0) return 0;
     await client.delete(busabaseWorkflowRuns).where(
       inArray(
@@ -175,37 +185,61 @@ export const createDbWorkflowRunStore = (
       .orderBy(asc(busabaseWorkflowRuns.resumeAt));
     return rows.map(toVO);
   },
-  async listDue(now, limit) {
-    const rows = await (await db())
-      .select()
-      .from(busabaseWorkflowRuns)
-      .where(
-        or(
-          eq(busabaseWorkflowRuns.status, "queued"),
-          and(
-            eq(busabaseWorkflowRuns.status, "waiting"),
-            lte(busabaseWorkflowRuns.resumeAt, new Date(now)),
-          ),
-        ),
-      )
-      .orderBy(asc(busabaseWorkflowRuns.updatedAt))
-      .limit(limit);
-    return rows.map(toVO);
-  },
-  async listInterrupted(now, limit) {
+  async listWaitingApproval(spaceId, limit) {
     const rows = await (await db())
       .select()
       .from(busabaseWorkflowRuns)
       .where(
         and(
-          eq(busabaseWorkflowRuns.status, "running"),
-          or(
-            isNull(busabaseWorkflowRuns.leaseUntil),
-            lt(busabaseWorkflowRuns.leaseUntil, new Date(now)),
-          ),
+          eq(busabaseWorkflowRuns.spaceId, spaceId),
+          eq(busabaseWorkflowRuns.status, "waiting_approval"),
         ),
       )
+      .orderBy(desc(busabaseWorkflowRuns.updatedAt))
       .limit(limit);
+    return rows.map(toVO);
+  },
+  async listDue(now, limit) {
+    const client = await db();
+    const rows = await selectOutsideRestoringSpaces((excluded) =>
+      client
+        .select()
+        .from(busabaseWorkflowRuns)
+        .where(
+          and(
+            excluded.length > 0 ? notInArray(busabaseWorkflowRuns.spaceId, excluded) : undefined,
+            or(
+              eq(busabaseWorkflowRuns.status, "queued"),
+              and(
+                eq(busabaseWorkflowRuns.status, "waiting"),
+                lte(busabaseWorkflowRuns.resumeAt, new Date(now)),
+              ),
+            ),
+          ),
+        )
+        .orderBy(asc(busabaseWorkflowRuns.updatedAt))
+        .limit(limit),
+    );
+    return rows.map(toVO);
+  },
+  async listInterrupted(now, limit) {
+    const client = await db();
+    const rows = await selectOutsideRestoringSpaces((excluded) =>
+      client
+        .select()
+        .from(busabaseWorkflowRuns)
+        .where(
+          and(
+            eq(busabaseWorkflowRuns.status, "running"),
+            excluded.length > 0 ? notInArray(busabaseWorkflowRuns.spaceId, excluded) : undefined,
+            or(
+              isNull(busabaseWorkflowRuns.leaseUntil),
+              lt(busabaseWorkflowRuns.leaseUntil, new Date(now)),
+            ),
+          ),
+        )
+        .limit(limit),
+    );
     return rows.map(toVO);
   },
   async claim(runId, now, leaseUntil) {

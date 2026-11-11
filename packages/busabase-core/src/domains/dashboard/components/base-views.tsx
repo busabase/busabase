@@ -17,10 +17,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { localizeCoreErrorMessage, presentCoreError } from "../../../i18n/localize-error";
-import { isSystemFieldType } from "../../base/field-types";
 import { type DateFieldOptions, getDateFieldOptions } from "../../base/utils/date-value";
 import { isDeletableFieldType } from "../../base/utils/field-capabilities";
-import { isUnconvertibleFieldType } from "../../base/utils/field-conversion";
+import { canConvertFieldType } from "../../base/utils/field-conversion";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { FormsForBasePanel } from "../../form/components/forms-for-base-panel";
 import { isDerivedFieldSlug } from "../helpers/change-request";
@@ -55,6 +54,8 @@ import type {
   ViewSubmitOptions,
   ViewUpdatePayload,
 } from "../helpers/view-types";
+import type { UpdateRecordCell } from "../hooks/use-base-grid-editing";
+import type { RecordFindControl } from "../hooks/use-record-find";
 import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-actions";
 import { useRegisterTopbarNodeInfo } from "../hooks/use-register-topbar-node-info";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
@@ -75,6 +76,7 @@ import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import { NodeSettingsDialog } from "./node-settings-dialog";
 import { EmptyState, PropertyRow, SidebarPanel } from "./primitives";
 import { RecordTitleBadge } from "./record-title-badge";
+import { RecordsPaginationBar } from "./records-pagination-bar";
 import { findReverseColumn, RelationReverseSettings } from "./relation-reverse-settings";
 import { SelectChoicesEditor } from "./select-choices-editor";
 import { NodeDetailSkeleton } from "./skeletons";
@@ -104,6 +106,7 @@ export function BaseDetailView({
   orderedRecords,
   orpc,
   pagination,
+  recordFind,
   base,
   onCreateView,
   onDeleteView,
@@ -116,6 +119,7 @@ export function BaseDetailView({
   onOpenRecord,
   onPatchRecord,
   onReorderView,
+  onUpdateRecordCell,
   onUpdateView,
   views,
 }: {
@@ -135,6 +139,7 @@ export function BaseDetailView({
   /** Wired through to the header's "•••" menu (NodeActionsMenu). */
   orpc: BusabaseQueryUtils;
   pagination?: RecordsPagination;
+  recordFind?: RecordFindControl;
   base: BaseVO | null;
   onCreateView: (
     base: BaseVO,
@@ -169,6 +174,8 @@ export function BaseDetailView({
   ) => Promise<{ materialized: true } | { materialized: false; changeRequestId: string }>;
   /** Drag-to-reorder a view tab; `position` is its 0-based target index among the Base's views. */
   onReorderView?: (view: ViewVO, position: number) => void;
+  /** In-cell editing of one field; see `BusaBaseTable`. */
+  onUpdateRecordCell?: UpdateRecordCell;
   onUpdateView: (
     view: ViewVO,
     payload: ViewUpdatePayload,
@@ -217,13 +224,14 @@ export function BaseDetailView({
         records.filter((record) => record.baseId === base?.id),
         activeView?.config,
       );
+  const isTableView = !activeView || activeView.type === "table";
   return (
-    <div
-      className="h-full min-h-0 w-full min-w-0 flex-1 overflow-auto"
-      data-base-detail-scroll
-      ref={scrollElementRef}
-    >
-      <section>
+    <section className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
+      <div
+        className="min-h-0 min-w-0 flex-1 overflow-auto"
+        data-base-detail-scroll
+        ref={scrollElementRef}
+      >
         <BaseTopbarSlots base={base} orpc={orpc} />
         <div className="px-6 py-5">
           <SubmitPermissionProvider permissionLevel={basePermissionLevel}>
@@ -246,17 +254,25 @@ export function BaseDetailView({
               onOpenRecord={onOpenRecord}
               onPatchRecord={onPatchRecord}
               onReorderView={onReorderView}
+              onUpdateRecordCell={onUpdateRecordCell}
               onUpdateView={onUpdateView}
               records={filteredRecords}
               relationRecords={records}
               pagination={pagination}
+              recordFind={recordFind}
               scrollElementRef={scrollElementRef}
               views={baseViews}
             />
           </SubmitPermissionProvider>
         </div>
-      </section>
-    </div>
+      </div>
+      {isTableView && pagination ? (
+        <RecordsPaginationBar
+          className="mx-3 shrink-0 sm:mx-6 [&_ul]:flex-wrap [&_ul]:justify-end"
+          {...pagination}
+        />
+      ) : null}
+    </section>
   );
 }
 
@@ -293,10 +309,10 @@ function FieldTypeConversionPanel({
   // Ask the same two predicates the server gate asks, never a third hardcoded
   // list: a stale duplicate of exactly this set is what once let `member → text`
   // through and nulled a whole column with no error and no undo.
-  const sourceUnconvertible = isSystemFieldType(field.type) || isUnconvertibleFieldType(field.type);
   const convertibleTargets = fieldTypeOptions.filter(
-    (type) => !isSystemFieldType(type) && !isUnconvertibleFieldType(type),
+    (type) => type !== field.type && canConvertFieldType(field.type, type),
   );
+  const sourceUnconvertible = convertibleTargets.length === 0;
   const wantsChoiceMode = targetType === "select" || targetType === "multiselect";
 
   return (

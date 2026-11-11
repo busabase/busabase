@@ -36,6 +36,8 @@ import {
 import {
   RichNodeNotFound,
   RichNodeReviewLink,
+  richNodeActionClusterClass,
+  richNodeSaveStatusClass,
   richNodeSaveStatusLabel,
   useNodeContentSave,
   useServerDocumentSync,
@@ -167,51 +169,55 @@ function HtmlEditor({ document: htmlDocument, node, orpc }: HtmlEditorProps) {
     isAnonymous ? null : (
       <>
         <span
-          className={
-            status === "error"
-              ? "hidden max-w-48 truncate text-destructive text-xs sm:block"
-              : "hidden text-muted-foreground text-xs sm:block"
-          }
+          className={richNodeSaveStatusClass(status)}
+          data-rich-node-save-status=""
           title={error ?? statusLabel}
         >
           {error ?? statusLabel}
         </span>
         {reviewRequestId ? <RichNodeReviewLink requestId={reviewRequestId} /> : null}
-        <NodePinButton
-          payload={{ nodeId: node.id }}
-          tabId={nodeSidePanelTabId("html", node.id)}
-          tabType="html-preview"
-          title={node.name}
-        />
-        <PreviewFullscreenButton
-          fullscreenState={fullscreenState}
-          label={messages.airapp.enterFullscreen}
-          onEnter={() => setSelectedTab("preview")}
-        />
-        <NodeAgentPromptsButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="html" />
-        <NodeActionsMenu
-          nodeId={node.id}
-          nodeName={node.name}
-          nodeSlug={node.slug}
-          nodeType="html"
-          orpc={orpc}
-        />
-        <Button
-          aria-label={messages.richNodes.save}
-          disabled={
-            status === "saving" ||
-            status === "saved" ||
-            status === "in_review" ||
-            status === "approved"
-          }
-          onClick={() => save({ version: 1, source })}
-          size="icon-sm"
-          title={messages.richNodes.save}
-          type="button"
-          variant="default"
-        >
-          <Save className="size-3.5" />
-        </Button>
+        <div className={richNodeActionClusterClass} data-rich-node-actions="">
+          <NodePinButton
+            payload={{ nodeId: node.id }}
+            tabId={nodeSidePanelTabId("html", node.id)}
+            tabType="html-preview"
+            title={node.name}
+          />
+          <PreviewFullscreenButton
+            fullscreenState={fullscreenState}
+            label={messages.airapp.enterFullscreen}
+            onEnter={() => setSelectedTab("preview")}
+          />
+          <NodeAgentPromptsButton
+            orpc={orpc}
+            nodeId={node.id}
+            nodeName={node.name}
+            nodeType="html"
+          />
+          <NodeActionsMenu
+            nodeId={node.id}
+            nodeName={node.name}
+            nodeSlug={node.slug}
+            nodeType="html"
+            orpc={orpc}
+          />
+          <Button
+            aria-label={messages.richNodes.save}
+            disabled={
+              status === "saving" ||
+              status === "saved" ||
+              status === "in_review" ||
+              status === "approved"
+            }
+            onClick={() => save({ version: 1, source })}
+            size="icon-sm"
+            title={messages.richNodes.save}
+            type="button"
+            variant="default"
+          >
+            <Save className="size-3.5" />
+          </Button>
+        </div>
       </>
     ),
   );

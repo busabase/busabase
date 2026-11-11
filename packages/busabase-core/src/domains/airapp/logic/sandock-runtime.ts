@@ -162,7 +162,7 @@ export function resolveSandockConfig(env: NodeJS.ProcessEnv = process.env): Sand
  * Sandock's own three apps (`sandock-core`, `apps/sandock`, `apps/sandock-cloud`)
  * and reaches into `@orpc/*` types that never belonged in a published surface.
  */
-const client = (config: SandockConfig) =>
+export const sandockClient = (config: SandockConfig) =>
   createSandockClient({
     baseUrl: config.baseUrl.replace(/\/+$/, ""),
     headers: {
@@ -224,7 +224,7 @@ export async function __resetSandockRuntimeForTest(): Promise<void> {
   reusableSandboxes.clear();
   await Promise.all(
     sandboxes.map(async ({ id, config }) => {
-      const api = client(config);
+      const api = sandockClient(config);
       await cleanupStep(`sandbox test reset delete (${id})`, () => api.sandbox.delete(id));
     }),
   );
@@ -338,7 +338,7 @@ const assertExecutionSucceeded = (operation: string, result: ExecutionResultLike
  * simply renders broken, which is the worst shape a failure can take.
  */
 const writeFile = async (
-  api: ReturnType<typeof client>,
+  api: ReturnType<typeof sandockClient>,
   id: string,
   path: string,
   content: string,
@@ -385,7 +385,7 @@ export async function* runAirAppSandock(
     return;
   }
 
-  const api = client(config);
+  const api = sandockClient(config);
   const port = plan.port ?? 3000;
   const installCommand = substitutePort(plan.install, port);
   const startCommand = substitutePort(plan.start, port);
@@ -400,7 +400,7 @@ export async function* runAirAppSandock(
     if (reusable && !hasSameSandboxConfiguration(reusable.config, config)) {
       const staleId = reusable.id;
       dropReusableSandbox(input.owner, input.nodeId, staleId);
-      const staleApi = client(reusable.config);
+      const staleApi = sandockClient(reusable.config);
       const deleteError = await cleanupStep("changed-config cached sandbox delete", () =>
         staleApi.sandbox.delete(staleId),
       );

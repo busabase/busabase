@@ -81,7 +81,7 @@ import {
   Shield,
   Trash2,
 } from "lucide-react";
-import { useContext, useRef, useState } from "react";
+import { type ReactNode, useContext, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -102,6 +102,7 @@ export function NodeActionsMenu({
   onRenamed,
   childCount,
   onDeleted,
+  extraActions,
 }: {
   orpc: BusabaseQueryUtils;
   nodeId: string;
@@ -125,6 +126,8 @@ export function NodeActionsMenu({
   /** Fired after a successful delete — e.g. an airapp tearing down its live
    *  Nodepod runner rather than leaking it. */
   onDeleted?: () => void;
+  /** Node-specific actions; their dialogs stay mounted outside this menu. */
+  extraActions?: ReactNode;
 }) {
   const messages = useCoreI18n();
   const [, setLocation] = useLocation();
@@ -292,6 +295,7 @@ export function NodeActionsMenu({
               {messages.share.title}
             </DropdownMenuItem>
           )}
+          {extraActions}
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setDeleteOpen(true)} variant="destructive">
             <Trash2 className="mr-2 size-3.5" />
