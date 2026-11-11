@@ -698,6 +698,105 @@ test("stops a streaming turn and keeps the follow-up separate", async ({ page },
   await capture(page, testInfo, "17-stop-turn-follow-up-stays-separate");
 });
 
+test("side-panel chat resumes the selected conversation after refresh", async ({
+  page,
+  request,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await connectBudaAgent(page);
+  const slug = unique("resumable-agent-chat")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+  await json(
+    await request.post("/api/v1/docs", {
+      data: {
+        autoMerge: true,
+        slug,
+        name: "Watchlist planning",
+        body: "# Watchlist planning\n\nDiscuss saved videos beside this page.",
+      },
+    }),
+  );
+  await page.goto(`/dashboard/local/doc/${slug}`);
+  await page.getByTestId("node-agent-actions-trigger").click();
+  await page
+    .getByRole("menu")
+    .getByRole("menuitem", { name: "Buda AI Agent", exact: true })
+    .click();
+
+  const panel = page.getByRole("region", { name: "Side panel" });
+  const composer = panel.getByPlaceholder("Message Buda AI Agent…");
+  const submit = composer.locator("xpath=ancestor::form").locator('button[type="submit"]');
+  const waitForPanel = async () => {
+    await expect
+      .poll(async () => {
+        const box = await panel.boundingBox();
+        return !!box && Math.abs(box.width - 420) < 1 && Math.abs(box.x + box.width - 1440) < 1;
+      })
+      .toBe(true);
+  };
+  const sendAndReceive = async (text: string) => {
+    const sent = page.waitForRequest(
+      (entry) => entry.url().includes("/agents/sessions/prompt") && entry.method() === "POST",
+    );
+    await composer.fill(text);
+    await submit.click();
+    const input = (await sent).postDataJSON() as { json: { sessionId: string } };
+    await expect(panel.locator(".is-assistant").last()).toContainText(text);
+    await expect(submit).toBeEnabled();
+    return input.json.sessionId;
+  };
+
+  const original = "Keep my original watchlist conversation";
+  const originalSession = await sendAndReceive(original);
+  await waitForPanel();
+  await capture(page, testInfo, "resume-01-chat-beside-original-page");
+
+  await panel.getByRole("button", { name: "Agent menu", exact: true }).click();
+  await page.getByRole("menuitem", { name: "New session", exact: true }).click();
+  await expect(panel.getByText(original, { exact: true })).toHaveCount(0);
+  const newer = "A separate newer conversation";
+  const newerSession = await sendAndReceive(newer);
+  expect(newerSession).not.toBe(originalSession);
+  await panel.getByRole("button", { name: "Agent menu", exact: true }).click();
+  await page
+    .getByRole("menu", { name: "Agent menu" })
+    .getByTestId("agent-session-item")
+    .nth(1)
+    .click();
+  await expect(panel.locator(".is-user").getByText(original, { exact: true })).toBeVisible();
+  await expect(panel.locator(".is-user").getByText(newer, { exact: true })).toHaveCount(0);
+  await capture(page, testInfo, "resume-02-selected-older-conversation");
+
+  await page.reload();
+  await expect(page).toHaveURL(new RegExp(`/doc/${slug}$`));
+  await expect(composer).toBeVisible();
+  await expect(panel.locator(".is-user").getByText(original, { exact: true })).toBeVisible();
+  await expect(panel.locator(".is-user").getByText(newer, { exact: true })).toHaveCount(0);
+  await waitForPanel();
+  await capture(page, testInfo, "resume-03-refresh-restores-selected-transcript");
+
+  expect(await sendAndReceive("Continue the original conversation after refresh")).toBe(
+    originalSession,
+  );
+  await capture(page, testInfo, "resume-04-restored-session-replies-again");
+  await composer.fill("Unsent text stays in this page only");
+  await panel.getByRole("button", { name: "Collapse side panel", exact: true }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "Open side panel", exact: true }).click();
+  await expect(composer).toHaveValue("");
+  await expect(panel.locator(".is-user").getByText(original, { exact: true })).toBeVisible();
+  await waitForPanel();
+  await capture(page, testInfo, "resume-05-collapsed-refresh-keeps-conversation");
+
+  await panel.getByRole("button", { name: "Close tab", exact: true }).click();
+  await page.reload();
+  await expect(panel.getByText("Nothing pinned", { exact: true })).toBeVisible();
+  await expect(composer).toHaveCount(0);
+  await waitForPanel();
+  await capture(page, testInfo, "resume-06-closed-conversation-stays-closed");
+});
+
 test("node side-panel chat keeps a post-cancel follow-up separate", async ({
   page,
   request,

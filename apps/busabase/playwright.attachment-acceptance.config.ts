@@ -9,7 +9,7 @@ if (!baseURL || !["localhost", "127.0.0.1"].includes(new URL(baseURL).hostname))
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testMatch: "attachment-overflow.spec.ts",
+  testMatch: ["attachment-overflow.spec.ts", "attachment-file-icons.spec.ts"],
   timeout: 180_000,
   expect: { timeout: 25_000 },
   workers: 1,

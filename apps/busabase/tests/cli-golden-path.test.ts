@@ -57,6 +57,9 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
   });
 
   afterAll(async () => {
+    // Close PGLite before deleting its data dir: left open, it keeps flushing into
+    // the deleted dir and either fails the delete (ENOTEMPTY) or spins forever.
+    await (await import("busabase-core/db")).closeDb();
     global.fetch = originalFetch;
     delete process.env.PG_DATABASE_URL;
     delete process.env.STORAGE_URL;
@@ -64,9 +67,6 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
       if (savedEnv[k] === undefined) delete process.env[k];
       else process.env[k] = savedEnv[k];
     }
-    // PGlite is still flushing its data directory when the suite ends, and a plain
-    // `rm` then fails with ENOTEMPTY, failing a suite whose tests all passed. Retry
-    // with a growing delay until the last writes land.
     for (const dir of [dataDir, storageDir, homeDir]) {
       if (dir) await rm(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
     }

@@ -39,7 +39,8 @@
    product is built for. Why *cool* (hue 177) rather than the warmer cement
    options: it is the only candidate whose CIE Lab b* is negative (−0.24), i.e.
    it reads as decisively not-yellow. Chroma stays ≤6% — the ground is still
-   black-white-grey, with the Cha states below as the only real color.
+   black-white-grey. Cha colors describe review state; file artwork has its own
+   content palette below.
 
    ⚠️ TWO DIFFERENT TOKEN FORMATS ARE IN PLAY. Get this wrong and the color
    silently falls back to transparent — the page still renders, just white.
@@ -141,6 +142,26 @@
   --color-fd-card: oklch(0.09 0.004 195);
   --color-fd-border: oklch(0.22 0.005 195);
   --color-fd-muted: oklch(0.15 0.005 195);
+}
+
+/* File content has its own vivid palette. It is independent of review status
+   and stays consistent across themes and hosts, like the attached image itself. */
+:root {
+  --attachment-file-spreadsheet: #24864b;
+  --attachment-file-document: #2d72d2;
+  --attachment-file-pdf: #d5434d;
+  --attachment-file-presentation: #c86322;
+  --attachment-file-json: #a87812;
+  --attachment-file-markdown: #7754c5;
+  --attachment-file-code: #128591;
+  --attachment-file-config: #546da4;
+  --attachment-file-archive: #aa7722;
+  --attachment-file-text: #577b8d;
+  --attachment-file-image: #b44791;
+  --attachment-file-audio: #9550bb;
+  --attachment-file-video: #6358c7;
+  --attachment-file-file: #6e7988;
+  --attachment-file-foreground: #fff;
 }
 
 /* Radius is theme-independent, so it stays on plain `:root`.

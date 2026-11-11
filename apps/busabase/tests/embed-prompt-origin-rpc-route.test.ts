@@ -120,27 +120,23 @@ describe("OSS embed prompt request origin over HTTP", () => {
     });
   });
 
-  it("validates a complete context-only snapshot against the actual request origin", async () => {
-    const context = snapshot();
-    const response = await call(context);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      json: { resourceContext: [context], origin, spaceId: "local", embed: true },
-    });
-  });
-
-  it.each(["foreign origin", "foreign edition"])(
-    "rejects %s despite matching forged headers",
+  it.each(["request origin", "another domain"])(
+    "accepts a complete context-only snapshot from %s while preserving request attribution",
     async (variant) => {
-      const response = await call(
-        variant === "foreign origin"
-          ? snapshot("https://attacker.test")
-          : snapshot(origin, "cloud"),
-      );
-      expect(response.status).toBe(400);
-      expect(await response.text()).toContain("different Busabase");
+      const context = snapshot(variant === "request origin" ? origin : "https://other.test");
+      const response = await call(context);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        json: { resourceContext: [context], origin, spaceId: "local", embed: true },
+      });
     },
   );
+
+  it("rejects a foreign edition despite matching forged headers", async () => {
+    const response = await call(snapshot(origin, "cloud"));
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("different Busabase edition or workspace");
+  });
 
   it("still forbids actual Agent submission through the production router", async () => {
     const response = await call(snapshot(), capability, "agents/sessions/prompt");

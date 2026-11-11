@@ -61,6 +61,16 @@ for (const embedded of [true, false, undefined]) {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-");
     const name = "Launch notes";
+    const openSnapshot = async (message: Locator) => {
+      await message.getByRole("button", { name, exact: true }).click();
+      const dialog = page.getByRole("dialog", { name, exact: true });
+      await expect(dialog.getByRole("link", { name: `Open ${name}`, exact: true })).toBeVisible();
+      return dialog.getByRole("region", { name: "View sent context", exact: true });
+    };
+    const closeSnapshot = async () => {
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog", { name, exact: true })).toBeHidden();
+    };
     const marker = `CONTEXT_ONLY_${crypto.randomUUID()}`;
     const doc = await json<{ node: { id: string } }>(
       await request.post("/api/v1/docs", {
@@ -116,29 +126,21 @@ for (const embedded of [true, false, undefined]) {
     const message = detail.locator(".is-user").last();
     await expect(message.getByText(question, { exact: true })).toBeVisible();
     await expect(message).not.toContainText("Target: the Busabase");
-    await expect(message.getByRole("link", { name, exact: true })).toBeVisible();
-    await message.locator("summary").click();
-    await expect(message).toContainText(marker);
+    await expect(await openSnapshot(message)).toContainText(marker);
     await capture(page, info, "02-sent-reference-exposes-actual-snapshot");
+    await closeSnapshot();
 
     await page.reload();
-    // Tabs are intentionally not persisted. Re-enter the existing conversation
-    // through the Agent list; the message itself must be durable.
+    // The side panel resumes the same conversation beside the original page.
     await expect(page.getByRole("heading", { name, exact: true }).first()).toBeVisible();
-    await page.getByRole("link", { name: "Agents", exact: true }).click();
-    await page
-      .getByTestId("agent-connection-card")
-      .filter({ hasText: "Buda AI Agent" })
-      .locator("button")
-      .first()
-      .click();
-    const replay = page.getByTestId("agent-detail-view");
+    const panel = page.getByRole("region", { name: "Side panel" });
+    const replay = panel.getByTestId("agent-detail-view");
     await expect(replay.locator(".is-user").last()).toContainText(question);
     await expect(
       replay.getByPlaceholder("Message Buda AI Agent…").locator("xpath=ancestor::form"),
     ).toContainText(name);
-    await replay.locator(".is-user").last().locator("summary").click();
-    await expect(replay.locator(".is-user").last()).toContainText(marker);
+    await expect(await openSnapshot(replay.locator(".is-user").last())).toContainText(marker);
+    await closeSnapshot();
 
     await replay.getByRole("button", { name: "Don't send this as context", exact: true }).click();
     const without = `A general question without a page (${String(embedded)}).`;
@@ -159,11 +161,12 @@ for (const embedded of [true, false, undefined]) {
     )?.prompt;
     expect(withoutWire).toEqual([{ type: "text", text: without }]);
     await expect(
-      replay.locator(".is-user").last().getByRole("link", { name, exact: true }),
+      replay.locator(".is-user").last().getByRole("button", { name, exact: true }),
     ).toHaveCount(0);
     await capture(page, info, "03-removing-reference-sends-only-user-text");
 
-    await replay.getByRole("button", { name: "Reference current page", exact: true }).click();
+    await replay.getByRole("button", { name: "Attach a file", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Reference current page", exact: true }).click();
     const updatedMarker = `UPDATED_${crypto.randomUUID()}`;
     await json(
       await request.put(`/api/v1/nodes/${doc.node.id}/content`, {
@@ -175,13 +178,15 @@ for (const embedded of [true, false, undefined]) {
     );
     await send(replay, "");
     const latestCard = replay.locator(".is-user").last();
-    await expect(latestCard.getByRole("link", { name, exact: true })).toBeVisible();
-    await latestCard.locator("summary").click();
-    await expect(latestCard).toContainText(updatedMarker);
-    await expect(latestCard).not.toContainText(marker);
-    await expect(replay.locator(".is-user").first()).toContainText(marker);
-    await expect(replay.locator(".is-user").first()).not.toContainText(updatedMarker);
+    const updatedSnapshot = await openSnapshot(latestCard);
+    await expect(updatedSnapshot).toContainText(updatedMarker);
+    await expect(updatedSnapshot).not.toContainText(marker);
     await capture(page, info, "04-reference-only-send-uses-fresh-content-and-keeps-history");
+    await closeSnapshot();
+    const historicalSnapshot = await openSnapshot(replay.locator(".is-user").first());
+    await expect(historicalSnapshot).toContainText(marker);
+    await expect(historicalSnapshot).not.toContainText(updatedMarker);
+    await closeSnapshot();
 
     await replay.getByRole("button", { name: "Don't send this as context", exact: true }).click();
     await replay.getByRole("button", { name: "Agent menu", exact: true }).click();
@@ -189,6 +194,7 @@ for (const embedded of [true, false, undefined]) {
     await expect(
       replay.getByRole("button", { name: "Don't send this as context", exact: true }),
     ).toBeVisible();
+    await panel.getByRole("button", { name: "Close tab", exact: true }).click();
     await page.getByRole("link", { name: "Home", exact: true }).click();
     await page.getByRole("link", { name: "Agents", exact: true }).click();
     await page

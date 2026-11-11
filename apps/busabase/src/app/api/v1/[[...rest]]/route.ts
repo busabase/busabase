@@ -23,7 +23,7 @@ import { resolveRelayPermissionContext } from "~/lib/relay-permission";
 const withoutRpcOnlySurfaces = <
   R extends {
     nodes: { purge: unknown };
-    workflows: { resume: unknown; resumeElapsed: unknown; cancelQueued: unknown };
+    workflows: { resume: unknown; resumeElapsed: unknown; cancelQueued: unknown; waiting: unknown };
   },
 >(
   router: R,
@@ -33,6 +33,7 @@ const withoutRpcOnlySurfaces = <
     resume: _rpcOnlyResume,
     resumeElapsed: _rpcOnlyResumeElapsed,
     cancelQueued: _rpcOnlyCancelQueued,
+    waiting: _rpcOnlyWaiting,
     ...workflows
   } = router.workflows;
   return { ...router, nodes, workflows };
