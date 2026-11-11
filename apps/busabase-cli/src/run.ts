@@ -79,7 +79,14 @@ import {
   observeRequests,
   renderDryRunPlan,
 } from "./dry-run.js";
-import { CliOutcomeError, classifyError, EXIT_CODES, errorEnvelope, toIssues } from "./errors.js";
+import {
+  CliOutcomeError,
+  classifyError,
+  EXIT_CODES,
+  errorEnvelope,
+  isRouteMissing,
+  toIssues,
+} from "./errors.js";
 import { type OutputFormat, render, slim } from "./format.js";
 import {
   assertCredentialNotExpired,
@@ -145,6 +152,7 @@ type ResolvedConfig = BusabaseConfig & { output: OutputFormat; retries: number }
 
 /** Public docs page covering every error below, for both Cloud and local. Linked from each error. */
 const DOCS_TROUBLESHOOTING = "https://busabase.com/docs/troubleshooting";
+const DOCS_MEMBERS = "https://busabase.com/docs/organizations";
 
 // The field `type` arrives as a free-form CLI string; the typed contract narrows it
 // to the field-type union. Server-side zod re-validates, so narrow with a cast here.
@@ -3142,13 +3150,14 @@ To add content to a space that is already in use, use \`busabase-cli install\` i
 To copy a still-live space's current content into another space, use
 \`busabase-cli export\` + \`busabase-cli install\` instead of backup/restore.`,
     )
-    .option("--dry-run", "print the request this would send and send nothing")
+    .option("--dry-run", "verify the archive and print its contents without restoring anything")
     .action(
       runArgAction(state, (file, client, opts, config) =>
         runRestore(client, {
           file,
           resume: Boolean(opts.resume),
           intoFolder: opts.intoFolder as string | undefined,
+          dryRun: Boolean(opts.dryRun),
           json: config.output === "json",
         }),
       ),
@@ -3322,6 +3331,11 @@ export async function runCli(argv: string[]): Promise<number> {
       return EXIT_CODES.USAGE;
     }
     const classified = classifyError(error);
+    const unsupported = explainUnsupportedCommand(state, error);
+    if (unsupported) {
+      classified.message = unsupported.message;
+      classified.hint = unsupported.hint;
+    }
     // Auth failures additionally carry an agent-facing `hint`: the exact
     // recovery command for THIS connection (base URL + profile pre-filled), so
     // an agent hitting a 401 mid-task recovers without reverse-engineering the
@@ -3346,9 +3360,40 @@ export async function runCli(argv: string[]): Promise<number> {
     // `--output json` already reads from; the prose still goes to stderr, so a
     // human sees exactly what they saw before and a pipeline sees neither twice.
     if (json) console.log(JSON.stringify(errorEnvelope(classified), null, 2));
-    console.error(explainError(error, state.config ?? resolveConfig({}, { strict: false })));
+    console.error(
+      unsupported?.prose ??
+        explainError(error, state.config ?? resolveConfig({}, { strict: false })),
+    );
     return classified.exitCode;
   }
+}
+
+/**
+ * A Cloud-only command that hit a server without the route. The CLI ships
+ * separately from the server, so `members …` can reach an older Busabase Cloud,
+ * or the open-source / Desktop server, which has no members at all. Both answer
+ * the router's 404, which on its own reads like a wrong id — say what it means
+ * and where the same job can be done instead. A procedure's own NOT_FOUND (an
+ * unknown invite link) is left alone: see `isRouteMissing`.
+ */
+function explainUnsupportedCommand(
+  state: CliState,
+  error: unknown,
+): { message: string; hint: string; prose: string } | undefined {
+  if (!state.procedureId?.startsWith("members.") || !isRouteMissing(error)) return undefined;
+  const base = (state.config ?? resolveConfig({}, { strict: false })).baseUrl;
+  const web = `open ${base}/dashboard?settings=space&tab=people (avatar menu → Account Settings → Space Settings → Members)`;
+  const message = `${base} does not support member invitations over the API (404: no such route).`;
+  return {
+    message,
+    hint: `This is an older Busabase Cloud server, or the open-source / Desktop edition, which has no members. On Busabase Cloud, invite on the web instead: ${web}.`,
+    prose: [
+      message,
+      `  • An older Busabase Cloud server: invite on the web instead — ${web}.`,
+      "  • The open-source / Desktop edition: it is single-user and has no members to invite.",
+      `  → Docs: ${DOCS_MEMBERS}`,
+    ].join("\n"),
+  };
 }
 
 /**

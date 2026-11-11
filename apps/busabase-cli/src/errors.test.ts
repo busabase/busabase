@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyError, EXIT_CODES, errorEnvelope } from "./errors";
+import { classifyError, EXIT_CODES, errorEnvelope, isRouteMissing } from "./errors";
 
 /** An oRPC failure as the SDK actually throws it — see `ORPCError`. */
 const orpc = (status: number, code: string, message: string, issues?: unknown) =>
@@ -73,5 +73,34 @@ describe("errorEnvelope", () => {
     const envelope = errorEnvelope(classifyError(new TypeError("fetch failed")));
     expect(envelope).not.toHaveProperty("status");
     expect(envelope.retryable).toBe(true);
+  });
+});
+
+describe("isRouteMissing", () => {
+  const error = (fields: Record<string, unknown>) => Object.assign(new Error("x"), fields);
+
+  it("recognises the router fallback the SDK decodes without a code", () => {
+    expect(isRouteMissing(error({ status: 404, code: "HTTP_404" }))).toBe(true);
+  });
+
+  it("recognises a 404 whose body was not a Busabase error envelope", () => {
+    expect(
+      isRouteMissing(error({ status: 404, code: "NOT_FOUND", data: { body: "Not Found" } })),
+    ).toBe(true);
+  });
+
+  it("never mistakes a procedure's own NOT_FOUND for a missing route", () => {
+    expect(isRouteMissing(error({ status: 404, code: "NOT_FOUND" }))).toBe(false);
+    expect(
+      isRouteMissing(
+        error({
+          status: 404,
+          code: "NOT_FOUND",
+          data: { body: { error: "x", code: "NOT_FOUND" } },
+        }),
+      ),
+    ).toBe(false);
+    expect(isRouteMissing(error({ status: 403, code: "HTTP_403" }))).toBe(false);
+    expect(isRouteMissing("boom")).toBe(false);
   });
 });

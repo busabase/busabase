@@ -1,17 +1,20 @@
-import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, type WriteStream } from "node:fs";
-import { open, stat, unlink } from "node:fs/promises";
+import { mkdtemp, rename, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import {
   type DumpTable,
   DumpTableSchema,
   EXPORT_DOC_BODIES_MAX_BATCH,
+  type ExportAttachmentVO,
+  type ExportDocBodiesVO,
 } from "busabase-contract/domains/dump/types";
 import type { BusabaseClient } from "busabase-sdk";
 import { isTransientError } from "../../retry.js";
 import { ArchiveWriter } from "../format/archive-writer.js";
 import { FORMAT_VERSION, type Manifest } from "../format/manifest.js";
 import { IMPORT_ORDER } from "../import/full-importer.js";
+import { BackupContentIntegrityError, canonicalHash, RawBlobSpool } from "./raw-blob-spool.js";
+import { SpooledTable } from "./spooled-table.js";
 
 /**
  * The CLI's shared `withRetry` (retry.ts) wraps `fetch` and only inspects the
@@ -105,9 +108,8 @@ type Settled<R> = { ok: true; value: R } | { ok: false; error: unknown };
  * with which download happened to finish first.
  *
  * A rejected `work` is captured rather than thrown, so one bad item still
- * reaches `consume` as a failure and the run continues — the loops below
- * already treat a single unreachable blob as a warning, not a reason to lose
- * the other 10,485.
+ * reaches `consume` as a failure. A full backup then fails closed; already
+ * started work is drained first so its streams and resumable receipts settle.
  */
 const forEachConcurrent = async <T, R>(
   items: readonly T[],
@@ -118,23 +120,30 @@ const forEachConcurrent = async <T, R>(
   const inFlight = new Map<number, Promise<Settled<R>>>();
   let started = 0;
 
-  for (let emitted = 0; emitted < items.length; emitted += 1) {
-    while (inFlight.size < limit && started < items.length) {
-      const index = started;
-      started += 1;
-      inFlight.set(
-        index,
-        work(items[index]).then<Settled<R>, Settled<R>>(
-          (value) => ({ ok: true, value }),
-          (error) => ({ ok: false, error }),
-        ),
-      );
+  try {
+    for (let emitted = 0; emitted < items.length; emitted += 1) {
+      while (inFlight.size < limit && started < items.length) {
+        const index = started;
+        started += 1;
+        inFlight.set(
+          index,
+          work(items[index]).then<Settled<R>, Settled<R>>(
+            (value) => ({ ok: true, value }),
+            (error) => ({ ok: false, error }),
+          ),
+        );
+      }
+      // Always populated: `emitted` trails `started`, and the loop above tops
+      // the window up before every read.
+      const pending = inFlight.get(emitted) as Promise<Settled<R>>;
+      inFlight.delete(emitted);
+      await consume(await pending, items[emitted]);
     }
-    // Always populated: `emitted` trails `started`, and the loop above tops
-    // the window up before every read.
-    const pending = inFlight.get(emitted) as Promise<Settled<R>>;
-    inFlight.delete(emitted);
-    await consume(await pending, items[emitted]);
+  } catch (error) {
+    // Already-started downloads must settle their streams/receipts before the
+    // command returns or another --resume can race unfinished cache writes.
+    await Promise.all(inFlight.values());
+    throw error;
   }
 };
 
@@ -173,138 +182,59 @@ const writeNdjsonEntry = async (
   await writer.addStream(path, totalSize, Readable.from(lines()));
 };
 
-/**
- * Same NDJSON-entry shape as {@link writeNdjsonEntry}, but for a table built
- * one row at a time over a long fetch loop (attachment blobs, asset-text
- * blobs) instead of already sitting in memory. `ArchiveWriter.addStream`
- * requires the entry's total byte size up front (a tar constraint), which is
- * why `writeNdjsonEntry` collects every row into an array first — fine for
- * table rows, but a real space's attachment blobs (base64-encoded, one row
- * per file) can total many GB. Held as an array of Buffers so their combined
- * size could be summed, that blew Node's default heap outright — confirmed
- * live: "JavaScript heap out of memory" partway through a ~5.7GB attachment
- * set. Spooling each row to a temp file as it's produced, then streaming
- * that file into the archive once its final size is known from disk, keeps
- * peak memory bounded by one row at a time rather than the whole table.
- */
-class SpooledNdjsonEntry {
-  private readonly path: string;
-  private stream: WriteStream;
+class BackupCoverageError extends Error {}
+const incomplete = (message: string): BackupCoverageError =>
+  new BackupCoverageError(`Full backup incomplete: ${message}. No new archive was published.`);
 
-  /**
-   * `spoolPath` is deterministic (derived from the archive path) rather than a
-   * random temp name, so a killed backup leaves a file the next run can find
-   * and continue from — see `recoverCompleteRows`. A random name in `tmpdir()`
-   * left nothing but an orphan nobody could match back to its archive.
-   */
-  constructor(spoolPath: string, append: boolean) {
-    this.path = spoolPath;
-    this.stream = createWriteStream(this.path, append ? { flags: "a" } : {});
+function validateNodeGraph(rows: Array<Record<string, unknown>>): void {
+  const nodes = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    if (typeof row.id !== "string" || !row.id || nodes.has(row.id))
+      throw incomplete("the nodes snapshot contains an invalid or duplicate node id");
+    nodes.set(row.id, row);
   }
-
-  async writeRow(row: Record<string, unknown>): Promise<void> {
-    const buf = Buffer.from(`${JSON.stringify(row)}\n`, "utf8");
-    if (!this.stream.write(buf)) {
-      await new Promise<void>((resolve) => this.stream.once("drain", resolve));
+  const children = new Map<string, string[]>();
+  const queue: string[] = [];
+  for (const [id, row] of nodes) {
+    if (row.parentId === null || row.parentId === undefined) {
+      queue.push(id);
+      continue;
     }
+    if (typeof row.parentId !== "string" || !nodes.has(row.parentId))
+      throw incomplete(`node ${id} references a missing parent ${String(row.parentId)}`);
+    const siblings = children.get(row.parentId) ?? [];
+    siblings.push(id);
+    children.set(row.parentId, siblings);
   }
+  for (let index = 0; index < queue.length; index++)
+    for (const child of children.get(queue[index]) ?? []) queue.push(child);
+  if (queue.length !== nodes.size)
+    throw incomplete("the nodes parent graph contains a cycle and cannot be restored");
+}
 
-  async finish(writer: ArchiveWriter, archivePath: string): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      this.stream.end((error: unknown) => (error ? reject(error) : resolve()));
-    });
-    const { size } = await stat(this.path);
-    await writer.addStream(archivePath, size, createReadStream(this.path));
-    await unlink(this.path);
+function validateBodies(bodies: ExportDocBodiesVO["bodies"], requested: ReadonlySet<string>): void {
+  if (!Array.isArray(bodies)) throw incomplete("the body response was not an array");
+  const seen = new Set<string>();
+  for (const body of bodies) {
+    if (
+      !body ||
+      typeof body.nodeId !== "string" ||
+      typeof body.markdown !== "string" ||
+      !requested.has(body.nodeId) ||
+      seen.has(body.nodeId)
+    )
+      throw incomplete("the server returned malformed, duplicate or unrequested document bodies");
+    seen.add(body.nodeId);
   }
 }
 
-/**
- * What a previous, killed run already spooled: the identifying key of every
- * COMPLETE row, plus the totals those rows represent.
- *
- * "Complete" is load-bearing. A process killed mid-write leaves a final line
- * with no trailing newline — valid-looking JSON prefix, truncated content. The
- * file is therefore truncated back to its last newline before anything is
- * appended, so a resumed run can never splice new output onto half a row.
- *
- * Byte totals are recomputed from the base64 lengths WITHOUT decoding: a real
- * space's spool is ~5.7GB, and decoding it just to re-derive a counter would
- * cost more than re-downloading. base64 encodes 3 bytes per 4 chars, minus one
- * byte per `=` of padding.
- */
-/**
- * Suffixes of the two spool files a backup writes next to its archive, in the
- * order `exportFull` derives them (attachment blobs, then asset-text blobs).
- * Exported so `commands.ts` can detect leftovers from an interrupted run
- * without duplicating the naming.
- */
+/** Resumable raw object directories; old small base64 spools migrate on --resume. */
 export const SPOOL_SUFFIXES = [".attachment-blobs.part", ".asset-text-blobs.part"] as const;
-
-const decodedBase64Bytes = (base64: string): number => {
-  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
-  return Math.max(0, (base64.length * 3) / 4 - padding);
-};
-
-const recoverCompleteRows = async (
-  spoolPath: string,
-  keyField: string,
-): Promise<{ keys: Set<string>; count: number; bytes: number }> => {
-  const keys = new Set<string>();
-  let count = 0;
-  let bytes = 0;
-  let completeBytes = 0;
-
-  let handle: Awaited<ReturnType<typeof open>>;
-  try {
-    handle = await open(spoolPath, "r+");
-  } catch {
-    return { keys, count, bytes }; // nothing spooled yet
-  }
-  try {
-    let carry = "";
-    // `autoClose: false` — the default closes the underlying handle when the
-    // stream ends, and the `truncate` below still needs it open.
-    for await (const chunk of handle.createReadStream({ encoding: "utf8", autoClose: false })) {
-      carry += chunk as string;
-      let newlineIndex: number;
-      // biome-ignore lint/suspicious/noAssignInExpressions: standard incremental-parse idiom
-      while ((newlineIndex = carry.indexOf("\n")) !== -1) {
-        const line = carry.slice(0, newlineIndex);
-        carry = carry.slice(newlineIndex + 1);
-        completeBytes += Buffer.byteLength(line, "utf8") + 1;
-        if (!line) continue;
-        // A complete line can still be corrupt if the kill landed mid-flush of
-        // a buffer that already contained a newline. Treat unparseable as the
-        // end of trustworthy content rather than crashing the resume.
-        let row: Record<string, unknown>;
-        try {
-          row = JSON.parse(line);
-        } catch {
-          completeBytes -= Buffer.byteLength(line, "utf8") + 1;
-          carry = "";
-          break;
-        }
-        const key = row[keyField];
-        if (typeof key !== "string") continue;
-        keys.add(key);
-        count += 1;
-        bytes += decodedBase64Bytes(typeof row.base64 === "string" ? row.base64 : "");
-      }
-    }
-    // Drop the trailing partial (or post-corruption) region so appends start
-    // on a clean row boundary.
-    await handle.truncate(completeBytes);
-  } finally {
-    await handle.close();
-  }
-  return { keys, count, bytes };
-};
 
 // Every dump-eligible table, taken straight from the contract enum (the single
 // source of truth). FETCH order here is irrelevant — each table is drained
-// independently into `tableRows`, and the doc-body / attachment-blob passes
-// below read from that already-collected map. Deriving this instead of
+// independently into `tableRows` (or a leaf table's disk spool), and the
+// doc-body / attachment-blob passes read the smaller parent tables from that map. Deriving this instead of
 // hand-maintaining a parallel copy is what stops a newly-registered table
 // (e.g. the `nodePrincipals` permissions table) from being silently skipped
 // on backup.
@@ -323,12 +253,38 @@ const EXPORT_TABLES: DumpTable[] = [...DumpTableSchema.options];
  * must NOT be listed, or the drift check would drop rows Postgres would have
  * accepted.
  *
- * `nodes.parentId` is deliberately absent despite being a real self-FK: the
- * importer rewrites it (dropping the source root and remapping its children
- * onto the target's own root — see `import-logic.ts`), so a parentId that
- * looks dangling here is resolved server-side.
+ * Source root references resolve inside this exported node set before the
+ * importer remaps them to the target root. Loose history pointers such as
+ * commits.parentCommitId are intentionally not treated as database FKs.
  */
 const DUMP_FOREIGN_KEYS: Partial<Record<DumpTable, Record<string, DumpTable>>> = {
+  nodes: { parentId: "nodes" },
+  nodePrincipals: { nodeId: "nodes", sourceNodeId: "nodes" },
+  nodeShares: { nodeId: "nodes" },
+  favorites: { nodeId: "nodes" },
+  nodeSubscriptions: { nodeId: "nodes" },
+  forms: { nodeId: "nodes", targetBaseId: "bases" },
+  commits: { baseId: "bases", nodeId: "nodes" },
+  changeRequests: { baseId: "bases", nodeId: "nodes" },
+  operations: {
+    changeRequestId: "changeRequests",
+    baseId: "bases",
+    nodeId: "nodes",
+    targetViewId: "views",
+    mergedViewId: "views",
+    headCommitId: "commits",
+  },
+  comments: {
+    recordId: "records",
+    changeRequestId: "changeRequests",
+    operationId: "operations",
+    commitId: "commits",
+  },
+  commentMentions: { commentId: "comments" },
+  agentSessionEvents: { sessionId: "agentSessions" },
+  agentSessionCommands: { sessionId: "agentSessions" },
+  routerConnections: { grantId: "routerGrants" },
+  reviews: { changeRequestId: "changeRequests" },
   bases: { nodeId: "nodes" },
   baseFields: { baseId: "bases" },
   views: { baseId: "bases" },
@@ -358,6 +314,17 @@ const DUMP_FOREIGN_KEYS: Partial<Record<DumpTable, Record<string, DumpTable>>> =
     commitId: "commits",
   },
 };
+
+// Transcripts, command payloads and workflow outputs can be larger than record
+// history. Keep only parent session ids in memory; their payloads stay on disk.
+const ADDITIONAL_SPOOLED_TABLES: DumpTable[] = [
+  "workflowRuns",
+  "webhookDeliveries",
+  "agentSessions",
+  "agentSessionEvents",
+  "agentSessionCommands",
+  "commentMentions",
+];
 
 const HISTORY_TABLES: DumpTable[] = [
   "commits",
@@ -402,15 +369,16 @@ const FINISHED_CR_STATUSES = new Set(["merged", "closed", "rejected"]);
  * whatever the surviving rows still reference — rather than by any rule about
  * what a commit "is", so a NOT NULL `commitId` can never be left dangling.
  */
-const pruneToCurrentState = (
+const pruneToCurrentState = async (
   tableRows: Partial<Record<DumpTable, Array<Record<string, unknown>>>>,
   tableCounts: Record<string, number>,
   log: (message: string) => void,
-): void => {
-  const before = Object.fromEntries(
-    HISTORY_TABLES.map((t) => [t, (tableRows[t] ?? []).length] as const),
-  );
-  const beforeFieldValues = (tableRows.fieldValues ?? []).length;
+  fieldValuesSpool: SpooledTable,
+  commitsSpool: SpooledTable,
+  commitIds: Set<string>,
+): Promise<void> => {
+  const before = Object.fromEntries(HISTORY_TABLES.map((t) => [t, tableCounts[t] ?? 0] as const));
+  const beforeFieldValues = tableCounts.fieldValues ?? 0;
 
   // Unfinished change requests are in-flight work — kept whole, with every
   // operation, staged value, review and commit they depend on.
@@ -427,21 +395,24 @@ const pruneToCurrentState = (
   // A fieldValue with a `recordId` is a live cell of a live record. One
   // without belongs to a change request / operation, and survives only if that
   // change request is still unfinished.
-  const keptFieldValues = (tableRows.fieldValues ?? []).filter((fv) => {
-    if (fv.recordId) return true;
-    if (fv.changeRequestId && keptCrIds.has(fv.changeRequestId as string)) return true;
-    return Boolean(fv.operationId) && keptOpIds.has(fv.operationId as string);
-  });
-
-  // A surviving current value may still name the (now dropped) change request
-  // that originally produced it. Those columns are nullable by design, so
-  // clear them rather than dragging finished history back in to satisfy an FK.
-  for (const fv of keptFieldValues) {
-    if (fv.changeRequestId && !keptCrIds.has(fv.changeRequestId as string)) {
+  const neededCommitIds = new Set<string>();
+  const need = (id: unknown) => {
+    if (typeof id === "string" && id) neededCommitIds.add(id);
+  };
+  const keptFieldValuesCount = await fieldValuesSpool.transform((fv) => {
+    const keep =
+      Boolean(fv.recordId) ||
+      Boolean(fv.changeRequestId && keptCrIds.has(fv.changeRequestId as string)) ||
+      Boolean(fv.operationId && keptOpIds.has(fv.operationId as string));
+    if (!keep) return undefined;
+    // Current cells retain the commit they need, while finished CR/op refs are
+    // nullable and must not pull all finished history back into the snapshot.
+    if (fv.changeRequestId && !keptCrIds.has(fv.changeRequestId as string))
       fv.changeRequestId = null;
-    }
     if (fv.operationId && !keptOpIds.has(fv.operationId as string)) fv.operationId = null;
-  }
+    need(fv.commitId);
+    return fv;
+  });
 
   const keptReviews = (tableRows.reviews ?? []).filter((r) =>
     keptCrIds.has(r.changeRequestId as string),
@@ -456,22 +427,20 @@ const pruneToCurrentState = (
   // `recordLinks` and `fieldValues` all have a NOT NULL `commitId`, and
   // `operations.headCommitId` is NOT NULL too — collect from all of them
   // rather than assuming which commits "belong to" the current state.
-  const neededCommitIds = new Set<string>();
-  const need = (id: unknown) => {
-    if (typeof id === "string" && id) neededCommitIds.add(id);
-  };
   for (const r of tableRows.records ?? []) need(r.headCommitId);
   for (const rl of tableRows.recordLinks ?? []) need(rl.commitId);
-  for (const fv of keptFieldValues) need(fv.commitId);
   for (const op of keptOperations) need(op.headCommitId);
   for (const c of keptComments) need(c.commitId);
-  const keptCommits = (tableRows.commits ?? []).filter((c) => neededCommitIds.has(c.id as string));
+  const keptCommitCount = await commitsSpool.filter((commit) =>
+    neededCommitIds.has(commit.id as string),
+  );
+  for (const id of commitIds) if (!neededCommitIds.has(id)) commitIds.delete(id);
 
   const assign = (table: DumpTable, rows: Array<Record<string, unknown>>) => {
     tableRows[table] = rows;
     tableCounts[table] = rows.length;
   };
-  assign("fieldValues", keptFieldValues);
+  tableCounts.fieldValues = keptFieldValuesCount;
   assign(
     "changeRequests",
     (tableRows.changeRequests ?? []).filter((cr) => keptCrIds.has(cr.id as string)),
@@ -479,15 +448,15 @@ const pruneToCurrentState = (
   assign("operations", keptOperations);
   assign("reviews", keptReviews);
   assign("comments", keptComments);
-  assign("commits", keptCommits);
+  tableCounts.commits = keptCommitCount;
   // Audit events are a pure append-only trail — nothing references them, and
   // "who did what when" is exactly what `--no-history` is asked to leave out.
   assign("auditEvents", []);
 
-  const dropped = (table: DumpTable) => before[table] - (tableRows[table] ?? []).length;
+  const dropped = (table: DumpTable) => before[table] - (tableCounts[table] ?? 0);
   log(
-    `  --no-history: kept ${keptFieldValues.length}/${beforeFieldValues} fieldValues ` +
-      `(dropped ${beforeFieldValues - keptFieldValues.length} staged in finished change requests), ` +
+    `  --no-history: kept ${keptFieldValuesCount}/${beforeFieldValues} fieldValues ` +
+      `(dropped ${beforeFieldValues - keptFieldValuesCount} staged in finished change requests), ` +
       `${keptCrIds.size} unfinished change request(s); dropped ${dropped("commits")} commits, ` +
       `${dropped("operations")} operations, ${dropped("reviews")} reviews, ` +
       `${dropped("auditEvents")} audit events.`,
@@ -527,8 +496,7 @@ export interface FullExportOptions {
   onProgress?: (message: string) => void;
   /**
    * Internal-only override of the per-page row count (production default:
-   * 500, matching the contract's default — see `ExportTablesInputSchema` in
-   * `busabase-contract/domains/dump/types`). Not exposed as a CLI flag; exists
+   * 2000, the contract's maximum). Not exposed as a CLI flag; exists
    * so tests can force the cursor-pagination path to genuinely execute more
    * than once without needing to seed 500+ real rows. Must stay within the
    * contract's `1..2000` bound.
@@ -538,13 +506,83 @@ export interface FullExportOptions {
 
 /**
  * Full-fidelity export: pulls every dump-eligible table via the `dump.exportTables`
- * endpoint (cursor-paginated, raw rows with original ids), doc bodies for
- * every `doc` node via the public `docs.body` read, every asset's bytes via
- * `assets.download`, and every derived extracted-text object via
- * `dump.exportAssetText`. Writes one `tree/<table>.ndjson` per table (NDJSON
+ * endpoint (cursor-paginated rows with original identities), stored node
+ * documents via `dump.exportDocBodies`, every physical attachment through its
+ * signed origin URL, and every derived text object via `dump.exportAssetText`.
+ * Writes one `tree/<table>.ndjson` per table (NDJSON
  * keeps the format uniform regardless of table size).
  */
 export async function exportFull(options: FullExportOptions): Promise<Manifest> {
+  const fieldValuesSpool = await SpooledTable.create(options.outPath);
+  let commitsSpool: SpooledTable | undefined;
+  let writingDirectory: string | undefined;
+  const blobSpools: RawBlobSpool[] = [];
+  const additionalSpools = new Map<DumpTable, SpooledTable>();
+  const cleanupTableSpools = () =>
+    Promise.all([
+      fieldValuesSpool.cleanup(),
+      commitsSpool?.cleanup(),
+      ...[...additionalSpools.values()].map((spool) => spool.cleanup()),
+    ]);
+  try {
+    commitsSpool = await SpooledTable.create(options.outPath, "commits");
+    for (const table of ADDITIONAL_SPOOLED_TABLES)
+      additionalSpools.set(table, await SpooledTable.create(options.outPath, table));
+    writingDirectory = await mkdtemp(
+      join(dirname(options.outPath), `.${basename(options.outPath)}.writing-`),
+    );
+    const writingPath = join(writingDirectory, "archive.bbdump");
+    const manifest = await exportFullWithSpool(
+      options,
+      fieldValuesSpool,
+      commitsSpool,
+      writingPath,
+      blobSpools,
+      additionalSpools,
+    );
+    // Close snapshots before publication. A prior good backup is replaced only
+    // after all entries and the manifest have been finalized successfully.
+    await cleanupTableSpools();
+    await rename(writingPath, options.outPath);
+    for (const spool of blobSpools) {
+      await spool
+        .cleanup()
+        .catch((error) =>
+          options.onProgress?.(
+            `  NOTE: backup published, but its resumable cache could not be removed (${error instanceof Error ? error.message : String(error)})`,
+          ),
+        );
+    }
+    return manifest;
+  } catch (error) {
+    if (error instanceof BackupCoverageError) throw error;
+    throw new Error(
+      `Full backup failed; no new archive was published and any previous output was preserved (${error instanceof Error ? error.message : String(error)})`,
+      { cause: error },
+    );
+  } finally {
+    await cleanupTableSpools().catch((error) =>
+      options.onProgress?.(
+        `  NOTE: could not remove a closed table snapshot (${error instanceof Error ? error.message : String(error)})`,
+      ),
+    );
+    if (writingDirectory)
+      await rm(writingDirectory, { recursive: true, force: true }).catch((error) =>
+        options.onProgress?.(
+          `  NOTE: could not remove private archive staging (${error instanceof Error ? error.message : String(error)})`,
+        ),
+      );
+  }
+}
+
+async function exportFullWithSpool(
+  options: FullExportOptions,
+  fieldValuesSpool: SpooledTable,
+  commitsSpool: SpooledTable,
+  writingPath: string,
+  blobSpools: RawBlobSpool[],
+  additionalSpools: ReadonlyMap<DumpTable, SpooledTable>,
+): Promise<Manifest> {
   const {
     client,
     outPath,
@@ -570,9 +608,17 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
   // but not a memory concern the way a blob batch would be.
   const pageLimit = options.pageLimit ?? 2000;
   const log = onProgress ?? (() => {});
-  const writer = ArchiveWriter.create(outPath);
   const tableCounts: Record<string, number> = {};
   const tableRows: Partial<Record<DumpTable, Array<Record<string, unknown>>>> = {};
+  // Child FKs need only commit identities, never the large payload bodies.
+  const commitIds = new Set<string>();
+  const agentSessionIds = new Set<string>();
+  const spoolFor = (table: DumpTable) =>
+    table === "fieldValues"
+      ? fieldValuesSpool
+      : table === "commits"
+        ? commitsSpool
+        : additionalSpools.get(table);
 
   // Always FETCH everything, even under `--no-history`. Deciding what history
   // is still load-bearing needs the history itself: which change requests are
@@ -585,15 +631,14 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
 
   for (const table of tables) {
     const rows: Array<Record<string, unknown>> = [];
+    let count = 0;
+    const spool = spoolFor(table);
     let cursor: string | undefined;
     // A large table (fieldValues on a real space: hundreds of thousands of
     // rows, thousands of pages) can otherwise go silent for many minutes
     // between the "exported X: N rows" line for the PREVIOUS table and this
     // one — indistinguishable from a hang.
-    const reportProgress = throttledProgress(
-      log,
-      () => `  ...${table}: ${rows.length} rows so far`,
-    );
+    const reportProgress = throttledProgress(log, () => `  ...${table}: ${count} rows so far`);
     do {
       const page = await fetchPageWithRetry(
         () => client.dump.exportTables({ table, cursor, limit: pageLimit }),
@@ -604,18 +649,43 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
         undefined,
         retries,
       );
-      rows.push(...(page.rows as Array<Record<string, unknown>>));
+      const fetchedRows = page.rows as Array<Record<string, unknown>>;
+      if (table === "commits")
+        for (const row of fetchedRows) if (typeof row.id === "string") commitIds.add(row.id);
+      if (table === "agentSessions")
+        for (const row of fetchedRows) if (typeof row.id === "string") agentSessionIds.add(row.id);
+      if (spool) await spool.append(fetchedRows);
+      else rows.push(...fetchedRows);
+      count += fetchedRows.length;
       cursor = page.nextCursor ?? undefined;
       if (cursor) reportProgress();
     } while (cursor);
 
-    tableRows[table] = rows;
-    tableCounts[table] = rows.length;
-    log(`exported ${table}: ${rows.length} rows`);
+    if (!spool) tableRows[table] = rows;
+    if (additionalSpools.has(table)) await spool?.seal();
+    tableCounts[table] = count;
+    log(`exported ${table}: ${count} rows`);
   }
 
   if (!includeHistory) {
-    pruneToCurrentState(tableRows, tableCounts, log);
+    await pruneToCurrentState(
+      tableRows,
+      tableCounts,
+      log,
+      fieldValuesSpool,
+      commitsSpool,
+      commitIds,
+    );
+  } else {
+    await commitsSpool.seal();
+  }
+  if (!includeHistory) {
+    // Mentions belong to comments, including the comments deliberately removed
+    // with finished change requests by --no-history.
+    const keptComments = new Set((tableRows.comments ?? []).map((row) => row.id));
+    const mentions = additionalSpools.get("commentMentions");
+    if (mentions)
+      tableCounts.commentMentions = await mentions.filter((row) => keptComments.has(row.commentId));
   }
 
   // A real, actively-used space keeps changing WHILE a large backup is
@@ -631,10 +701,8 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
   // exposure exists for every FK in `DUMP_FOREIGN_KEYS` below.
   //
   // Cross-check each referencing table against the ids THIS SAME archive
-  // actually carries and drop what can't resolve, so the archive is at least
-  // internally self-consistent even though it isn't a perfect
-  // instant-in-time snapshot. Walked in `IMPORT_ORDER` so a drop cascades: if
-  // a `records` row goes, the `fieldValues` rows pointing at it go too.
+  // actually carries. An unresolved reference is a failed full backup, never
+  // permission to discard the row and publish an apparently complete archive.
   {
     // Only a table THIS export actually fetched can testify about what it
     // does or doesn't contain — treating "not fetched" as "carries no ids"
@@ -648,9 +716,16 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
     // table genuinely means "no such ids exist, drop what points at them",
     // while an ABSENT one means "no information" — collapsing the two is the
     // bug above waiting to come back the moment any caller narrows the set.
+    validateNodeGraph(tableRows.nodes ?? []);
     const exported = new Set(tables);
     const idsOf = (table: DumpTable): Set<string> | null =>
-      exported.has(table) ? new Set((tableRows[table] ?? []).map((row) => row.id as string)) : null;
+      !exported.has(table)
+        ? null
+        : table === "commits"
+          ? commitIds
+          : table === "agentSessions"
+            ? agentSessionIds
+            : new Set((tableRows[table] ?? []).map((row) => row.id as string));
 
     const validIds = new Map<DumpTable, Set<string> | null>();
     const validIdsFor = (table: DumpTable): Set<string> | null => {
@@ -662,31 +737,23 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
       const foreignKeys = DUMP_FOREIGN_KEYS[table];
       if (!foreignKeys || !exported.has(table)) continue;
       const rows = tableRows[table] ?? [];
-      if (rows.length === 0) continue;
+      const spool = spoolFor(table);
+      if (!spool && rows.length === 0) continue;
 
-      const kept = rows.filter((row) =>
-        Object.entries(foreignKeys).every(([column, targetTable]) => {
+      const referencesResolve = (row: Record<string, unknown>): boolean => {
+        for (const [column, targetTable] of Object.entries(foreignKeys)) {
           const id = row[column];
-          // A null/absent FK is legitimately unset, not a dangling reference.
-          if (id === null || id === undefined || id === "") return true;
+          if (id === null || id === undefined) continue;
           const valid = validIdsFor(targetTable);
-          // Target table not part of this export — nothing to check against.
-          return valid === null || valid.has(id as string);
-        }),
-      );
-
-      const dropped = rows.length - kept.length;
-      if (dropped === 0) continue;
-      log(
-        `  WARNING: dropped ${dropped} ${table} row(s) referencing a ` +
-          `${Object.values(foreignKeys).join("/")} that this archive does not carry — a long ` +
-          "backup of an actively-used space can drift out of sync with itself. Re-run the " +
-          "backup for a tighter snapshot if these matter.",
-      );
-      tableRows[table] = kept;
-      tableCounts[table] = kept.length;
-      // Later tables must judge against what SURVIVED, not what was fetched.
-      validIds.set(table, new Set(kept.map((row) => row.id as string)));
+          if (valid !== null && !valid.has(id as string))
+            throw incomplete(
+              `${table} row ${String(row.id)} references missing ${targetTable} id ${String(id)} via ${column}; retry against a consistent source snapshot`,
+            );
+        }
+        return true;
+      };
+      if (spool) await spool.filter(referencesResolve);
+      else for (const row of rows) referencesResolve(row);
     }
   }
 
@@ -715,8 +782,10 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
   // the ceiling of what an old server can serve, and the warning says so
   // rather than letting the gap pass silently.
   const docNodes = (tableRows.nodes ?? []).filter((n) => n.type === "doc");
-  const docBodyEntries: Array<{ nodeId: string; body: string }> = [];
+  // `html` marks a folder's HTML readme, archived as `docs/{nodeId}.html`.
+  const docBodyEntries: Array<{ nodeId: string; body: string; html?: true }> = [];
   const skippedDocBodies: string[] = [];
+  const coverageProblems: string[] = [];
   const reportDocProgress = throttledProgress(
     log,
     () => `  ...doc bodies: ${docBodyEntries.length}/${docNodes.length} fetched`,
@@ -727,7 +796,7 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
   // the ROUTE itself is absent — an unambiguous "server is older than this
   // CLI" signal, not a data condition.
   const isMissingRoute = (error: unknown): boolean =>
-    /not found|404|no procedure|unknown procedure/i.test(
+    /^(?:not found|HTTP 404|endpoint not found|no procedure.*|unknown procedure.*|cannot (?:get|post) .*)$/i.test(
       error instanceof Error ? error.message : String(error),
     );
 
@@ -740,7 +809,9 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
         if (detail.type !== "doc") {
           throw new Error(`Expected a doc node for ${nodeId}, got "${detail.type}"`);
         }
-        return detail.body ?? "";
+        if (typeof detail.body !== "string")
+          throw incomplete(`legacy server returned no readable body for doc ${nodeId}`);
+        return detail.body;
       },
       (attempt, error) =>
         log(
@@ -758,7 +829,7 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
     docBodyEntries.push({ nodeId, body });
   };
 
-  let batchRouteAvailable = true;
+  let batchRouteAvailable = typeof client.dump.exportDocBodies === "function";
   for (let i = 0; i < docNodes.length; i += EXPORT_DOC_BODIES_MAX_BATCH) {
     reportDocProgress();
     const batch = docNodes.slice(i, i + EXPORT_DOC_BODIES_MAX_BATCH);
@@ -777,6 +848,9 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
           (error) => !isMissingRoute(error),
           retries,
         );
+        validateBodies(bodies, new Set(nodeIds));
+        if (bodies.some((body) => body.bodyFormat !== undefined || body.nodeType !== undefined))
+          throw incomplete("a Doc body response carried a different content type");
         const byId = new Map(bodies.map((entry) => [entry.nodeId, entry.markdown]));
         for (const nodeId of nodeIds) {
           const markdown = byId.get(nodeId);
@@ -786,7 +860,7 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
             // (these ids came from this same archive's own `nodes` dump), so
             // surface it rather than silently archiving nothing for it.
             skippedDocBodies.push(nodeId);
-            log(`  WARNING: server returned no body for doc node ${nodeId}, skipping it`);
+            coverageProblems.push(`server returned no body for doc node ${nodeId}`);
             continue;
           }
           // Written later, in the write phase below — see that comment for why.
@@ -795,20 +869,18 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
         continue;
       } catch (error) {
         if (!isMissingRoute(error)) {
-          // A genuine failure on one batch must not cost the whole archive —
-          // same treatment as the attachment and asset-text loops below.
+          // Collect this batch's failure for a precise coverage error. Nothing
+          // is published when any required body was unreadable.
           const message = error instanceof Error ? error.message : String(error);
           skippedDocBodies.push(...nodeIds);
-          log(
-            `  WARNING: could not read doc bodies for ${nodeIds.length} node(s), skipping them (${message})`,
-          );
+          coverageProblems.push(`could not read doc bodies for ${nodeIds.join(", ")} (${message})`);
           continue;
         }
         batchRouteAvailable = false;
         log(
           "  NOTE: this server predates `dump.exportDocBodies`; falling back to one request per " +
-            "Doc. Archived Docs cannot be read that way, so their bodies will be missing from " +
-            "this archive — upgrade the server to capture them.",
+            "Doc and folder. Every body must still be readable; missing archived content " +
+            "will fail the backup instead of producing an incomplete archive.",
         );
       }
     }
@@ -827,7 +899,7 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
         const { error } = settled;
         const message = error instanceof Error ? error.message : String(error);
         skippedDocBodies.push(nodeId);
-        log(`  WARNING: could not read doc body for node ${nodeId}, skipping it (${message})`);
+        coverageProblems.push(`could not read doc body for node ${nodeId} (${message})`);
       },
     );
   }
@@ -838,7 +910,8 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
   // `docs/{nodeId}.md` entries: the server decides on restore whether an entry
   // is a Doc body or a readme from the node's restored type. Without this pass
   // a restore brought every readme back EMPTY while its `folder_update`
-  // history survived.
+  // history survived. An HTML readme (`bodyFormat: "html"`) is archived as
+  // `docs/{nodeId}.html` instead, so the restore knows to write it back as HTML.
   //
   // A separate pass, not folders mixed into `docNodes`: most folders have no
   // readme, and the route omits those, so an omitted folder is the normal case
@@ -851,6 +924,7 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
     .map((n) => n.id as string);
   let folderReadmeCount = 0;
   const skippedFolderReadmes: string[] = [];
+  let legacyFolderStart = batchRouteAvailable ? folderIds.length : 0;
   if (batchRouteAvailable) {
     for (let i = 0; i < folderIds.length; i += EXPORT_DOC_BODIES_MAX_BATCH) {
       const nodeIds = folderIds.slice(i, i + EXPORT_DOC_BODIES_MAX_BATCH);
@@ -867,128 +941,294 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
           retries,
         );
         const requested = new Set(nodeIds);
+        validateBodies(bodies, requested);
+        if (
+          bodies.some(
+            (body) =>
+              body.nodeType !== undefined ||
+              (body.bodyFormat !== undefined && body.bodyFormat !== "html"),
+          )
+        )
+          throw incomplete("a folder readme response carried a different content type");
         for (const entry of bodies) {
           if (!requested.has(entry.nodeId)) continue;
-          docBodyEntries.push({ nodeId: entry.nodeId, body: entry.markdown });
+          docBodyEntries.push(
+            entry.bodyFormat === "html"
+              ? { nodeId: entry.nodeId, body: entry.markdown, html: true }
+              : { nodeId: entry.nodeId, body: entry.markdown },
+          );
           folderReadmeCount += 1;
         }
       } catch (error) {
-        if (isMissingRoute(error)) break;
+        if (isMissingRoute(error)) {
+          legacyFolderStart = i;
+          break;
+        }
         const message = error instanceof Error ? error.message : String(error);
         skippedFolderReadmes.push(...nodeIds);
-        log(
-          `  WARNING: could not read folder readmes for ${nodeIds.length} folder(s), skipping them (${message})`,
+        coverageProblems.push(
+          `could not read folder readmes for ${nodeIds.join(", ")} (${message})`,
         );
       }
     }
+  }
+  if (legacyFolderStart < folderIds.length) {
+    await forEachConcurrent(
+      folderIds.slice(legacyFolderStart),
+      BLOB_DOWNLOAD_CONCURRENCY,
+      async (nodeId) => {
+        const detail = await fetchPageWithRetry(
+          () => client.nodes.get({ nodeId, type: "folder" }),
+          undefined,
+          isTransientError,
+          retries,
+        );
+        if (detail.type !== "folder" || typeof detail.body !== "string")
+          throw incomplete(`legacy server cannot read folder ${nodeId} completely`);
+        return detail;
+      },
+      (settled, nodeId) => {
+        if (!settled.ok) {
+          skippedFolderReadmes.push(nodeId);
+          coverageProblems.push(
+            `could not read legacy folder ${nodeId} (${settled.error instanceof Error ? settled.error.message : String(settled.error)})`,
+          );
+          return;
+        }
+        const detail = settled.value;
+        if (detail.body.length === 0) return;
+        docBodyEntries.push(
+          detail.bodyFormat === "html"
+            ? { nodeId, body: detail.body, html: true }
+            : { nodeId, body: detail.body },
+        );
+        folderReadmeCount++;
+      },
+    );
   }
   log(
     `fetched ${folderReadmeCount} folder readmes from ${folderIds.length} folders, ` +
       `skipped ${skippedFolderReadmes.length}`,
   );
 
-  // Attachment blobs — download every exported Asset's bytes and archive them
-  // keyed by the OWNING `busabase_attachments` row's own `storageKey` (written
-  // to `attachments.ndjson` next to the `attachments` table dump above), not
-  // by content hash — the importer restores each blob at that exact key via
-  // `storage.uploadFileToKey` before the `attachments` row that FKs into it is
-  // inserted, so a re-imported Asset's `assets.download` resolves immediately.
-  const attachmentsById = new Map((tableRows.attachments ?? []).map((a) => [a.id as string, a]));
-  // Resuming: whatever a previous killed run finished downloading is already
-  // on disk at a known path. Recover it (truncating any half-written final
-  // row) and skip re-downloading those blobs — this phase is ~2/3 of a real
-  // backup's wall clock, so it is the part worth not repeating.
-  const recoveredBlobs = resume
-    ? await recoverCompleteRows(attachmentSpoolPath, "storageKey")
-    : { keys: new Set<string>(), count: 0, bytes: 0 };
-  const attachmentBlobs = new SpooledNdjsonEntry(attachmentSpoolPath, resume);
+  // Preserve raw stored rich documents, including archived nodes. Do not use
+  // renderer defaults or JSON parse/stringify: both would change source bytes.
+  const richNodes = (tableRows.nodes ?? []).filter((node) =>
+    ["html", "whiteboard", "workflow"].includes(node.type as string),
+  );
+  const richBodyEntries: Array<{
+    nodeId: string;
+    nodeType: "html" | "whiteboard" | "workflow";
+    body: string;
+  }> = [];
+  for (let offset = 0; offset < richNodes.length; offset += EXPORT_DOC_BODIES_MAX_BATCH) {
+    const batch = richNodes.slice(offset, offset + EXPORT_DOC_BODIES_MAX_BATCH);
+    try {
+      const result = await fetchPageWithRetry(
+        () => client.dump.exportDocBodies({ nodeIds: batch.map((node) => node.id as string) }),
+        undefined,
+        (error) => !isMissingRoute(error),
+        retries,
+      );
+      if (
+        !Array.isArray(result.supportedRichNodeTypes) ||
+        batch.some(
+          (node) =>
+            !result.supportedRichNodeTypes?.includes(
+              node.type as "html" | "whiteboard" | "workflow",
+            ),
+        )
+      )
+        throw incomplete(
+          "server does not support complete HTML, whiteboard and workflow backup coverage; upgrade the server",
+        );
+      validateBodies(result.bodies, new Set(batch.map((node) => node.id as string)));
+      for (const body of result.bodies) {
+        const node = batch.find((node) => node.id === body.nodeId);
+        if (!node || !body.nodeType || body.nodeType !== node.type)
+          throw incomplete("a rich document response carried a different node type");
+        richBodyEntries.push({
+          nodeId: body.nodeId,
+          nodeType: body.nodeType,
+          body: body.markdown,
+        });
+      }
+    } catch (error) {
+      coverageProblems.push(
+        `could not read rich node document(s) ${batch.map((node) => node.id).join(", ")}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  log(`fetched ${richBodyEntries.length} stored rich documents from ${richNodes.length} nodes`);
+
+  if (coverageProblems.length > 0)
+    throw incomplete(
+      `${coverageProblems.length} document coverage error(s): ${coverageProblems.slice(0, 10).join("; ")}`,
+    );
+
+  // Physical rows are the complete byte registry. Assets cover only a subset:
+  // attachments with no Asset still belong in a disaster-recovery archive.
+  const attachmentRows = tableRows.attachments ?? [];
+  const attachmentsById = new Map(
+    attachmentRows.map((attachment) => [attachment.id as string, attachment]),
+  );
+  const assetsByAttachmentId = new Map<string, Record<string, unknown>>();
+  for (const asset of tableRows.assets ?? []) {
+    if (!assetsByAttachmentId.has(asset.attachmentId as string))
+      assetsByAttachmentId.set(asset.attachmentId as string, asset);
+    if (!attachmentsById.has(asset.attachmentId as string)) {
+      throw incomplete(
+        `asset ${asset.id} has no exported attachment row; upgrade an older server or repair the source registry before backing up`,
+      );
+    }
+  }
+  const uniqueAttachments = [
+    ...new Map(
+      attachmentRows.map((attachment) => [attachment.storageKey as string, attachment]),
+    ).values(),
+  ];
+  const registeredHashes = new Map<string, string>();
+  for (const attachment of attachmentRows) {
+    const normalized = canonicalHash(attachment.contentHash, `attachment ${attachment.id}`);
+    if (normalized === undefined) continue;
+    const key = attachment.storageKey as string;
+    const previous = registeredHashes.get(key);
+    if (previous && previous !== normalized)
+      throw new BackupContentIntegrityError(
+        `Conflicting registered content hashes for shared attachment key ${key}. No new archive was published.`,
+      );
+    registeredHashes.set(key, normalized);
+  }
+  const attachmentBlobs = await RawBlobSpool.open(
+    attachmentSpoolPath,
+    "attachments",
+    resume,
+    registeredHashes,
+  );
+  blobSpools.push(attachmentBlobs);
+  const allowedAttachmentKeys = new Map(
+    uniqueAttachments.map((attachment) => [
+      attachment.storageKey as string,
+      registeredHashes.get(attachment.storageKey as string),
+    ]),
+  );
+  const recoveredBlobs = await attachmentBlobs.recover(allowedAttachmentKeys);
   let blobCount = recoveredBlobs.count;
   let blobBytes = recoveredBlobs.bytes;
-  const skippedAssets: string[] = [];
-  const assetRows = tableRows.assets ?? [];
-  if (recoveredBlobs.count > 0) {
+  const skippedAttachments: string[] = [];
+  if (recoveredBlobs.count > 0)
     log(
-      `  resuming: ${recoveredBlobs.count} attachment blob(s) already downloaded ` +
-        `(${recoveredBlobs.bytes} bytes), continuing with the rest`,
+      `  resuming: ${recoveredBlobs.count} attachment blob(s) already downloaded (${recoveredBlobs.bytes} bytes), continuing with the rest`,
+    );
+
+  // Probe once before concurrent work. New SDK methods against old servers are
+  // present locally but 404 remotely; plain test/old SDK objects can lack it.
+  let attachmentRouteAvailable = typeof client.dump.exportAttachment === "function";
+  const prefetched = new Map<string, ExportAttachmentVO>();
+  const firstAttachment = uniqueAttachments.find(
+    (attachment) => !recoveredBlobs.keys.has(attachment.storageKey as string),
+  );
+  if (attachmentRouteAvailable && firstAttachment) {
+    try {
+      prefetched.set(
+        firstAttachment.id as string,
+        await client.dump.exportAttachment({ attachmentId: firstAttachment.id as string }),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // An absent object or a now-deleted row is not an absent route.
+      if (
+        /^(?:not found|unknown procedure.*|no procedure.*|cannot get .*|HTTP 404)$/i.test(message)
+      )
+        attachmentRouteAvailable = false;
+    }
+  }
+  if (!attachmentRouteAvailable && uniqueAttachments.length > 0) {
+    log(
+      "  WARNING: this server predates dump.exportAttachment. Falling back to Asset downloads: physical attachments without Assets and original bytes behind a rewriting CDN cannot be guaranteed. Upgrade the server for complete backup coverage.",
     );
   }
   const reportBlobProgress = throttledProgress(
     log,
-    () => `  ...attachment blobs: ${blobCount}/${assetRows.length} fetched`,
+    () => `  ...attachment blobs: ${blobCount}/${uniqueAttachments.length} fetched`,
   );
-  // Downloads overlap (`BLOB_DOWNLOAD_CONCURRENCY`); the spool write and the
-  // counters stay strictly sequential and in order — see `forEachConcurrent`.
   await forEachConcurrent(
-    assetRows,
+    uniqueAttachments,
     BLOB_DOWNLOAD_CONCURRENCY,
-    async (asset) => {
-      const attachment = attachmentsById.get(asset.attachmentId as string);
-      // A single asset row with no resolvable bytes (e.g. an orphaned row
-      // whose attachment was already removed) must not abort the whole space
-      // backup — it surfaces as a warning below. `dump.importCommit`'s
-      // integrity pass also cross-checks `assets` rows against blobs actually
-      // present in the archive, so a caller can see this gap on import too.
-      if (!attachment) throw new Error("no matching attachments row (orphaned asset)");
-      // Already spooled by a previous run — its bytes are on disk, so neither
-      // the `assets.download` round trip nor the transfer is needed again.
-      if (recoveredBlobs.keys.has(attachment.storageKey as string)) return null;
-      // Retried as a unit. Neither round trip below was retried at all before:
-      // `assets.download` is an oRPC POST, which the shared `withRetry`
-      // refuses to repeat, and the byte transfer is a bare `fetch` that never
-      // went through that wrapper. A blip on either one dropped the blob and
-      // logged a warning, so the backup finished "successfully" MISSING an
-      // attachment — a silent hole in a disaster-recovery archive, which is
-      // worse than a loud failure. Re-requesting the download url is
-      // deliberate: it may be a short-lived signed url that expired.
+    async (attachment) => {
+      const key = attachment.storageKey as string;
+      if (recoveredBlobs.keys.has(key)) return null;
       return await fetchPageWithRetry(
         async () => {
-          const download = await client.assets.download({ assetId: asset.id as string });
-          // A local (non-S3) server returns a root-relative `downloadUrl` (e.g.
-          // `/api/storage/...`) meant to be fetched same-origin from the
-          // browser. `busabase-cli backup` runs out-of-process, so it must resolve
-          // that against the configured server host itself — found live against a real
-          // seeded server (a bare `fetch("/api/...")` throws "Failed to parse
-          // URL" in Node), not just inferred from reading the code.
-          const resolvedUrl = new URL(download.downloadUrl, sourceHost).toString();
-          const res = await fetch(resolvedUrl);
-          if (!res.ok || !res.body) {
-            throw new Error(`HTTP ${res.status}`);
+          let downloadUrl: string;
+          let mimeType = attachment.mimeType as string;
+          let registeredHash = registeredHashes.get(key);
+          if (attachmentRouteAvailable) {
+            const info =
+              prefetched.get(attachment.id as string) ??
+              (await client.dump.exportAttachment({ attachmentId: attachment.id as string }));
+            prefetched.delete(attachment.id as string);
+            if (info.storageKey !== key || info.attachmentId !== attachment.id)
+              throw new BackupContentIntegrityError(
+                `Attachment identity changed while backing up ${attachment.id}.`,
+              );
+            downloadUrl = info.downloadUrl;
+            mimeType = info.mimeType;
+            registeredHash = info.contentHash ?? registeredHash;
+          } else {
+            const asset = assetsByAttachmentId.get(attachment.id as string);
+            if (!asset)
+              throw new Error(
+                "server has no physical-attachment download endpoint and this attachment has no Asset",
+              );
+            const legacy = await client.assets.download({ assetId: asset.id as string });
+            downloadUrl = legacy.downloadUrl;
+            mimeType = legacy.mimeType;
           }
-          return {
-            storageKey: attachment.storageKey as string,
-            mimeType: download.mimeType,
-            buf: Buffer.from(await res.arrayBuffer()),
-          };
+          const response = await fetch(new URL(downloadUrl, sourceHost).toString());
+          if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+          const metadata = await attachmentBlobs.download(
+            response,
+            key,
+            mimeType,
+            [registeredHashes.get(key), registeredHash],
+            `attachment ${attachment.id}`,
+          );
+          // Size registrations can be stale (verified on real legacy images).
+          // A matching content hash proves byte identity; keep those bytes and
+          // expose the size discrepancy rather than treating metadata as damage.
+          const registeredSize = attachment.sizeBytes;
+          const sizeWarning =
+            typeof registeredSize === "number" && registeredSize !== metadata.bytes
+              ? `  WARNING: attachment ${attachment.id} registered size ${registeredSize} differs from downloaded ${metadata.bytes}; ${registeredHash ? "content hash verified" : "no registered hash available"}.`
+              : null;
+          return { metadata, sizeWarning };
         },
         (attempt, error) =>
           log(
-            `  retrying asset ${asset.id} (attempt ${attempt}/${retries}): ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+            `  retrying attachment ${attachment.id} (attempt ${attempt}/${retries}): ${error instanceof Error ? error.message : String(error)}`,
           ),
         isTransientError,
         retries,
       );
     },
-    async (settled, asset) => {
+    async (settled, attachment) => {
       reportBlobProgress();
-      const assetId = asset.id as string;
       if (!settled.ok) {
-        const { error } = settled;
-        const message = error instanceof Error ? error.message : String(error);
-        skippedAssets.push(assetId);
-        log(`  WARNING: could not download asset ${assetId}, skipping its blob (${message})`);
-        return;
+        if (settled.error instanceof BackupContentIntegrityError) throw settled.error;
+        throw incomplete(
+          `could not download attachment ${attachment.id} after retries (${settled.error instanceof Error ? settled.error.message : String(settled.error)})`,
+        );
       }
-      if (!settled.value) return; // already recovered from a previous run
-      const { storageKey, mimeType, buf } = settled.value;
-      await attachmentBlobs.writeRow({ storageKey, mimeType, base64: buf.toString("base64") });
-      blobCount += 1;
-      blobBytes += buf.length;
+      if (!settled.value) return;
+      const { metadata, sizeWarning } = settled.value;
+      if (sizeWarning) log(sizeWarning);
+      blobCount++;
+      blobBytes += metadata.bytes;
     },
   );
   log(
-    `fetched ${blobCount} attachment blobs (${blobBytes} bytes), skipped ${skippedAssets.length}`,
+    `fetched ${blobCount} attachment blobs (${blobBytes} bytes), skipped ${skippedAttachments.length}`,
   );
 
   // Asset-text blobs — the extracted-text objects `busabase_asset_texts` rows
@@ -1007,17 +1247,36 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
   // one key on restore. Keys are content-addressed, so two assets holding
   // identical text share one key: dedupe, or the archive carries the same
   // bytes twice.
-  const recoveredTexts = resume
-    ? await recoverCompleteRows(assetTextSpoolPath, "textStorageKey")
-    : { keys: new Set<string>(), count: 0, bytes: 0 };
-  const textBlobs = new SpooledNdjsonEntry(assetTextSpoolPath, resume);
+  const assetTextRows = tableRows.assetTexts ?? [];
+  const expectedTextHashes = new Map<string, string>();
+  for (const row of assetTextRows) {
+    if (typeof row.textStorageKey !== "string" || !row.textStorageKey) continue;
+    const hash = canonicalHash(row.textContentHash, `asset text ${row.assetId}`);
+    if (hash === undefined) continue;
+    const previous = expectedTextHashes.get(row.textStorageKey);
+    if (previous && previous !== hash)
+      throw new BackupContentIntegrityError(
+        `Conflicting registered text hashes for shared key ${row.textStorageKey}`,
+      );
+    expectedTextHashes.set(row.textStorageKey, hash);
+  }
+  const allowedTextKeys = new Map(
+    assetTextRows
+      .filter((row) => typeof row.textStorageKey === "string" && row.textStorageKey)
+      .map((row) => [
+        row.textStorageKey as string,
+        expectedTextHashes.get(row.textStorageKey as string),
+      ]),
+  );
+  const textBlobs = await RawBlobSpool.open(assetTextSpoolPath, "asset-texts", resume);
+  blobSpools.push(textBlobs);
+  const recoveredTexts = await textBlobs.recover(allowedTextKeys);
   // Seeded with what a previous run already wrote, so the content-addressed
   // dedupe below still holds across the resume boundary.
   const seenTextKeys = new Set<string>(recoveredTexts.keys);
   let textBlobCount = recoveredTexts.count;
   let textBlobBytes = recoveredTexts.bytes;
   const skippedAssetTexts: string[] = [];
-  const assetTextRows = tableRows.assetTexts ?? [];
   if (recoveredTexts.count > 0) {
     log(`  resuming: ${recoveredTexts.count} asset-text blob(s) already downloaded`);
   }
@@ -1040,7 +1299,23 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
             assetId: assetText.assetId as string,
           });
           // No separate object to archive (auto-registered row, or `status: "none"`).
-          if (!info.downloadUrl) return null;
+          if (!info.downloadUrl) {
+            const key = assetText.textStorageKey;
+            const ownsObject =
+              typeof key === "string" && key.length > 0 && !allowedAttachmentKeys.has(key);
+            if (ownsObject && assetText.status !== "none")
+              throw incomplete(
+                `server returned no download URL for extracted text ${assetText.assetId}`,
+              );
+            return null;
+          }
+          if (
+            typeof assetText.textStorageKey === "string" &&
+            assetText.textStorageKey !== info.textStorageKey
+          )
+            throw incomplete(
+              `extracted text storage identity changed for asset ${assetText.assetId}`,
+            );
           // Already spooled by a previous run. Safe to read `recoveredBlobs`-style
           // state from inside the concurrent worker because this set is immutable
           // for the whole run — unlike `seenTextKeys`, which the sequential step
@@ -1052,21 +1327,13 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
           if (!res.ok || !res.body) {
             throw new Error(`HTTP ${res.status}`);
           }
-          const buf = Buffer.from(await res.arrayBuffer());
-          // The key IS the sha256 of these bytes, so a text that comes back even
-          // one byte different (a line-oriented reader dropping a trailing
-          // newline, a proxy re-encoding the body) would restore to a key that no
-          // longer matches its own `textContentHash`. Verify rather than assume —
-          // a corrupt backup that reports success is worse than a loud skip.
-          if (info.textContentHash) {
-            const actual = `sha256:${createHash("sha256").update(buf).digest("hex")}`;
-            if (actual !== info.textContentHash) {
-              throw new Error(
-                `content hash mismatch (expected ${info.textContentHash}, downloaded ${actual})`,
-              );
-            }
-          }
-          return { textStorageKey: info.textStorageKey, buf };
+          return await textBlobs.download(
+            res,
+            info.textStorageKey,
+            undefined,
+            [expectedTextHashes.get(info.textStorageKey), info.textContentHash],
+            `asset text ${assetText.assetId}`,
+          );
         },
         (attempt, error) =>
           log(
@@ -1082,15 +1349,14 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
       const assetId = assetText.assetId as string;
       if (!settled.ok) {
         const { error } = settled;
-        const message = error instanceof Error ? error.message : String(error);
-        skippedAssetTexts.push(assetId);
-        log(
-          `  WARNING: could not download text for asset ${assetId}, skipping its blob (${message})`,
+        if (error instanceof BackupContentIntegrityError) throw error;
+        throw incomplete(
+          `could not download text for asset ${assetId} after retries (${error instanceof Error ? error.message : String(error)})`,
         );
-        return;
       }
       if (!settled.value) return;
-      const { textStorageKey, buf } = settled.value;
+      const metadata = settled.value;
+      const textStorageKey = metadata.textStorageKey as string;
       // Keys are content-addressed, so two assets holding identical text share
       // one key. Dedupe HERE, in the sequential step — checking a shared Set
       // from inside the concurrent work function would race (two in-flight
@@ -1098,53 +1364,70 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
       // downloading a duplicate we then discard, which is rare and bounded.
       if (seenTextKeys.has(textStorageKey)) return;
       seenTextKeys.add(textStorageKey);
-      await textBlobs.writeRow({ textStorageKey, base64: buf.toString("base64") });
       textBlobCount += 1;
-      textBlobBytes += buf.length;
+      textBlobBytes += metadata.bytes;
     },
   );
   log(
     `fetched ${textBlobCount} asset-text blobs (${textBlobBytes} bytes), skipped ${skippedAssetTexts.length}`,
   );
 
-  // Write phase — everything above only FETCHED data into memory; nothing has
-  // touched the archive file yet. Entries are written here in the exact
+  // Write phase — everything above FETCHED data into memory or a disk spool;
+  // nothing has touched the archive file yet. Entries are written here in the exact
   // order `full-importer.ts` needs to encounter them while streaming the
   // file back in a single pass (blobs before the table rows that reference
   // them, tables in FK-safe `IMPORT_ORDER`, doc bodies last): `streamArchive`
   // processes entries strictly in tar-physical order, so THIS order is what
   // makes a true single-pass streaming restore possible without re-reading
   // the file per table. See the matching comment on `IMPORT_ORDER`.
-  await attachmentBlobs.finish(writer, "tree/attachmentBlobs.ndjson");
-  await textBlobs.finish(writer, "tree/assetTextBlobs.ndjson");
-  for (const table of IMPORT_ORDER) {
-    // `--no-history` never fetched these tables at all (see `tables` above)
-    // — omit the entry entirely rather than writing an empty one, matching
-    // the archive's previous shape for a `--no-history` backup.
-    if (!tables.includes(table)) continue;
-    await writeNdjsonEntry(writer, `tree/${table}.ndjson`, tableRows[table] ?? []);
-  }
-  for (const doc of docBodyEntries) {
-    await writer.addBuffer(`docs/${doc.nodeId}.md`, doc.body);
-  }
-  log(
-    `wrote archive entries: ${blobCount} attachment blobs, ${textBlobCount} asset-text blobs, ` +
-      `${IMPORT_ORDER.length} tables, ${docBodyEntries.length} doc bodies`,
-  );
+  const writer = ArchiveWriter.create(writingPath);
+  try {
+    await attachmentBlobs.finish(
+      writer,
+      uniqueAttachments.map((attachment) => attachment.storageKey as string),
+    );
+    await textBlobs.finish(writer, [...seenTextKeys]);
+    for (const table of IMPORT_ORDER) {
+      // `--no-history` never fetched these tables at all (see `tables` above)
+      // — omit the entry entirely rather than writing an empty one, matching
+      // the archive's previous shape for a `--no-history` backup.
+      if (!tables.includes(table)) continue;
+      const spool = spoolFor(table);
+      if (spool) {
+        await spool.writeArchive(writer, `tree/${table}.ndjson`);
+      } else {
+        await writeNdjsonEntry(writer, `tree/${table}.ndjson`, tableRows[table] ?? []);
+      }
+    }
+    for (const doc of docBodyEntries) {
+      await writer.addBuffer(`docs/${doc.nodeId}.${doc.html ? "html" : "md"}`, doc.body);
+    }
+    for (const rich of richBodyEntries) {
+      const extension = rich.nodeType === "html" ? "html" : `${rich.nodeType}.json`;
+      await writer.addBuffer(`rich/${rich.nodeId}.${extension}`, rich.body);
+    }
+    log(
+      `wrote archive entries: ${blobCount} attachment blobs, ${textBlobCount} asset-text blobs, ` +
+        `${IMPORT_ORDER.length} tables, ${docBodyEntries.length} doc bodies`,
+    );
 
-  const manifestWithoutChecksum: Omit<Manifest, "checksum"> = {
-    formatVersion: FORMAT_VERSION,
-    toolVersion,
-    exportedAt: new Date().toISOString(),
-    spaceId,
-    sourceHost,
-    fidelity: "full",
-    excludesSecrets: true,
-    tables: tableCounts,
-    blobCount,
-    blobBytes,
-    textBlobCount,
-    textBlobBytes,
-  };
-  return writer.finalize(manifestWithoutChecksum);
+    const manifestWithoutChecksum: Omit<Manifest, "checksum"> = {
+      formatVersion: FORMAT_VERSION,
+      toolVersion,
+      exportedAt: new Date().toISOString(),
+      spaceId,
+      sourceHost,
+      fidelity: "full",
+      excludesSecrets: true,
+      tables: tableCounts,
+      blobCount,
+      blobBytes,
+      textBlobCount,
+      textBlobBytes,
+    };
+    return await writer.finalize(manifestWithoutChecksum);
+  } catch (error) {
+    await writer.abort();
+    throw error;
+  }
 }

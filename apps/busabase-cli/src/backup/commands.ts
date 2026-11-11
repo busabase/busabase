@@ -6,8 +6,8 @@
 import { access } from "node:fs/promises";
 import type { BusabaseClient } from "busabase-sdk";
 import { exportFull, SPOOL_SUFFIXES } from "./export/full-exporter.js";
-import { verifyArchive } from "./format/archive-reader.js";
-import { importFull } from "./import/full-importer.js";
+import { openVerifiedArchive } from "./format/archive-reader.js";
+import { assertSupportedRestoreTables, importFull } from "./import/full-importer.js";
 
 /** Progress is diagnostics, not data — it must never pollute `--output json` on stdout. */
 const reportProgress = (message: string): void => {
@@ -138,6 +138,8 @@ export interface RestoreCommandOptions {
   file: string;
   resume?: boolean;
   intoFolder?: string;
+  /** Verify and describe the archive without sending any restore requests. */
+  dryRun?: boolean;
   json: boolean;
 }
 
@@ -145,47 +147,81 @@ export const runRestore = async (
   client: BusabaseClient,
   options: RestoreCommandOptions,
 ): Promise<unknown> => {
-  if (options.resume) {
-    reportProgress(
-      "Resuming: rows already present are left alone, and this run will NOT roll back on " +
-        "failure. Only do this to continue THIS archive into THIS space.",
-    );
-  }
-
   reportProgress(`Reading ${options.file} …`);
   // Streams the whole archive once, hashing incrementally (never buffering a
   // whole entry — see archive-reader.ts), and verifies every entry against
   // the manifest before a single row is replayed.
-  const manifest = await verifyArchive(options.file);
-  reportProgress(
-    `Archive: fidelity=${manifest.fidelity} space=${manifest.spaceId} exportedAt=${manifest.exportedAt}`,
-  );
-  if (manifest.fidelity !== "full") throw new Error(STATE_ONLY_RESTORE_MESSAGE);
-  if (options.intoFolder) {
-    throw new Error("--into-folder only applies to state-only archives.");
-  }
+  const archive = await openVerifiedArchive(options.file);
+  try {
+    const manifest = archive.manifest;
+    reportProgress(
+      `Archive: fidelity=${manifest.fidelity} space=${manifest.spaceId} exportedAt=${manifest.exportedAt}`,
+    );
+    if (manifest.fidelity !== "full") throw new Error(STATE_ONLY_RESTORE_MESSAGE);
+    assertSupportedRestoreTables(manifest.tables);
+    if (options.intoFolder) {
+      throw new Error("--into-folder only applies to state-only archives.");
+    }
 
-  const result = await importFull({
-    client,
-    archivePath: options.file,
-    sourceSpaceId: manifest.spaceId,
-    resume: Boolean(options.resume),
-    onProgress: (message) => reportProgress(`  ${message}`),
-  });
+    if (options.dryRun) {
+      const rows = Object.values(manifest.tables).reduce((total, count) => total + count, 0);
+      if (options.json) {
+        return {
+          dryRun: true,
+          restored: false,
+          file: options.file,
+          sourceSpaceId: manifest.spaceId,
+          checksumVerified: true,
+          rows,
+          tables: manifest.tables,
+          blobCount: manifest.blobCount,
+          textBlobCount: manifest.textBlobCount,
+          resume: Boolean(options.resume),
+          targetChecked: false,
+        };
+      }
+      return [
+        `Archive verified: ${rows} rows, ${manifest.blobCount} attachment blobs, ${manifest.textBlobCount} text blobs.`,
+        "Dry run: no restore requests were sent. Target availability and emptiness were not checked.",
+      ].join("\n");
+    }
 
-  if (options.json) {
-    return {
-      restored: result.ok,
-      file: options.file,
-      spaceId: manifest.spaceId,
-      warnings: result.warnings,
-    };
-  }
-  if (!result.ok || result.warnings.length > 0) {
+    if (options.resume) {
+      reportProgress(
+        "Resuming: rows already present are left alone, and this run will NOT roll back on " +
+          "failure. Only do this to continue THIS archive into THIS space.",
+      );
+    }
+
+    const result = await importFull({
+      client,
+      archivePath: options.file,
+      streamEntries: archive.streamEntries,
+      sourceSpaceId: manifest.spaceId,
+      resume: Boolean(options.resume),
+      onProgress: (message) => reportProgress(`  ${message}`),
+    });
+
+    if (options.json) {
+      return {
+        restored: result.ok,
+        file: options.file,
+        spaceId: manifest.spaceId,
+        warnings: result.warnings,
+        notices: result.notices ?? [],
+      };
+    }
+    if (!result.ok || result.warnings.length > 0) {
+      return [
+        "Restore completed with warnings:",
+        ...result.warnings.map((warning) => `  • ${warning}`),
+      ].join("\n");
+    }
     return [
-      "Restore completed with warnings:",
-      ...result.warnings.map((warning) => `  • ${warning}`),
+      "Restore completed successfully.",
+      ...(result.notices ?? []).map((notice) => `  • ${notice}`),
     ].join("\n");
+  } finally {
+    await archive.cleanup();
   }
-  return "Restore completed successfully.";
 };

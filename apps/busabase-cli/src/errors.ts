@@ -185,6 +185,36 @@ export function classifyError(error: unknown): ClassifiedError {
   };
 }
 
+/**
+ * Whether a 404 means "this server has no such route", as opposed to a
+ * procedure's own NOT_FOUND ("no invite link with that id").
+ *
+ * The CLI and the server ship separately, so a new command can reach a server
+ * that predates its endpoint — or the open-source edition, which never had it.
+ * Both servers' `/api/v1` handlers answer an unmatched path with
+ * `{ "error": "Not found", "path": … }` and no `code`; busabase-sdk decodes a body
+ * without `code` as `HTTP_404`. A procedure's error always carries its `code`
+ * (`encodeBusabaseOpenApiError`). Anything that is not a Busabase JSON error at
+ * all — an HTML or plain-text 404 from a proxy or a host with no `/api/v1` — is
+ * kept by oRPC as the raw `data.body`, and counts as route-missing too.
+ */
+export function isRouteMissing(error: unknown): boolean {
+  const { status, code, data } = (error ?? {}) as {
+    status?: unknown;
+    code?: unknown;
+    data?: unknown;
+  };
+  if (status !== 404) return false;
+  if (code === "HTTP_404") return true;
+  if (!data || typeof data !== "object" || !("body" in data)) return false;
+  const body = (data as { body?: unknown }).body;
+  return !(
+    body &&
+    typeof body === "object" &&
+    typeof (body as { code?: unknown }).code === "string"
+  );
+}
+
 /** The stdout envelope for a failed command under `--output json`. */
 export function errorEnvelope(classified: ClassifiedError): CliErrorEnvelope {
   return {

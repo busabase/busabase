@@ -191,13 +191,14 @@ tools `space_welcome_get` / `space_welcome_update`. The update input is
 
 ## Workflows
 
-Agents can see, start, cancel, and (where a step allows it) decide runs of a Workflow node. The
+Agents can see, start, retry, cancel, and (where a step allows it) decide runs of a Workflow node. The
 commands come from the same contract as the API, so `--help` always matches the server:
 
 ```bash
 busabase-cli workflows list --node-id nod_123 --limit 5
 busabase-cli workflows start --node-id nod_123 --record-id rec_456 --payload-json '{"source":"agent"}'
 busabase-cli workflows get --run-id wfr_789
+busabase-cli workflows retry --run-id wfr_789
 busabase-cli workflows cancel --run-id wfr_789
 busabase-cli workflows decide --run-id wfr_789 --decision approved
 ```
@@ -284,6 +285,50 @@ busabase-cli api --method get --path /nodes        # raw OpenAPI passthrough
 ```
 
 Run `busabase-cli --help` for the full command list.
+
+New full backups use archive format 2 so HTML, whiteboard, and workflow storage
+objects cannot be silently skipped by an older restore client. Use the updated
+CLI for restore; it also accepts existing format 1 archives. Restore rejects
+unsupported table declarations and unknown content entries instead of silently
+skipping them; update the CLI when an archive requires newer support. Upgrade
+the server to capture physical attachments without Asset entries, archived rich
+content, workspace settings, forms, sharing, workflows and session history.
+A full backup fails if a table reference cannot resolve, a required object cannot
+be read after retries, or the server cannot provide known rich-node content.
+It never publishes a smaller archive by silently skipping those rows or files.
+Normal empty folder readmes, unwritten rich documents, and intentional
+`--no-history` pruning are supported. Older-server fallbacks are accepted only
+when all required content remains readable.
+
+The archive is finalized in a private sibling staging directory, then atomically
+renamed to the requested output path. A failed attempt preserves an existing
+verified backup. Successful blob downloads remain resumable after a failed
+attempt; rerun with `--resume` to reuse that cache.
+
+`restore --dry-run` verifies the archive without sending restore requests. It
+does not check whether the target is reachable or empty. A normal restore checks
+the target before writing. `--resume` continues the same archive into the same
+space; it does not make a different archive safe to merge.
+Resume rechecks the references and physical files of already restored rows,
+including when replay inserts zero new rows. Missing data keeps recovery held
+until it is repaired.
+
+The full workspace archive covers 35 tables and their stored documents and
+physical files. It includes form bindings, password-protected sharing settings,
+favorites and subscriptions, comment mentions, space instructions and welcome
+pages, workflow definitions and runs, webhook rules and delivery history, and
+agent session transcripts and commands. Recovery pauses automatic work while
+the target is incomplete, including after a server crash.
+
+Dedicated Vault credentials, OAuth handshakes and pending enrollments, host
+authentication, and rebuildable search/cleanup state are outside this workspace
+archive. A webhook signing credential is omitted explicitly and its rule is
+disabled until reconnected. Router bindings and active authenticated embed links
+require reconnection; restore reports these changes. Sharing password hashes and
+origin restrictions remain intact. User-authored documents, code, workflow
+graphs and historical payloads are preserved verbatim, including any credentials
+their author put in that content; `excludesSecrets` describes the dedicated
+credential stores, not a scan that removes strings from user content.
 
 ## Programmatic use
 

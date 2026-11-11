@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readEntryText, streamArchive, verifyArchive } from "./archive-reader.js";
 import { ArchiveWriter } from "./archive-writer.js";
-import { FORMAT_VERSION } from "./manifest.js";
+import { FORMAT_VERSION, ManifestSchema } from "./manifest.js";
 
 /** Test helper: stream the whole archive back into a path→text map, the shape the old buffered reader returned. */
 async function readAllEntriesAsText(path: string): Promise<Map<string, string>> {
@@ -135,5 +135,31 @@ describe("bbdump archive format roundtrip", () => {
     expect(entries.get("tree/records.ndjson")?.split("\n").filter(Boolean)).toHaveLength(
       chunkCount,
     );
+  });
+});
+
+describe("archive version compatibility", () => {
+  const manifest = {
+    toolVersion: "test",
+    exportedAt: "2026-11-11T00:00:00.000Z",
+    spaceId: "source",
+    sourceHost: "http://localhost",
+    fidelity: "full",
+    excludesSecrets: true,
+    tables: {},
+    blobCount: 0,
+    blobBytes: 0,
+    checksum: "checksum",
+  };
+
+  it("accepts existing version 1 archives and the rich-content version", () => {
+    expect(ManifestSchema.parse({ ...manifest, formatVersion: 1 }).formatVersion).toBe(1);
+    expect(ManifestSchema.parse({ ...manifest, formatVersion: FORMAT_VERSION }).formatVersion).toBe(
+      2,
+    );
+  });
+
+  it("refuses versions whose required restore behavior is unknown", () => {
+    expect(() => ManifestSchema.parse({ ...manifest, formatVersion: 3 })).toThrow();
   });
 });

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
+import { finished, pipeline } from "node:stream/promises";
 import { ZstdDecompress } from "node:zlib";
 import * as tar from "tar-stream";
 import {
@@ -42,159 +42,161 @@ const requireZstd = async (path: string): Promise<void> => {
   }
 };
 
+/** A streamed entry must be fully consumed or drained before the callback resolves. */
+export interface StreamedArchiveEntry {
+  path: string;
+  body: Readable;
+}
+
+export interface VerifiedArchive {
+  manifest: Manifest;
+  /** Replays the same private tar bytes that passed the checksum scan. */
+  streamEntries(onEntry: (entry: StreamedArchiveEntry) => Promise<void>): Promise<void>;
+  cleanup(): Promise<void>;
+}
+
 /**
- * Decompress the whole archive to a private temp file, then hand back a
- * fresh `tar.extract()` reading from THAT file — never a live
- * `ZstdDecompress` piped straight into `tar.extract()`.
- *
- * That live pipe is where a real, reproducible corruption was traced to on
- * a real multi-gigabyte production archive: rows arriving mangled deep into
- * a large entry (`Unterminated string in JSON`, one row split across two
- * "lines") with no invalid bytes anywhere on disk. Isolated piece by piece:
- * Node's built-in zstd decompression is byte-perfect on its own (verified
- * against the system `zstd` CLI with `cmp` — identical output), and
- * `tar-stream` parses a pre-decompressed file with zero errors — the
- * corruption only reproduced with the live pipe. This fix removes that live
- * interaction (decompress to a file, then tar-parse the file) as the
- * primary defense; `full-importer.ts` also stopped relying on `node:readline`
- * for the same entries as defense in depth, since the exact mechanism
- * inside the live pipe was never pinned down to one specific line. The
- * cost is one extra temp-file write per pass — cheap local disk I/O,
- * negligible next to the HTTP round trips a real restore/verify already
- * does.
+ * Decompress to a private file rather than a live ZstdDecompress → tar pipe.
+ * That live combination previously corrupted multi-GB archive row boundaries.
  */
-const openTarStream = async (
-  path: string,
-): Promise<{ extract: tar.Extract; cleanup: () => Promise<void> }> => {
+async function decompressArchive(path: string) {
+  await requireZstd(path);
   const tempDir = await mkdtemp(join(tmpdir(), "busabase-restore-"));
-  const decompressedPath = join(tempDir, "archive.tar");
+  const tarPath = join(tempDir, "archive.tar");
   const cleanup = () => rm(tempDir, { recursive: true, force: true });
   try {
-    await pipeline(
-      createReadStream(path),
-      new ZstdDecompress(),
-      createWriteStream(decompressedPath),
-    );
+    await pipeline(createReadStream(path), new ZstdDecompress(), createWriteStream(tarPath));
+    return { tarPath, cleanup };
   } catch (error) {
     await cleanup();
     throw error;
   }
+}
 
+/** Every pass opens only this private, already decompressed tar file. */
+async function streamTar(tarPath: string, onEntry: (entry: StreamedArchiveEntry) => Promise<void>) {
   const extract = tar.extract();
-  createReadStream(decompressedPath)
-    .on("error", (err) => extract.destroy(err))
-    .pipe(extract);
-  return { extract, cleanup };
-};
-
-/**
- * Pass 1 of 2 — integrity only, never buffers a whole entry.
- *
- * Streams every tar entry chunk-by-chunk, hashing incrementally
- * (`hash.update(chunk)` per chunk, not once over a concatenated whole-entry
- * buffer — a single `Hash.update()` call over a many-gigabyte buffer throws
- * `RangeError: data is too long`, which is exactly what a real production
- * space's attachment bytes hit here before this rewrite). Recomputes and
- * checks the manifest's top-level `checksum` before returning anything —
- * a truncated or tampered archive throws here, before `streamArchive` (pass
- * 2) is ever invoked, so "verified before a single row is written" holds
- * regardless of entry size.
- */
-export async function verifyArchive(path: string): Promise<Manifest> {
-  await requireZstd(path);
-
-  const { extract, cleanup } = await openTarStream(path);
+  const input = createReadStream(tarPath);
   try {
-    const checksums: EntryChecksum[] = [];
-    let manifestBuf: Buffer | undefined;
-
     await new Promise<void>((resolvePromise, reject) => {
       extract.on("entry", (header, stream, next) => {
-        const hash = createHash("sha256");
-        const manifestChunks: Buffer[] | undefined =
-          header.name === "manifest.json" ? [] : undefined;
-        stream.on("data", (chunk) => {
-          hash.update(chunk);
-          manifestChunks?.push(chunk as Buffer);
-        });
-        stream.on("end", () => {
-          if (manifestChunks) {
-            manifestBuf = Buffer.concat(manifestChunks);
-          } else {
-            checksums.push({ path: header.name, sha256: hash.digest("hex") });
-          }
-          next();
-        });
         stream.on("error", reject);
-        stream.resume();
+        Promise.resolve()
+          .then(() => onEntry({ path: header.name, body: stream }))
+          .then(
+            () => next(),
+            (error) => {
+              reject(error);
+              input.destroy();
+              extract.destroy();
+            },
+          );
       });
       extract.on("finish", resolvePromise);
       extract.on("error", reject);
+      input.on("error", (error) => extract.destroy(error));
+      input.pipe(extract);
     });
-
-    if (!manifestBuf) {
-      throw new Error("Archive is missing manifest.json.");
-    }
-    const manifest = ManifestSchema.parse(JSON.parse(manifestBuf.toString("utf8")));
-
-    const recomputed = createHash("sha256")
-      .update(canonicalizeEntryChecksums(checksums))
-      .digest("hex");
-    if (recomputed !== manifest.checksum) {
-      throw new Error(
-        `Archive checksum mismatch — file may be truncated or corrupted (expected ${manifest.checksum}, got ${recomputed}).`,
-      );
-    }
-
-    return manifest;
   } finally {
-    await cleanup();
+    input.destroy();
+    extract.destroy();
+    await Promise.allSettled([finished(input), finished(extract)]);
   }
 }
 
-export interface StreamedArchiveEntry {
-  path: string;
-  /**
-   * The entry's raw bytes, in order. The callback MUST fully consume (or
-   * explicitly drain) this before its promise resolves — tar-stream can't
-   * advance to the next entry until the current one's stream has ended.
-   */
-  body: Readable;
+async function verifyTar(tarPath: string): Promise<Manifest> {
+  const checksums: EntryChecksum[] = [];
+  let manifestBytes: Buffer | undefined;
+  await streamTar(tarPath, async (entry) => {
+    const hash = createHash("sha256");
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of entry.body) {
+      hash.update(chunk);
+      if (entry.path === "manifest.json") {
+        size += chunk.length;
+        if (size > 8 * 1024 * 1024)
+          throw new Error("Archive manifest exceeds the 8 MiB metadata limit.");
+        chunks.push(chunk as Buffer);
+      }
+    }
+    if (entry.path === "manifest.json") {
+      if (manifestBytes) throw new Error("Archive contains more than one manifest.json.");
+      manifestBytes = Buffer.concat(chunks);
+    } else checksums.push({ path: entry.path, sha256: hash.digest("hex") });
+  });
+  if (!manifestBytes) throw new Error("Archive is missing manifest.json.");
+  const manifest = ManifestSchema.parse(JSON.parse(manifestBytes.toString("utf8")));
+  const recomputed = createHash("sha256")
+    .update(canonicalizeEntryChecksums(checksums))
+    .digest("hex");
+  if (recomputed !== manifest.checksum) {
+    throw new Error(
+      `Archive checksum mismatch — file may be truncated or corrupted (expected ${manifest.checksum}, got ${recomputed}).`,
+    );
+  }
+  return manifest;
 }
 
 /**
- * Pass 2 of 2 — content, streamed. Call only after `verifyArchive` has
- * already succeeded for this same file. Re-opens the archive (a second,
- * independent decompress+detar pass over the local file — cheap sequential
- * disk I/O, not a network cost) and hands each entry's raw stream to
- * `onEntry` in tar-physical order, one at a time, without ever buffering a
- * whole entry in memory. Callers that need dependency-ordered processing
- * (e.g. `busabase-cli restore`'s FK-safe table order) get it for free as
- * long as the archive was WRITTEN in that order — see `full-exporter.ts`.
+ * Decode once, verify every entry before writes, then retain that exact private
+ * tar for import. Mutating/replacing the compressed source after verification
+ * cannot change the replay, and a 36GB backup is not decompressed twice.
+ */
+export async function openVerifiedArchive(path: string): Promise<VerifiedArchive> {
+  const temporary = await decompressArchive(path);
+  try {
+    const manifest = await verifyTar(temporary.tarPath);
+    let closed = false,
+      reading = false;
+    return {
+      manifest,
+      async streamEntries(onEntry) {
+        if (closed) throw new Error("Verified archive is already closed.");
+        if (reading) throw new Error("Verified archive is already being read.");
+        reading = true;
+        try {
+          await streamTar(temporary.tarPath, onEntry);
+        } finally {
+          reading = false;
+        }
+      },
+      async cleanup() {
+        if (reading)
+          throw new Error("Cannot remove a verified archive while its entries are being read.");
+        closed = true;
+        await temporary.cleanup();
+      },
+    };
+  } catch (error) {
+    await temporary.cleanup();
+    throw error;
+  }
+}
+
+/** Backwards-compatible integrity-only wrapper; releases temporary bytes immediately. */
+export async function verifyArchive(path: string): Promise<Manifest> {
+  const archive = await openVerifiedArchive(path);
+  try {
+    return archive.manifest;
+  } finally {
+    await archive.cleanup();
+  }
+}
+
+/**
+ * Backwards-compatible content-only wrapper for callers that verified separately.
+ * Restore commands should use openVerifiedArchive to reuse the verified tar.
  */
 export async function streamArchive(
   path: string,
   onEntry: (entry: StreamedArchiveEntry) => Promise<void>,
 ): Promise<void> {
-  const { extract, cleanup } = await openTarStream(path);
+  const temporary = await decompressArchive(path);
   try {
-    await new Promise<void>((resolvePromise, reject) => {
-      extract.on("entry", (header, stream, next) => {
-        onEntry({ path: header.name, body: stream }).then(
-          () => next(),
-          (err) => {
-            // Make sure the underlying stream doesn't dangle if the callback
-            // threw without draining it, then propagate the real failure.
-            stream.resume();
-            reject(err);
-          },
-        );
-      });
-      extract.on("finish", resolvePromise);
-      extract.on("error", reject);
-    });
+    await streamTar(temporary.tarPath, onEntry);
   } finally {
-    await cleanup();
+    await temporary.cleanup();
   }
 }
 

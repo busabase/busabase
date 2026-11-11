@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, slim } from "./format";
+import { recordBusinessFields, render, slim } from "./format";
 
 /**
  * `render` is what the skill actually reads back — every command prints through
@@ -189,6 +189,52 @@ describe("paginated envelopes", () => {
 
   it("does the same in table mode", () => {
     expect(render(page, "table")).toContain("rec_1");
+  });
+
+  it("prints headCommit.payload as the row and leaves the page wrapper as metadata", () => {
+    const canonical = {
+      records: [
+        {
+          id: "rec_1",
+          headCommitId: "cmt_1",
+          base: { id: "bse_1", name: "Episodes" },
+          headCommit: {
+            id: "cmt_1",
+            author: "usr_1",
+            message: "seed",
+            payload: { title: "Episode 1", shots: 12 },
+          },
+        },
+      ],
+      nextCursor: "cur_2",
+    };
+    const text = render(canonical, "text");
+    const header = text.split("\n")[0] ?? "";
+    expect(header).toContain("title");
+    expect(header).toContain("shots");
+    expect(header).not.toContain("nextCursor");
+    expect(header).not.toContain("records");
+    expect(header).not.toContain("headCommit");
+    expect(text).toContain("Episode 1");
+    expect(text).toContain("12");
+    expect(text).toContain("nextCursor  cur_2");
+    expect(text).not.toContain("seed");
+    // JSON stays the canonical shape. Do not flatten or invent wrapper fields.
+    const json = render(canonical, "json");
+    expect(JSON.parse(json)).toEqual(canonical);
+  });
+
+  it("does not invent fields when a record has no payload", () => {
+    const pageWithoutPayload = {
+      records: [{ id: "rec_1", headCommitId: "cmt_1" }],
+      nextCursor: null,
+    };
+    expect(recordBusinessFields(pageWithoutPayload)).toBeUndefined();
+    expect(recordBusinessFields(pageWithoutPayload.records[0])).toBeUndefined();
+    const text = render(pageWithoutPayload, "text");
+    expect(text).toContain("rec_1");
+    expect(text.split("\n")[0]).not.toContain("records");
+    expect(text.split("\n")[0]).not.toContain("nextCursor");
   });
 
   it("leaves a multi-part result alone — `whoami` is a record with an array in it", () => {
