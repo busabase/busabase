@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +27,7 @@ import { IMPORT_ORDER, importFull } from "./import/full-importer.js";
 function createFakeExportClient(
   tables: Partial<Record<string, Array<Record<string, unknown>>>>,
   docs: Record<string, string>,
+  htmlReadmes: Record<string, string> = {},
 ): BusabaseClient {
   return {
     dump: {
@@ -42,9 +44,13 @@ function createFakeExportClient(
       // Mirrors the real route: a batch in, one entry per id that resolves to
       // a Doc, ids that don't resolve simply omitted (never an error).
       exportDocBodies: async ({ nodeIds }: { nodeIds: string[] }) => ({
-        bodies: nodeIds
-          .filter((nodeId) => nodeId in docs)
-          .map((nodeId) => ({ nodeId, markdown: docs[nodeId] })),
+        bodies: nodeIds.flatMap((nodeId) =>
+          nodeId in htmlReadmes
+            ? [{ nodeId, markdown: htmlReadmes[nodeId], bodyFormat: "html" as const }]
+            : nodeId in docs
+              ? [{ nodeId, markdown: docs[nodeId] }]
+              : [],
+        ),
       }),
     },
     nodes: {
@@ -100,6 +106,347 @@ describe("exportFull -> verifyArchive -> importFull round trip", () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("carries all workspace configuration and history tables through the actual archive", async () => {
+    const payload = JSON.parse('{"__proto__":{"own":true},"list":[1,null,"�"],"text":"配置正文"}');
+    const tables: Record<string, Array<Record<string, unknown>>> = {
+      nodes: [{ id: "root", parentId: null, type: "folder" }],
+      bases: [{ id: "base", nodeId: "root" }],
+      comments: [{ id: "comment", body: "Mention" }],
+      nodeShares: [{ id: "share", nodeId: "root", passwordHash: "preserved-password-verifier" }],
+      favorites: [{ id: "favorite", nodeId: "root" }],
+      nodeSubscriptions: [{ id: "subscription", nodeId: "root", mutedAt: "2026-11-11T00:00:00Z" }],
+      spaceInstructions: [{ spaceId: "source", body: "Original instructions", version: 7 }],
+      spaceWelcome: [{ spaceId: "source", nodeId: "root", version: 3 }],
+      embedLinks: [{ id: "embed", typeId: "root", secretHash: "preserved-link-verifier" }],
+      forms: [{ id: "form", nodeId: "root", targetBaseId: "base", bindings: [payload] }],
+      commentMentions: [{ id: "mention", commentId: "comment", startOffset: 0, endOffset: 7 }],
+      workflowRuns: [{ id: "run", payload, outputs: payload }],
+      workflowTriggers: [{ id: "trigger", config: payload }],
+      webhookRules: [{ id: "rule", enabled: false, config: payload }],
+      webhookDeliveries: [{ id: "delivery", detail: "Historical delivery" }],
+      agentSessions: [{ id: "session", recoverySnapshot: payload }],
+      agentSessionEvents: [{ id: "event", sessionId: "session", payload }],
+      agentSessionCommands: [{ id: "command", sessionId: "session", payload }],
+      routerGrants: [{ id: "grant", busabaseSpaceId: "source", revokedAt: "2026-11-11T00:00:00Z" }],
+      routerConnections: [{ id: "connection", grantId: "grant" }],
+    };
+    const manifest = await exportFull({
+      client: createFakeExportClient(tables, {}),
+      outPath: archivePath,
+      spaceId: "source",
+      sourceHost: "http://localhost:15419",
+      includeHistory: true,
+      toolVersion: "test",
+    });
+    const recorded: RecordedImport[] = [];
+    await verifyArchive(archivePath);
+    await importFull({
+      client: createFakeImportClient(recorded),
+      archivePath,
+      sourceSpaceId: "source",
+    });
+    for (const [table, expected] of Object.entries(tables)) {
+      expect(
+        recorded.filter((call) => call.table === table).flatMap((call) => call.rows),
+        table,
+      ).toEqual(expected);
+      expect(manifest.tables[table], table).toBe(expected.length);
+    }
+    expect(Object.keys(manifest.tables).sort()).toEqual([...DumpTableSchema.options].sort());
+  });
+
+  it("backs up every physical attachment without an Asset, deduplicates keys and bypasses CDN downloads", async () => {
+    const bytes = Buffer.from("<html>mail@example.com</html>\r\n");
+    const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+    const tables = {
+      attachments: [
+        {
+          id: "att_unmounted",
+          storageKey: "raw/original.html",
+          mimeType: "text/html",
+          sizeBytes: bytes.length,
+          contentHash,
+        },
+        {
+          id: "att_shared",
+          storageKey: "raw/original.html",
+          mimeType: "text/html",
+          sizeBytes: bytes.length,
+          contentHash: contentHash.slice(7).toUpperCase(),
+        },
+      ],
+    };
+    const base = createFakeExportClient(tables, {});
+    const original = vi.fn(async ({ attachmentId }: { attachmentId: string }) => ({
+      ...tables.attachments[0],
+      attachmentId,
+      downloadUrl: "/storage-origin/original.html",
+    }));
+    const legacy = vi.fn(async () => {
+      throw new Error("public CDN must not be used");
+    });
+    const client = {
+      ...base,
+      dump: { ...base.dump, exportAttachment: original },
+      assets: { download: legacy },
+    } as any;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        expect(String(url)).toBe("http://localhost:15419/storage-origin/original.html");
+        return new Response(bytes);
+      }),
+    );
+    try {
+      const manifest = await exportFull({
+        client,
+        outPath: archivePath,
+        spaceId: "spc_test",
+        sourceHost: "http://localhost:15419",
+        includeHistory: true,
+        toolVersion: "test",
+      });
+      expect(manifest.blobCount).toBe(1);
+      expect(original).toHaveBeenCalledTimes(1);
+      expect(legacy).not.toHaveBeenCalled();
+      // Verification normalization must not rewrite either source registry PO.
+      expect(tables.attachments.map((row) => row.contentHash)).toEqual([
+        contentHash,
+        contentHash.slice(7).toUpperCase(),
+      ]);
+      const imported: RecordedImport[] = [];
+      await importFull({
+        client: createFakeImportClient(imported),
+        archivePath,
+        sourceSpaceId: "spc_test",
+      });
+      expect(
+        imported
+          .filter((row) => row.table === "attachments")
+          .flatMap((row) => row.rows)
+          .map((row) => row.contentHash),
+      ).toEqual([contentHash, contentHash.slice(7).toUpperCase()]);
+      expect(
+        imported.filter((row) => row.table === "attachmentBlobs").flatMap((row) => row.rows),
+      ).toEqual([
+        {
+          storageKey: "raw/original.html",
+          mimeType: "text/html",
+          base64: bytes.toString("base64"),
+        },
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rejects rewritten bytes and resumed corrupt bytes instead of finalizing a misleading backup", async () => {
+    const original = Buffer.from("original HTML");
+    const contentHash = `sha256:${createHash("sha256").update(original).digest("hex")}`;
+    const attachment = {
+      id: "att_html",
+      storageKey: "original.html",
+      mimeType: "text/html",
+      sizeBytes: original.length,
+      contentHash,
+    };
+    const base = createFakeExportClient({ attachments: [attachment] }, {});
+    const client = {
+      ...base,
+      dump: {
+        ...base.dump,
+        exportAttachment: async () => ({
+          ...attachment,
+          attachmentId: attachment.id,
+          downloadUrl: "/original.html",
+        }),
+      },
+    } as any;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("CDN modified HTML")),
+    );
+    const options = {
+      client,
+      outPath: archivePath,
+      spaceId: "spc_test",
+      sourceHost: "http://localhost:15419",
+      includeHistory: true,
+      toolVersion: "test",
+      retries: 0,
+    };
+    try {
+      await expect(exportFull(options)).rejects.toThrow(/Content hash mismatch.*Backup stopped/);
+      expect(existsSync(archivePath)).toBe(false);
+      // Version 2 uses a raw-object directory. Replace this failed attempt's
+      // cache explicitly to exercise migration of a corrupt legacy spool file.
+      rmSync(`${archivePath}.attachment-blobs.part`, { recursive: true, force: true });
+      writeFileSync(
+        `${archivePath}.attachment-blobs.part`,
+        `${JSON.stringify({
+          storageKey: attachment.storageKey,
+          mimeType: attachment.mimeType,
+          base64: Buffer.from("old corrupt spool").toString("base64"),
+        })}\n`,
+      );
+      await expect(exportFull({ ...options, resume: true })).rejects.toThrow(/resumed attachment/);
+      expect(existsSync(archivePath)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps hash-verified legacy bytes when only the registered size is stale", async () => {
+    const bytes = Buffer.from("source image bytes");
+    const attachment = {
+      id: "att_image",
+      storageKey: "image.png",
+      mimeType: "image/png",
+      sizeBytes: 100,
+      contentHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+    };
+    const base = createFakeExportClient({ attachments: [attachment] }, {});
+    const client = {
+      ...base,
+      dump: {
+        ...base.dump,
+        exportAttachment: async () => ({
+          ...attachment,
+          attachmentId: attachment.id,
+          downloadUrl: "/image.png",
+        }),
+      },
+    } as any;
+    const messages: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(bytes)),
+    );
+    try {
+      const result = await exportFull({
+        client,
+        outPath: archivePath,
+        spaceId: "spc_test",
+        sourceHost: "http://localhost:15419",
+        includeHistory: true,
+        toolVersion: "test",
+        onProgress: (message) => messages.push(message),
+      });
+      expect(result.blobCount).toBe(1);
+      expect(result.blobBytes).toBe(bytes.length);
+      expect(messages.join("\n")).toMatch(/registered size 100.*content hash verified/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rejects incomplete physical coverage on an older server without Asset downloads", async () => {
+    const base = createFakeExportClient(
+      { attachments: [{ id: "att_without_asset", storageKey: "old.bin" }] },
+      {},
+    );
+    const messages: string[] = [];
+    await expect(
+      exportFull({
+        client: base,
+        outPath: archivePath,
+        spaceId: "spc_test",
+        sourceHost: "http://localhost:15419",
+        includeHistory: true,
+        toolVersion: "test",
+        onProgress: (message) => messages.push(message),
+      }),
+    ).rejects.toThrow(/att_without_asset.*no Asset/);
+    expect(existsSync(archivePath)).toBe(false);
+    expect(messages.join("\n")).toContain("predates dump.exportAttachment");
+  });
+  it("falls back once when an older HTTP server returns 404 for the new attachment route", async () => {
+    const attachment = {
+      id: "att_old",
+      storageKey: "old.bin",
+      mimeType: "application/octet-stream",
+    };
+    const base = createFakeExportClient(
+      { attachments: [attachment], assets: [{ id: "ast_old", attachmentId: attachment.id }] },
+      {},
+    );
+    const direct = vi.fn(async () => {
+      throw new Error("Not found");
+    });
+    const legacy = vi.fn(async () => ({ downloadUrl: "/old.bin", mimeType: attachment.mimeType }));
+    const client = {
+      ...base,
+      dump: { ...base.dump, exportAttachment: direct },
+      assets: { download: legacy },
+    } as any;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("old bytes")),
+    );
+    const messages: string[] = [];
+    try {
+      const result = await exportFull({
+        client,
+        outPath: archivePath,
+        spaceId: "spc_test",
+        sourceHost: "http://localhost:15419",
+        includeHistory: true,
+        toolVersion: "test",
+        onProgress: (message) => messages.push(message),
+      });
+      expect(result.blobCount).toBe(1);
+      expect(direct).toHaveBeenCalledTimes(1);
+      expect(legacy).toHaveBeenCalledTimes(1);
+      expect(messages.join("\n")).toContain("predates dump.exportAttachment");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("preserves archived HTML and workflow raw bytes without inventing a missing rich document", async () => {
+    const html = "<!DOCTYPE html>\r\n<p>Original �</p>\r\n";
+    const workflow = '{\n  "version": 1,  "nodes": [], "edges": []\n}\r\n';
+    const nodes = [
+      { id: "nod_root", type: "folder", parentId: null },
+      { id: "nod_html", type: "html", parentId: "nod_root" },
+      { id: "nod_workflow", type: "workflow", parentId: "nod_root", archivedAt: "2026-01-01" },
+      { id: "nod_empty", type: "whiteboard", parentId: "nod_root" },
+    ];
+    const base = createFakeExportClient({ nodes }, {});
+    const rich = new Map([
+      ["nod_html", { nodeId: "nod_html", nodeType: "html", markdown: html }],
+      ["nod_workflow", { nodeId: "nod_workflow", nodeType: "workflow", markdown: workflow }],
+    ]);
+    const client = {
+      ...base,
+      dump: {
+        ...base.dump,
+        exportDocBodies: async ({ nodeIds }: { nodeIds: string[] }) => ({
+          supportedRichNodeTypes: ["html", "whiteboard", "workflow"],
+          bodies: nodeIds.flatMap((id) => (rich.has(id) ? [rich.get(id)] : [])),
+        }),
+      },
+    } as any;
+    await exportFull({
+      client,
+      outPath: archivePath,
+      spaceId: "spc_test",
+      sourceHost: "http://localhost:15419",
+      includeHistory: true,
+      toolVersion: "test",
+    });
+    const imported: RecordedImport[] = [];
+    await importFull({
+      client: createFakeImportClient(imported),
+      archivePath,
+      sourceSpaceId: "spc_test",
+    });
+    expect(imported.filter((row) => row.table === "docBodies").flatMap((row) => row.rows)).toEqual([
+      { nodeId: "nod_html", nodeType: "html", markdown: html },
+      { nodeId: "nod_workflow", nodeType: "workflow", markdown: workflow },
+    ]);
   });
 
   it("streams every table in IMPORT_ORDER, blobs first, docs last — with real multi-page pagination", async () => {
@@ -276,7 +623,7 @@ describe("exportFull -> verifyArchive -> importFull round trip", () => {
     }
   });
 
-  it("drops a fieldValues row whose recordId isn't in this same archive's records, instead of shipping a restore-time FK crash", async () => {
+  it("rejects a snapshot with unresolved fieldValues references instead of silently dropping rows", async () => {
     // Regression coverage for a real production bug: a backup of an
     // actively-used space took over an hour. `records` is fetched (and its
     // snapshot fixed) long before the much larger `fieldValues` table
@@ -309,34 +656,20 @@ describe("exportFull -> verifyArchive -> importFull round trip", () => {
       },
     ];
 
-    const warnings: string[] = [];
-    const manifest = await exportFull({
-      client: createFakeExportClient(tables, {}),
-      outPath: archivePath,
-      spaceId: "spc_test",
-      sourceHost: "http://localhost:15419",
-      includeHistory: true,
-      toolVersion: "0.1.0-test",
-      onProgress: (m) => warnings.push(m),
-    });
-
-    expect(manifest.tables.fieldValues).toBe(1);
-    expect(warnings.some((w) => w.includes("dropped 1 fieldValues row"))).toBe(true);
-    await expect(verifyArchive(archivePath)).resolves.toEqual(manifest);
-
-    const recorded: RecordedImport[] = [];
-    const result = await importFull({
-      client: createFakeImportClient(recorded),
-      archivePath,
-      sourceSpaceId: "spc_test",
-    });
-    expect(result).toEqual({ ok: true, warnings: [] });
-
-    const fieldValueCalls = recorded.filter((c) => c.table === "fieldValues");
-    expect(fieldValueCalls.flatMap((c) => c.rows).map((r) => r.id)).toEqual(["fvl_ok"]);
+    await expect(
+      exportFull({
+        client: createFakeExportClient(tables, {}),
+        outPath: archivePath,
+        spaceId: "spc_test",
+        sourceHost: "http://localhost:15419",
+        includeHistory: true,
+        toolVersion: "test",
+      }),
+    ).rejects.toThrow(/fieldValues row fvl_orphaned.*missing records.*recordId/);
+    expect(existsSync(archivePath)).toBe(false);
   });
 
-  it("falls back to the legacy per-Doc read when the server predates dump.exportDocBodies", async () => {
+  it("rejects a legacy server that cannot read an archived Doc while keeping its live fallback coverage", async () => {
     // The CLI ships independently of the server, so a current CLI routinely
     // talks to an older one. Reproduced live: a real backup against production
     // got `Not found` for every `dump.exportDocBodies` batch and archived ZERO
@@ -370,6 +703,39 @@ describe("exportFull -> verifyArchive -> importFull round trip", () => {
     } as unknown as BusabaseClient;
 
     const messages: string[] = [];
+    await expect(
+      exportFull({
+        client: exportClient,
+        outPath: archivePath,
+        spaceId: "spc_test",
+        sourceHost: "http://localhost:15419",
+        includeHistory: true,
+        toolVersion: "test",
+        onProgress: (message) => messages.push(message),
+      }),
+    ).rejects.toThrow(/nod_archived/);
+    expect(messages.some((message) => message.includes("predates `dump.exportDocBodies`"))).toBe(
+      true,
+    );
+    expect(messages).toContain("fetched 1 doc bodies, skipped 1");
+    expect(existsSync(archivePath)).toBe(false);
+  });
+
+  it("archives an HTML folder readme as docs/{nodeId}.html and restores it as HTML", async () => {
+    const tables: Partial<Record<string, Array<Record<string, unknown>>>> = {};
+    for (const table of DumpTableSchema.options) tables[table] = [];
+    tables.nodes = [
+      { id: "nod_root", parentId: null, type: "folder" },
+      { id: "nod_site", parentId: "nod_root", type: "folder" },
+      { id: "nod_guide", parentId: "nod_root", type: "folder" },
+    ];
+    const exportClient = createFakeExportClient(
+      tables,
+      { nod_guide: "# How to use this folder\n" },
+      { nod_site: "<h1>Folder page</h1>\n" },
+    );
+
+    const messages: string[] = [];
     const manifest = await exportFull({
       client: exportClient,
       outPath: archivePath,
@@ -379,15 +745,9 @@ describe("exportFull -> verifyArchive -> importFull round trip", () => {
       toolVersion: "0.1.0-test",
       onProgress: (m) => messages.push(m),
     });
-
-    expect(messages.some((m) => m.includes("predates `dump.exportDocBodies`"))).toBe(true);
-    // The archived one's absence is stated, not silent.
-    expect(messages.some((m) => m.includes("nod_archived"))).toBe(true);
-    expect(messages).toContain("fetched 1 doc bodies, skipped 1");
+    expect(messages).toContain("fetched 2 folder readmes from 3 folders, skipped 0");
     await expect(verifyArchive(archivePath)).resolves.toEqual(manifest);
 
-    // The live Doc's body genuinely reached the archive — the whole point of
-    // the fallback, and the part a log line alone wouldn't prove.
     const recorded: RecordedImport[] = [];
     await importFull({
       client: createFakeImportClient(recorded),
@@ -395,7 +755,10 @@ describe("exportFull -> verifyArchive -> importFull round trip", () => {
       sourceSpaceId: "spc_test",
     });
     const docBodyRows = recorded.filter((c) => c.table === "docBodies").flatMap((c) => c.rows);
-    expect(docBodyRows).toEqual([{ nodeId: "nod_live", markdown: "live body\n" }]);
+    expect(docBodyRows).toEqual([
+      { nodeId: "nod_site", markdown: "<h1>Folder page</h1>\n", bodyFormat: "html" },
+      { nodeId: "nod_guide", markdown: "# How to use this folder\n" },
+    ]);
   });
 
   it("archives folder readmes beside doc bodies, and a folder without one costs no warning", async () => {
@@ -832,20 +1195,19 @@ describe("exportFull -> verifyArchive -> importFull round trip", () => {
         },
       } as unknown as BusabaseClient;
 
-      const manifest = await exportFull({
-        client: exportClient,
-        outPath: archivePath,
-        spaceId: "spc_test",
-        sourceHost: "http://localhost:15419",
-        includeHistory: true,
-        toolVersion: "0.1.0-test",
-        retries: 0,
-      });
-
+      await expect(
+        exportFull({
+          client: exportClient,
+          outPath: archivePath,
+          spaceId: "spc_test",
+          sourceHost: "http://localhost:15419",
+          includeHistory: true,
+          toolVersion: "test",
+          retries: 0,
+        }),
+      ).rejects.toThrow(/could not download attachment att_1.*HTTP 502/);
       expect(byteAttempts).toBe(1);
-      // Still a skip-with-warning rather than an abort: one unreachable
-      // attachment must not throw away the other 10,485.
-      expect(manifest.blobCount).toBe(0);
+      expect(existsSync(archivePath)).toBe(false);
     } finally {
       vi.unstubAllGlobals();
     }

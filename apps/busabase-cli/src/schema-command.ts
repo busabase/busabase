@@ -1,5 +1,6 @@
 import {
   type ApiKeyPermissionLevel,
+  MEMBERS_API_MIN_KEY_LEVEL,
   PROCEDURE_PERMISSION_POLICY,
   resolveRequiredLevel,
 } from "busabase-contract/access-control/api-key-level";
@@ -41,11 +42,17 @@ export interface SchemaEndpoint {
  * A handful of endpoints have no explicit entry and the policy fails closed to
  * `manage`. That is the right answer for the gate, but a *guess* as far as advice
  * goes, so callers that phrase it for a human should know which it is.
+ *
+ * Cloud's `members.*` sit outside that table and gate in Cloud's own logic, so
+ * their floor comes from the constant that logic enforces (granting `admin`
+ * additionally needs `MEMBERS_API_ADMIN_GRANT_KEY_LEVEL`, and the server's 403
+ * says so).
  */
 export function requiredLevelFor(id: string): {
   level: ApiKeyPermissionLevel;
   declared: boolean;
 } {
+  if (id.startsWith("members.")) return { level: MEMBERS_API_MIN_KEY_LEVEL, declared: true };
   return {
     level: resolveRequiredLevel(id.split("."), undefined),
     declared: id in PROCEDURE_PERMISSION_POLICY,

@@ -21,11 +21,20 @@ export class ArchiveWriter {
 
   private constructor(outPath: string) {
     const zstd = new ZstdCompress();
-    this.donePromise = pipeline(this.pack, zstd, createWriteStream(outPath));
+    this.donePromise = pipeline(this.pack, zstd, createWriteStream(outPath, { mode: 0o600 }));
+    // The sink can fail before the caller reaches finalize(). Keep the same
+    // rejecting promise for awaiters while preventing an unhandled rejection.
+    void this.donePromise.catch(() => undefined);
   }
 
   static create(outPath: string): ArchiveWriter {
     return new ArchiveWriter(outPath);
+  }
+
+  /** Close every pipeline after a fetch/read/write failure without publishing its staging file. */
+  async abort(): Promise<void> {
+    this.pack.destroy();
+    await this.donePromise.catch(() => undefined);
   }
 
   /** Add one archive entry from an in-memory buffer/string (small entries: manifest, base.json, etc). */

@@ -150,9 +150,34 @@ function truncate(value: string, max = 72): string {
 }
 
 function renderRecord(row: Record<string, unknown>): string {
-  const keys = Object.keys(row);
+  const presented = presentRecordRow(row);
+  const keys = Object.keys(presented);
   const width = Math.max(0, ...keys.map((k) => k.length));
-  return keys.map((k) => `${k.padEnd(width)}  ${cell(row[k])}`).join("\n");
+  return keys.map((k) => `${k.padEnd(width)}  ${cell(presented[k])}`).join("\n");
+}
+
+/**
+ * A record's current values live in `headCommit.payload`. The page wrapper
+ * (`records`, `nextCursor`) and the commit's bookkeeping are not fields.
+ * Rows without a payload object are left unchanged so a plain `{ id, status }`
+ * fixture still prints those keys.
+ */
+export function recordBusinessFields(record: unknown): Record<string, unknown> | undefined {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return undefined;
+  const head = (record as Record<string, unknown>).headCommit;
+  if (!head || typeof head !== "object" || Array.isArray(head)) return undefined;
+  const payload = (head as Record<string, unknown>).payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  return payload as Record<string, unknown>;
+}
+
+function presentRecordRow(row: Record<string, unknown>): Record<string, unknown> {
+  const fields = recordBusinessFields(row);
+  if (!fields) return row;
+  const presented: Record<string, unknown> = {};
+  if ("id" in row && !Object.hasOwn(fields, "id")) presented.id = row.id;
+  for (const [key, value] of Object.entries(fields)) presented[key] = value;
+  return presented;
 }
 
 function renderTable(rows: unknown[]): string {
@@ -160,7 +185,11 @@ function renderTable(rows: unknown[]): string {
   if (typeof rows[0] !== "object" || rows[0] === null) {
     return rows.map((r) => cell(r)).join("\n");
   }
-  const records = rows as Record<string, unknown>[];
+  const records = rows.map((row) =>
+    row && typeof row === "object" && !Array.isArray(row)
+      ? presentRecordRow(row as Record<string, unknown>)
+      : (row as Record<string, unknown>),
+  );
   const columns = [...new Set(records.flatMap((r) => Object.keys(r)))];
   const widths = columns.map((c) => Math.max(c.length, ...records.map((r) => cell(r[c]).length)));
   const line = (cells: string[]) =>

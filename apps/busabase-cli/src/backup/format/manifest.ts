@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-export const FORMAT_VERSION = 1;
+// Rich node objects are restore-critical. Version 1 readers ignore unknown
+// archive entries, so version 2 makes old CLIs reject an archive they cannot
+// restore completely. New readers continue to accept existing version 1 dumps.
+export const FORMAT_VERSION = 2;
 
 /**
  * `.bbdump` manifest — the archive's own table of contents + integrity
@@ -13,7 +16,7 @@ export const FORMAT_VERSION = 1;
  * file before any row hits the target space.
  */
 export const ManifestSchema = z.object({
-  formatVersion: z.literal(FORMAT_VERSION),
+  formatVersion: z.union([z.literal(1), z.literal(FORMAT_VERSION)]),
   toolVersion: z.string(),
   exportedAt: z.string(),
   spaceId: z.string(),
