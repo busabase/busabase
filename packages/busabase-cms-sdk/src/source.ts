@@ -6,6 +6,7 @@ export type BusabaseCmsFieldType =
   | "markdown"
   | "html"
   | "attachment"
+  | "drive"
   | "relation"
   | "member"
   | "number"
