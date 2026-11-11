@@ -24,12 +24,20 @@
 !packages/busabase-contract/**
 !packages/busabase-core/
 !packages/busabase-core/**
+!packages/busabase-package/
+!packages/busabase-package/**
+!packages/previewfile-core/
+!packages/previewfile-core/**
 !packages/open-domains/
 !packages/open-domains/**
 !packages/openlib/
 !packages/openlib/**
 !packages/ts7-i18n/
 !packages/ts7-i18n/**
+!packages/relaylib/
+!packages/relaylib/**
+!packages/@acp-ui/
+!packages/@acp-ui/**
 !packages/share-domains/
 !packages/share-domains/**
 

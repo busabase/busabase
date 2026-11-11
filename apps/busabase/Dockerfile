@@ -23,6 +23,7 @@ COPY apps/busabase/package.json apps/busabase/
 COPY packages/busabase-contract/package.json packages/busabase-contract/
 COPY packages/busabase-core/package.json packages/busabase-core/
 COPY packages/busabase-package/package.json packages/busabase-package/
+COPY packages/previewfile-core/package.json packages/previewfile-core/
 COPY packages/open-domains/package.json packages/open-domains/
 COPY packages/openlib/package.json packages/openlib/
 COPY packages/ts7-i18n/package.json packages/ts7-i18n/
@@ -36,6 +37,7 @@ COPY apps/busabase apps/busabase
 COPY packages/busabase-contract packages/busabase-contract
 COPY packages/busabase-core packages/busabase-core
 COPY packages/busabase-package packages/busabase-package
+COPY packages/previewfile-core packages/previewfile-core
 COPY packages/open-domains packages/open-domains
 COPY packages/openlib packages/openlib
 COPY packages/ts7-i18n packages/ts7-i18n

@@ -1,1 +1,5 @@
 .next-desktop/
+
+# PreviewFile runtime assets copied from installed dependencies.
+public/sql-wasm/
+public/libarchive/

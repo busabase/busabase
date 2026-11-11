@@ -16,8 +16,13 @@ export default defineConfig({
   // in this credential-free sweep, where it can only fail, twice, at 60s each.
   // tests/playwright-suite-ownership.test.ts keeps this list complete.
   testIgnore: [
+    "unified-file-preview.spec.ts",
+    "text-attachment-preview.spec.ts",
+    "markdown-attachment-preview.spec.ts",
     // Uses explicitly provisioned isolated servers and the dedicated acceptance matrix.
     "attachment-overflow.spec.ts",
+    "attachment-file-icons.spec.ts",
+    "row-height.spec.ts",
     "agent-prompt-context.spec.ts",
     "agent-chat.spec.ts",
     "agent-context.spec.ts",

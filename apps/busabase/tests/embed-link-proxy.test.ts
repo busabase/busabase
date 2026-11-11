@@ -1,3 +1,4 @@
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -103,12 +104,31 @@ describe("Desktop embed proxy", () => {
     expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
   });
 
-  it("keeps the existing route coverage while adding public embeds", () => {
-    expect(config.matcher).toEqual([
-      "/dashboard/:path*",
-      "/api/:path*",
-      "/embed/:path*",
+  it("keeps APIs, dashboard, embed and service-worker requests covered", () => {
+    for (const url of [
+      "/dashboard",
+      "/dashboard/local/base/projects",
+      "/api/v1/assets/confirmations",
+      "/api/rpc",
+      "/api/storage/upload-unrelated",
+      "/api/storage/upload/other",
+      "/api/storage/attachments/report.pdf",
+      `/embed/${publicId}`,
       "/__sw__.js",
-    ]);
+    ]) {
+      expect(unstable_doesMiddlewareMatch({ config, nextConfig: {}, url }), url).toBe(true);
+    }
+  });
+
+  it("lets only local upload relays receive unbuffered request bodies", () => {
+    for (const url of [
+      "/api/storage/upload",
+      "/api/storage/upload/?key=report.bin",
+      "/api/storage/upload?key=report.bin",
+      "/api/storage/upload/part?uploadId=u&partNumber=1&key=report.bin",
+      "/api/storage/upload/part/",
+    ]) {
+      expect(unstable_doesMiddlewareMatch({ config, nextConfig: {}, url }), url).toBe(false);
+    }
   });
 });

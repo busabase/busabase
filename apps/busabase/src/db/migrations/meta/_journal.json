@@ -330,6 +330,13 @@
       "when": 1793900459145,
       "tag": "0046_melted_lizard",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1794190843568,
+      "tag": "0047_classy_vermin",
+      "breakpoints": true
     }
   ]
 }

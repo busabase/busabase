@@ -19,6 +19,9 @@ describe("busabase pglite integration flow", { timeout: 90_000 }, () => {
   });
 
   afterAll(async () => {
+    // Close PGLite before deleting its data dir: left open, it keeps flushing into
+    // the deleted dir and either fails the delete (ENOTEMPTY) or spins forever.
+    await (await import("busabase-core/db")).closeDb();
     delete process.env.PG_DATABASE_URL;
     delete process.env.STORAGE_URL;
     if (dataDir) {

@@ -77,9 +77,12 @@ test("a new user tours the approval-first knowledge base", async ({ page }) => {
   await test.step("tours the Field Type Lab — one column per field type", async () => {
     await page.goto("/dashboard/local/base/field-type-lab");
     await expect(page.locator("[data-topbar-current-item]")).toHaveText("Field Type Lab");
-    await expect(page.getByText("Number", { exact: true })).toBeVisible();
-    await expect(page.getByText("Select", { exact: true })).toBeVisible();
-    await expect(page.getByText("Relation").first()).toBeVisible();
+    // Scope to the grid: the in-view Find control also lists every field name
+    // as an <option>, so a page-wide getByText("Number") is ambiguous.
+    const grid = page.getByTestId("base-records-grid");
+    await expect(grid.getByText("Number", { exact: true })).toBeVisible();
+    await expect(grid.getByText("Select", { exact: true })).toBeVisible();
+    await expect(grid.getByText("Relation").first()).toBeVisible();
   });
 
   await test.step("searches the seeded knowledge base", async () => {

@@ -99,7 +99,11 @@ test("Table and Gallery can jump between numbered record pages", async ({ page, 
   await page.getByRole("option", { name: "100", exact: true }).click();
   await expect(page).toHaveURL(/recordPage=1/);
   await expect(page).toHaveURL(/recordPageSize=100/);
-  await expect(rows).toHaveCount(100);
+  // A full 100-row page is windowed (`>= VIRTUALIZE_ROW_THRESHOLD`), so the DOM
+  // no longer holds every row. Prove the page size took effect via the range
+  // label and that at least one row rendered.
+  await expect(page.getByText(`1–100 of ${firstPage.total}`)).toBeVisible();
+  await expect(rows.first()).toBeVisible();
 
   await page.getByRole("link", { name: "Go to page 2" }).click();
   await expect(page).toHaveURL(/recordPage=2/);

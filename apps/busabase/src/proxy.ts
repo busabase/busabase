@@ -132,5 +132,13 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/api/:path*", "/embed/:path*", "/__sw__.js"],
+  matcher: [
+    "/dashboard/:path*",
+    // Next clones bodies for matched requests and truncates the clone at
+    // proxyClientMaxBodySize. The local upload relays must receive the original
+    // bytes; their own handlers enforce the storage-key / multipart guards.
+    "/api/((?!storage/upload(?:/part)?/?$).*)",
+    "/embed/:path*",
+    "/__sw__.js",
+  ],
 };

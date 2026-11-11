@@ -34,4 +34,7 @@ export const dynamic = "force-dynamic";
  * existing posture — `/api/rpc` has no auth either — but it is a deliberate
  * trade. See the sibling `/api/storage/[...key]` read route.
  */
-export const { POST, PUT } = createDevUploadRoute({ gateProduction: false });
+export const { POST, PUT } = createDevUploadRoute({
+  gateProduction: false,
+  verifyContentAddressedKey: true,
+});
