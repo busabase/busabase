@@ -189,7 +189,11 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   e2e:
-    runs-on: ubuntu-latest
+    # Pin 24.04: GitHub's ubuntu-latest moved to 26.04, and Playwright 1.58.2
+    # cannot install Chromium there (`ERROR: Playwright does not support
+    # chromium on ubuntu26.04-x64`). Keep the browser job on a supported LTS
+    # until Playwright ships ubuntu26 deps.
+    runs-on: ubuntu-24.04
     # 21-31 minutes for the full Playwright suite with retries.
     timeout-minutes: 45
     steps:
