@@ -9,6 +9,8 @@ import {
   canonicalJson,
   compareArchive,
   compareWorkspace,
+  fetchDumpPage,
+  isRetryableDumpFetchError,
   rowFingerprint,
   snapshotWorkspace,
   TABLES,
@@ -231,5 +233,57 @@ describe("workspace snapshot verifier with real local HTTP, SQLite and files", (
     await expect(
       snapshotWorkspace(options("https://busabase.com", storage, join(directory, "remote"))),
     ).rejects.toThrow("loopback");
+  });
+
+  it("retries abrupt dump connection drops and still reads the page", async () => {
+    expect(isRetryableDumpFetchError(new TypeError("fetch failed"))).toBe(true);
+    expect(isRetryableDumpFetchError(new Error("Input validation failed"))).toBe(false);
+
+    let remainingFails = 2;
+    let successfulForwards = 0;
+    const flaky = http.createServer(async (req, res) => {
+      if (remainingFails > 0) {
+        remainingFails -= 1;
+        req.socket.destroy();
+        return;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      const body = JSON.parse(Buffer.concat(chunks).toString());
+      const all = rows[body.table] ?? [];
+      const start = Number(body.cursor ?? 0);
+      const page = all.slice(start, start + body.limit);
+      successfulForwards += 1;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          rows: page,
+          nextCursor: start + page.length < all.length ? String(start + page.length) : null,
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => flaky.listen(0, "127.0.0.1", resolve));
+    const address = flaky.address();
+    if (!address || typeof address === "string") throw new Error("missing flaky address");
+    const flakyUrl = `http://127.0.0.1:${address.port}`;
+    try {
+      const page = await fetchDumpPage(
+        {
+          baseUrl: flakyUrl,
+          spaceId: "local",
+          storageDir: storage,
+          snapshotDir: join(directory, "unused-snapshot"),
+          pageLimit: 10,
+        },
+        "nodes",
+        undefined,
+      );
+      expect(page.rows).toHaveLength(2);
+      expect(page.nextCursor).toBeNull();
+      expect(remainingFails).toBe(0);
+      expect(successfulForwards).toBe(1);
+    } finally {
+      await new Promise<void>((resolve) => flaky.close(() => resolve()));
+    }
   });
 });

@@ -150,33 +150,77 @@ function objectDigest(db: DatabaseSync): ObjectSummary {
   }
   return { files, bytes, sha256: hash.digest("hex") };
 }
+/** Transient loopback dump failures after multi-million-row scans (keep-alive drop, brief stall). */
+export const DUMP_PAGE_ATTEMPTS = 8;
+export const DUMP_PAGE_TIMEOUT_MS = 180_000;
+
+export function isRetryableDumpFetchError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const name = error.name;
+  if (name === "TimeoutError" || name === "AbortError") return true;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("fetch failed") ||
+    message.includes("econnreset") ||
+    message.includes("econnrefused") ||
+    message.includes("socket") ||
+    message.includes("other side closed") ||
+    message.includes("und_err")
+  );
+}
+
+export async function fetchDumpPage(
+  options: Options,
+  table: string,
+  cursor: string | undefined,
+): Promise<{ rows: unknown[]; nextCursor: string | null }> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= DUMP_PAGE_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(`${options.baseUrl}/api/v1/dump/export/tables`, {
+        method: "POST",
+        redirect: "error",
+        headers: { "content-type": "application/json", "x-busabase-space": options.spaceId },
+        body: JSON.stringify({ table, limit: options.pageLimit, ...(cursor ? { cursor } : {}) }),
+        signal: AbortSignal.timeout(DUMP_PAGE_TIMEOUT_MS),
+      });
+      if (!response.ok)
+        throw new Error(`${table}: local dump endpoint returned HTTP ${response.status}`);
+      const page: unknown = await response.json();
+      if (
+        !page ||
+        typeof page !== "object" ||
+        !Object.hasOwn(page, "rows") ||
+        !Object.hasOwn(page, "nextCursor")
+      )
+        throw new Error(`${table}: malformed dump page`);
+      const { rows, nextCursor } = page as { rows: unknown; nextCursor: unknown };
+      if (!Array.isArray(rows) || !(nextCursor === null || typeof nextCursor === "string"))
+        throw new Error(`${table}: malformed rows or cursor`);
+      if (nextCursor !== null && (!nextCursor || nextCursor === cursor || rows.length === 0))
+        throw new Error(`${table}: non-advancing pagination`);
+      return { rows, nextCursor };
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableDumpFetchError(error) || attempt === DUMP_PAGE_ATTEMPTS) throw error;
+      const delayMs = Math.min(30_000, 500 * 2 ** (attempt - 1));
+      console.error(
+        `${table}: dump page fetch retry ${attempt}/${DUMP_PAGE_ATTEMPTS} after ${
+          error instanceof Error ? error.message : String(error)
+        } (wait ${delayMs}ms)`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 async function scanTable(options: Options, table: string, consume: (rows: unknown[]) => void) {
   let cursor: string | undefined;
   let count = 0,
     lastLog = Date.now();
   do {
-    const response = await fetch(`${options.baseUrl}/api/v1/dump/export/tables`, {
-      method: "POST",
-      redirect: "error",
-      headers: { "content-type": "application/json", "x-busabase-space": options.spaceId },
-      body: JSON.stringify({ table, limit: options.pageLimit, ...(cursor ? { cursor } : {}) }),
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!response.ok)
-      throw new Error(`${table}: local dump endpoint returned HTTP ${response.status}`);
-    const page: unknown = await response.json();
-    if (
-      !page ||
-      typeof page !== "object" ||
-      !Object.hasOwn(page, "rows") ||
-      !Object.hasOwn(page, "nextCursor")
-    )
-      throw new Error(`${table}: malformed dump page`);
-    const { rows, nextCursor } = page as { rows: unknown; nextCursor: unknown };
-    if (!Array.isArray(rows) || !(nextCursor === null || typeof nextCursor === "string"))
-      throw new Error(`${table}: malformed rows or cursor`);
-    if (nextCursor !== null && (!nextCursor || nextCursor === cursor || rows.length === 0))
-      throw new Error(`${table}: non-advancing pagination`);
+    const { rows, nextCursor } = await fetchDumpPage(options, table, cursor);
     consume(rows);
     count += rows.length;
     cursor = nextCursor ?? undefined;

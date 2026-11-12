@@ -107,6 +107,27 @@ describe("raw backup blob spool", () => {
     );
   });
 
+  it("refuses to finalize when a required attachment key was never downloaded", async () => {
+    const path = join(directory, "objects.part");
+    const spool = await RawBlobSpool.open(path, "attachments", false);
+    await spool.download(
+      new Response("present"),
+      "attachments/present.bin",
+      "text/plain",
+      [],
+      "present object",
+    );
+    await expect(
+      spool.finish(
+        {
+          addBuffer: async () => undefined,
+          addStream: async () => undefined,
+        },
+        ["attachments/present.bin", "attachments/missing-file-tree.bin"],
+      ),
+    ).rejects.toThrow(/Full backup incomplete.*attachments\/missing-file-tree\.bin/);
+  });
+
   it("rejects corrupt resumed raw bytes and streamed hash mismatches", async () => {
     const path = join(directory, "objects.part");
     const key = "key";
