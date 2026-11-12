@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { attachmentGridLayout, attachmentGridThumbnailSize } from "./attachment-grid-layout";
 
 describe("attachment grid width budget", () => {
+  it("limits collapsed previews while reserving the complete hidden count", () => {
+    expect(attachmentGridLayout(500, [32, 32, 32], 1)).toMatchObject({ visible: 1, hidden: 2 });
+    expect(attachmentGridLayout(70, [32, 32, 32], 1)).toMatchObject({ visible: 0, hidden: 3 });
+  });
   it("fits complete images and reserves overflow even with only two files", () => {
     expect(attachmentGridLayout(100, [32, 32]).visible).toBe(2);
     expect(attachmentGridLayout(99, [32, 32])).toMatchObject({ visible: 0, hidden: 2 });

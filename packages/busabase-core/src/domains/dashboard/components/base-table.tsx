@@ -152,6 +152,7 @@ import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { ConfirmActionDialog } from "./primitives";
 import { RecordFind } from "./record-find-control";
 import { RecordsPaginationBar } from "./records-pagination-bar";
+import { RelationFieldAddButton } from "./relation-field";
 import { SplitSubmitButton, useWorkspacePermissionLevel } from "./split-submit-button";
 import {
   FIELD_TYPE_ICONS,
@@ -659,6 +660,7 @@ const VIRTUALIZE_ROW_THRESHOLD = 100;
 // One canonical record row, shared by the plain and virtualized render paths.
 // `style` carries the absolute-positioning transform when virtualized.
 function BusaBaseRecordRow({
+  client,
   record,
   fields,
   columnTemplate,
@@ -673,6 +675,7 @@ function BusaBaseRecordRow({
   onToggleSelected,
   onOpenRecord,
 }: {
+  client: BusabaseDashboardApiClient;
   record: RecordVO;
   /** In-cell editing controller; null keeps every cell read-only. */
   grid: BaseGridEditingContextValue | null;
@@ -719,6 +722,7 @@ function BusaBaseRecordRow({
       ) : null}
       {fields.map((field, index) => (
         <RecordTableCell
+          client={client}
           currentRecordHref={currentRecordHref}
           field={field}
           grid={grid}
@@ -2011,6 +2015,7 @@ export function BusaBaseTable({
                   return (
                     <BusaBaseRecordRow
                       baseSlug={base?.slug}
+                      client={client}
                       columnTemplate={columnTemplate}
                       fields={fields}
                       grid={gridEditingContext}
@@ -2038,6 +2043,7 @@ export function BusaBaseTable({
               records.map((record, index) => (
                 <BusaBaseRecordRow
                   baseSlug={base?.slug}
+                  client={client}
                   columnTemplate={columnTemplate}
                   fields={fields}
                   grid={gridEditingContext}
@@ -2073,6 +2079,7 @@ export function BusaBaseTable({
                     ) : null}
                     {fields.map((field, index) => (
                       <RecordTableCell
+                        client={client}
                         currentRecordHref={mergeSearchIntoHref(
                           `/base/${base?.slug ?? record.base.slug}/${record.id}`,
                           currentSearch,
@@ -2633,6 +2640,7 @@ interface RecordTableCellProps {
    * hosts without a cell write) renders the cell exactly as it always was.
    */
   grid?: BaseGridEditingContextValue | null;
+  client: BusabaseDashboardApiClient;
   onOpenRecord?: (record: RecordVO) => void;
   currentRecordHref: string;
   field: BaseFieldVO;
@@ -2645,6 +2653,7 @@ interface RecordTableCellProps {
 
 function RecordTableCell(props: RecordTableCellProps) {
   const { field, grid, index, record } = props;
+  const messages = useCoreI18n();
   const stickyClassName =
     index === 0
       ? `${baseTableStickyClassName} ${props.hasSelectionColumn ? "left-9" : "left-0"}`
@@ -2674,7 +2683,7 @@ function RecordTableCell(props: RecordTableCellProps) {
     <div
       aria-colindex={index + 1 + (props.hasSelectionColumn ? 1 : 0)}
       aria-readonly={!editable}
-      className={`flex min-w-0 items-center gap-1 overflow-hidden border-border/40 border-r px-2 outline-none ${stickyClassName} ${
+      className={`flex min-w-0 items-center gap-1 border-border/40 border-r px-2 outline-none ${editing ? "z-20 overflow-visible" : "overflow-hidden"} ${stickyClassName} ${
         active
           ? `ring-2 ring-inset ${status.error ? "ring-destructive" : "ring-primary"}`
           : status.error
@@ -2686,7 +2695,7 @@ function RecordTableCell(props: RecordTableCellProps) {
       data-grid-cell={key}
       data-inline-editable={editable ? "true" : undefined}
       onDoubleClick={
-        editable && getInlineCellEditorKind(field) !== "checkbox"
+        editable && field.type !== "relation" && getInlineCellEditorKind(field) !== "checkbox"
           ? (event) => {
               if ((event.target as HTMLElement).closest("a[href], [data-inline-cell-editor]")) {
                 return;
@@ -2702,7 +2711,35 @@ function RecordTableCell(props: RecordTableCellProps) {
       tabIndex={grid.tabStopKey === key ? 0 : -1}
     >
       {editing ? (
-        <InlineCellEditor field={field} grid={grid} record={record} />
+        <InlineCellEditor
+          client={props.client}
+          field={field}
+          grid={grid}
+          relationRecords={props.records}
+          record={record}
+        />
+      ) : editable && field.type === "relation" ? (
+        <>
+          <RelationFieldAddButton
+            aria-label={messages.base.addRelation}
+            className="bg-muted/70"
+            disabled={!field.options.targetBaseId}
+            onClick={() => grid.startEditing(record, field)}
+            title={messages.base.addRelation}
+          />
+          {getRelationRecordIds(value).length > 0 ? (
+            <RecordTableCellContent
+              {...props}
+              record={{
+                ...record,
+                headCommit: {
+                  ...record.headCommit,
+                  payload: { ...record.headCommit.payload, [field.slug]: value },
+                },
+              }}
+            />
+          ) : null}
+        </>
       ) : editable ? (
         <InlineEditableCellValue
           active={active}

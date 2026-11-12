@@ -30,18 +30,40 @@ const field = (
 });
 
 describe("which cells edit in place", () => {
+  it("edits reverse relation columns through the same relation draft rules", () => {
+    const reverse = field("relation", {}, { targetBaseId: "source", reverseOfFieldId: "forward" });
+    expect(getInlineCellEditorKind(reverse)).toBe("relation");
+    expect(canEditCellValueInline(reverse, ["existing"])).toBe(true);
+    expect(parseInlineCellDraft(reverse, ["existing", "new"])).toEqual({
+      ok: true,
+      value: ["existing", "new"],
+    });
+    expect(parseInlineCellDraft(reverse, [])).toEqual({ ok: true, value: [] });
+    expect(isSameInlineCellValue(reverse, ["existing"], ["existing"])).toBe(true);
+    expect(canEditCellValueInline(reverse, LIST_OMITTED_FIELD_VALUE)).toBe(false);
+  });
+
   it("covers the MVP types and leaves everything else to the record", () => {
     expect(
-      (["text", "number", "select", "checkbox", "date", "url", "email", "phone"] as const).map(
-        (type) => getInlineCellEditorKind(field(type)),
-      ),
-    ).toEqual(["text", "number", "select", "checkbox", "date", "url", "email", "tel"]);
+      (
+        [
+          "text",
+          "number",
+          "select",
+          "checkbox",
+          "date",
+          "url",
+          "email",
+          "phone",
+          "relation",
+        ] as const
+      ).map((type) => getInlineCellEditorKind(field(type))),
+    ).toEqual(["text", "number", "select", "checkbox", "date", "url", "email", "tel", "relation"]);
     for (const type of [
       "longtext",
       "markdown",
       "json",
       "attachment",
-      "relation",
       "member",
       "multiselect",
       "lookup",

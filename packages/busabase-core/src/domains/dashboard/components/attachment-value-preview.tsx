@@ -123,12 +123,15 @@ export function AttachmentValuePreview({
   minimalChrome = false,
   presentation = "flow",
   rowHeight = 48,
+  maxVisible,
 }: {
   value: unknown;
   compact?: boolean;
   /** Grid previews fit the selected row; flow remains compatible with detail/cards. */
   presentation?: "flow" | "grid";
   rowHeight?: number;
+  /** Limit collapsed grid thumbnails while retaining every file in expansion. */
+  maxVisible?: number;
   className?: string;
   /** Reuse this preview with a host-owned chip instead of the default thumbnail/link. */
   renderTrigger?: (
@@ -182,6 +185,7 @@ export function AttachmentValuePreview({
   const layout = attachmentGridLayout(
     width,
     attachments.map(() => thumbnailSize),
+    maxVisible,
   );
   const visible = grid ? entries.slice(0, layout.visible) : compact ? entries.slice(0, 3) : entries;
   if (attachments.length === 0) return <span className="text-muted-foreground">-</span>;

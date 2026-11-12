@@ -1,6 +1,6 @@
 import type { BaseFieldVO, FieldType } from "busabase-contract/types";
 import { validateRecordFields } from "../../base/field-rules";
-import { type FieldInputKind, fieldInputKind, isReadOnlyFieldDef } from "../../base/field-types";
+import { type FieldInputKind, fieldInputKind, isSystemFieldType } from "../../base/field-types";
 import {
   getDateFieldOptions,
   toDateInputValue,
@@ -29,13 +29,14 @@ import { TABLE_CELL_PREVIEW_MAX_CHARS } from "./table-cell-preview";
 /** The editor a grid cell opens in place — the form's control kind for that field. */
 export type InlineCellEditorKind = Extract<
   FieldInputKind,
-  "text" | "number" | "select" | "checkbox" | "date" | "url" | "email" | "tel"
+  "text" | "number" | "select" | "checkbox" | "date" | "url" | "email" | "tel" | "relation"
 >;
 
 /**
  * Field types that edit in place. Deliberately a short list: long text, JSON,
- * attachments, relations, people and AI/computed fields need more room or a
- * picker the grid cannot hold, so those cells keep opening the record.
+ * attachments, people and AI/computed fields need more room or a picker the
+ * grid cannot hold, so those cells keep opening the record. Relations use the
+ * record form's picker inside a cell-anchored popover.
  */
 const INLINE_FIELD_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "text",
@@ -46,10 +47,13 @@ const INLINE_FIELD_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "url",
   "email",
   "phone",
+  "relation",
 ]);
 
 export const getInlineCellEditorKind = (field: BaseFieldVO): InlineCellEditorKind | null =>
-  isReadOnlyFieldDef(field) || !INLINE_FIELD_TYPES.has(field.type)
+  // Reverse relation edits use the record form's server-side redirection to
+  // the forward field. Never-stored does not mean uneditable for these columns.
+  isSystemFieldType(field.type) || !INLINE_FIELD_TYPES.has(field.type)
     ? null
     : (fieldInputKind(field.type) as InlineCellEditorKind);
 
@@ -165,6 +169,7 @@ const errorForKind: Record<InlineCellEditorKind, InlineCellDraftError> = {
   url: "url",
   email: "email",
   tel: "phone",
+  relation: "invalid",
 };
 
 /**
@@ -201,7 +206,7 @@ export const parseInlineCellDraft = (field: BaseFieldVO, draft: unknown): Inline
   const value = normalizeEditorFieldValue(field, input);
   const [failure] = validateRecordFields({ [field.slug]: value }, [field]);
   if (failure) {
-    const empty = value === null || value === "";
+    const empty = value === null || value === "" || (Array.isArray(value) && value.length === 0);
     return { ok: false, error: empty && field.required ? "required" : errorForKind[kind] };
   }
   return { ok: true, value };
@@ -234,6 +239,16 @@ export const isSameInlineCellValue = (
     if (typeof current !== "string" || typeof next !== "string") return false;
     const choices = field.options.choices ?? [];
     return (resolveChoiceValue(current, choices).choice?.id ?? current) === next;
+  }
+  if (kind === "relation") {
+    const normalizedCurrent = normalizeEditorFieldValue(field, current);
+    const normalizedNext = normalizeEditorFieldValue(field, next);
+    return (
+      Array.isArray(normalizedCurrent) &&
+      Array.isArray(normalizedNext) &&
+      normalizedCurrent.length === normalizedNext.length &&
+      normalizedCurrent.every((item, index) => item === normalizedNext[index])
+    );
   }
   if (kind === "date") {
     return dateComparisonKey(field, current) === dateComparisonKey(field, next);

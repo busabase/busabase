@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
@@ -74,6 +75,15 @@ const base: BaseVO = {
   fields,
 };
 
+const relation = field("related", "relation", { targetBaseId: "bas_related", multiple: true });
+const relatedBase = {
+  ...base,
+  id: "bas_related",
+  slug: "related-records",
+  fields: [field("name", "text")],
+} as BaseVO;
+const baseWithRelation = { ...base, fields: [...fields, relation] } as BaseVO;
+
 const makeRecord = (
   id: string,
   payload: Record<string, unknown>,
@@ -123,6 +133,11 @@ const blocks = makeRecord("rec_blocks", {
   notes: "",
   sku: "TT-BLOCKS",
 });
+const relatedRecord = {
+  ...makeRecord("rec_related", { name: "Related record" }),
+  baseId: relatedBase.id,
+  base: relatedBase,
+} as RecordVO;
 
 const merged = (headCommitId = "cmt_after"): RecordCellUpdateResult => ({
   materialized: true,
@@ -131,9 +146,13 @@ const merged = (headCommitId = "cmt_after"): RecordCellUpdateResult => ({
 
 function harness(level: ApiKeyPermissionLevel, children: ReactNode) {
   return (
-    <CoreI18nProvider locale="en">
-      <SubmitPermissionProvider permissionLevel={level}>{children}</SubmitPermissionProvider>
-    </CoreI18nProvider>
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <CoreI18nProvider locale="en">
+        <SubmitPermissionProvider permissionLevel={level}>{children}</SubmitPermissionProvider>
+      </CoreI18nProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -236,6 +255,144 @@ describe("selecting and moving between cells", () => {
     // Not prevented: the browser moves focus on, out of the row.
     expect(event).toBe(true);
   });
+});
+
+describe("relation cells", () => {
+  it("keeps the add button first and retains an invalid required draft until corrected or cancelled", async () => {
+    const row = makeRecord(robot.id, { ...robot.headCommit.payload, related: [relatedRecord.id] });
+    const onUpdateRecordCell = vi.fn<UpdateRecordCell>(async () => merged());
+    const client = {
+      getBase: vi.fn(async () => relatedBase),
+      listRecordsPage: vi.fn(async () => ({ records: [relatedRecord], totalPages: 1 })),
+    } as unknown as BusabaseDashboardApiClient;
+    const { container } = renderGrid({
+      base: { ...baseWithRelation, fields: [...fields, { ...relation, required: true }] },
+      client,
+      records: [row],
+      relationRecords: [relatedRecord],
+      onUpdateRecordCell,
+    });
+    const target = cell(container, row.id, "related");
+    const add = within(target).getByRole("button", { name: "Add link" });
+    expect(target.firstElementChild).toBe(add);
+    fireEvent.click(add);
+    fireEvent.click(await screen.findByRole("button", { name: "Remove link to Related record" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Now" }));
+    expect(screen.getByRole("alert").textContent).toMatch(/required/i);
+    expect(onUpdateRecordCell).not.toHaveBeenCalled();
+    fireEvent.focusIn(document.body);
+    expect(screen.getByRole("searchbox")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Related record" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Now" }));
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(onUpdateRecordCell).not.toHaveBeenCalled();
+    fireEvent.click(within(target).getByRole("button", { name: "Add link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove link to Related record" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    fireEvent.click(within(target).getByRole("button", { name: "Add link" }));
+    expect(screen.getByRole("button", { name: "Remove link to Related record" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onUpdateRecordCell).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "saves a relation draft through the normal record update (reverse: %s)",
+    async (reverse) => {
+      const row = makeRecord(robot.id, { ...robot.headCommit.payload, related: [] });
+      const onUpdateRecordCell = vi.fn<UpdateRecordCell>(async () => merged());
+      const client = {
+        getBase: vi.fn(async () => relatedBase),
+        listRecordsPage: vi.fn(async () => ({
+          records: [relatedRecord],
+          total: 1,
+          totalPages: 1,
+          page: 1,
+        })),
+      } as unknown as BusabaseDashboardApiClient;
+      const { container } = renderGrid({
+        base: reverse
+          ? {
+              ...baseWithRelation,
+              fields: [
+                ...fields,
+                { ...relation, options: { ...relation.options, reverseOfFieldId: "forward" } },
+              ],
+            }
+          : baseWithRelation,
+        client,
+        onUpdateRecordCell,
+        records: [row],
+        relationRecords: [relatedRecord],
+      });
+      const relationCell = cell(container, row.id, "related");
+
+      fireEvent.click(relationCell);
+      expect(screen.queryByRole("searchbox")).toBeNull();
+      fireEvent.doubleClick(relationCell);
+      expect(screen.queryByRole("searchbox")).toBeNull();
+      fireEvent.click(within(relationCell).getByRole("button", { name: "Add link" }));
+      fireEvent.click(await screen.findByRole("checkbox", { name: /Related record/ }));
+      expect(onUpdateRecordCell).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Save Now" }));
+
+      await waitFor(() =>
+        expect(onUpdateRecordCell).toHaveBeenCalledWith(row, "related", [relatedRecord.id], {
+          baseCommitId: row.headCommitId,
+          mergeImmediately: true,
+        }),
+      );
+    },
+  );
+
+  it.each([false, true])(
+    "submits a relation selection for review without direct save access (reverse: %s)",
+    async (reverse) => {
+      const row = makeRecord(robot.id, { ...robot.headCommit.payload, related: [] });
+      const onUpdateRecordCell = vi.fn<UpdateRecordCell>(async () => ({
+        materialized: false,
+        changeRequestId: "crq_related",
+      }));
+      const client = {
+        getBase: vi.fn(async () => relatedBase),
+        listRecordsPage: vi.fn(async () => ({
+          records: [relatedRecord],
+          total: 1,
+          totalPages: 1,
+          page: 1,
+        })),
+      } as unknown as BusabaseDashboardApiClient;
+      const { container } = renderGrid({
+        base: reverse
+          ? {
+              ...baseWithRelation,
+              fields: [
+                ...fields,
+                { ...relation, options: { ...relation.options, reverseOfFieldId: "forward" } },
+              ],
+            }
+          : baseWithRelation,
+        client,
+        level: "changeRequest",
+        onUpdateRecordCell,
+        records: [row],
+        relationRecords: [relatedRecord],
+      });
+
+      fireEvent.click(
+        within(cell(container, row.id, "related")).getByRole("button", { name: "Add link" }),
+      );
+      fireEvent.click(await screen.findByRole("checkbox", { name: /Related record/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Save as Change Request" }));
+
+      await waitFor(() =>
+        expect(onUpdateRecordCell).toHaveBeenCalledWith(row, "related", [relatedRecord.id], {
+          baseCommitId: row.headCommitId,
+          mergeImmediately: false,
+        }),
+      );
+    },
+  );
 });
 
 describe("editing a number (the price cell)", () => {
