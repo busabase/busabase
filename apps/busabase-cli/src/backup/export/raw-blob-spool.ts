@@ -206,9 +206,22 @@ export class RawBlobSpool {
     writer: Pick<ArchiveWriter, "addBuffer" | "addStream">,
     orderedKeys: readonly string[],
   ): Promise<void> {
+    // Every required key must already be in the spool. Skipping a missing key
+    // used to publish archives whose attachment/asset-text rows pointed at
+    // absent bytes (file-tree rows without an Asset were the common case).
+    const missing = orderedKeys.filter((key) => !this.entries.has(key));
+    if (missing.length > 0) {
+      throw new BackupContentIntegrityError(
+        `Full backup incomplete: ${missing.length} ${this.kind} object(s) have no downloaded bytes (first: ${missing[0]}). No complete archive was produced.`,
+      );
+    }
     for (const key of orderedKeys) {
       const metadata = this.entries.get(key);
-      if (!metadata) continue;
+      if (!metadata) {
+        throw new BackupContentIntegrityError(
+          `Full backup incomplete: missing downloaded bytes for ${this.kind} key ${key}. No complete archive was produced.`,
+        );
+      }
       const digest = keyDigest(key);
       const prefix = `blobs/${this.kind}/${digest}`;
       await writer.addBuffer(`${prefix}.json`, `${JSON.stringify(metadata)}\n`);
