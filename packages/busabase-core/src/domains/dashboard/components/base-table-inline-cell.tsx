@@ -1,5 +1,6 @@
 "use client";
 
+import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BaseFieldVO, RecordVO } from "busabase-contract/types";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import {
@@ -29,7 +30,7 @@ import {
 } from "../../../i18n/inline-cell-edit";
 import { fieldLinkPrefix } from "../../base/field-types";
 import { getDateFieldOptions, parseDateFieldValue } from "../../base/utils/date-value";
-import { getFieldChipEntries, getFieldPreviewText } from "../helpers/field";
+import { getEditorFieldValue, getFieldChipEntries, getFieldPreviewText } from "../helpers/field";
 import { fieldValueToString } from "../helpers/format";
 import { buildGridCellText } from "../helpers/grid-cell-layout";
 import {
@@ -52,6 +53,7 @@ import { ChoiceOptionsPanel, choicePopoverClassName } from "./choice-field";
 import { DateFieldInput, DateFieldValue } from "./date-field";
 import { FieldBadge } from "./field-preview";
 import { GridCellText } from "./grid-cell-presentation";
+import { RelationFieldEditor } from "./relation-field";
 import { SplitSubmitButton } from "./split-submit-button";
 
 /**
@@ -408,16 +410,30 @@ const isComposing = (event: KeyboardEvent) =>
  * normalize + validate (`parseInlineCellDraft`) before it is saved.
  */
 export function InlineCellEditor({
+  client,
   field,
   grid,
+  relationRecords,
   record,
 }: {
+  client: BusabaseDashboardApiClient;
   field: BaseFieldVO;
   grid: BaseGridEditing;
+  relationRecords: RecordVO[];
   record: RecordVO;
 }) {
   const kind = getInlineCellEditorKind(field);
   if (!kind || kind === "checkbox") return null;
+  if (kind === "relation")
+    return (
+      <InlineRelationCellEditor
+        client={client}
+        field={field}
+        grid={grid}
+        loadedRecords={relationRecords}
+        record={record}
+      />
+    );
   if (kind === "select")
     return <InlineSelectCellEditor field={field} grid={grid} record={record} />;
   if (kind === "date") return <InlineDateCellEditor field={field} grid={grid} record={record} />;
@@ -485,6 +501,101 @@ function InlineCellEditorError({ id, message }: { id: string; message: string | 
     >
       {message}
     </p>
+  );
+}
+
+/**
+ * Relation selection keeps its local draft open long enough to choose several
+ * records, then uses the same permission-aware save action as every other
+ * inline editor. The picker is also used by the record form, so searching,
+ * paging and missing-record handling stay consistent between both surfaces.
+ */
+function InlineRelationCellEditor({
+  client,
+  field,
+  grid,
+  loadedRecords,
+  record,
+}: {
+  client: BusabaseDashboardApiClient;
+  field: BaseFieldVO;
+  grid: BaseGridEditing;
+  loadedRecords: RecordVO[];
+  record: RecordVO;
+}) {
+  const copy = useInlineCellEditMessages();
+  const resolveIString = useIString();
+  const fieldName = resolveIString(field.name);
+  const key = gridCellKey(record.id, field.slug);
+  const [draft, setDraft] = useState<string[]>(() => {
+    const current = getEditorFieldValue(field, grid.getDisplayValue(record, field));
+    return Array.isArray(current)
+      ? current.filter((item): item is string => typeof item === "string")
+      : typeof current === "string" && current
+        ? [current]
+        : [];
+  });
+  const latest = useRef(draft);
+  const settled = useRef(false);
+  const error = grid.editError ? describeInlineCellError(copy, grid.editError, fieldName) : null;
+  const change = (next: unknown) => {
+    const relationIds = Array.isArray(next)
+      ? next.filter((item): item is string => typeof item === "string")
+      : typeof next === "string" && next
+        ? [next]
+        : [];
+    latest.current = relationIds;
+    setDraft(relationIds);
+  };
+  const settle = (action: () => boolean) => {
+    if (!settled.current) settled.current = action();
+    return settled.current;
+  };
+
+  return (
+    <div className="relative min-w-0 flex-1 py-1" data-inline-cell-editor={field.slug}>
+      <RelationFieldEditor
+        addButtonFirst
+        autoOpen
+        client={client}
+        field={field}
+        fieldName={fieldName}
+        footer={
+          <>
+            {error ? (
+              <p className="mb-2 text-destructive text-xs" role="alert">
+                {error}
+              </p>
+            ) : null}
+            <InlineCellSubmitActions
+              dropdownPosition="below"
+              onCancel={() =>
+                settle(() => {
+                  grid.cancelEditing("stay");
+                  return true;
+                })
+              }
+              onSubmit={(mergeImmediately) =>
+                settle(() => grid.commit(record, field, latest.current, "stay", mergeImmediately))
+              }
+            />
+          </>
+        }
+        inputId={`${key}-inline-relation`}
+        loadedRecords={loadedRecords}
+        onChange={change}
+        onEscape={() =>
+          settle(() => {
+            grid.cancelEditing("stay");
+            return true;
+          })
+        }
+        onOpenChange={(open) => {
+          if (!open) return settle(() => grid.commit(record, field, latest.current, "none"));
+        }}
+        value={draft}
+      />
+    </div>
   );
 }
 

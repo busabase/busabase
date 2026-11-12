@@ -12,7 +12,11 @@ import type {
   FileTreeNodeVO,
 } from "busabase-contract/types";
 import { and, asc, count, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
-import { confirmUpload, requestUploadUrl } from "open-domains/attachments/logic";
+import {
+  confirmUpload,
+  deleteAttachmentSafely,
+  requestUploadUrl,
+} from "open-domains/attachments/logic";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
 import {
@@ -268,6 +272,27 @@ const deleteOrphanedUploadedAsset = async (
   }
 };
 
+/**
+ * After a file-tree path is repointed onto new bytes, the previous Attachment
+ * is often left with zero Asset refs. Nothing else GC'd those rows, so workspace
+ * dumps kept accumulating dead `attachments` entries — and older backup CLIs
+ * that only walked Assets published archives missing those bytes entirely.
+ * Mirror `deleteAssetRow`: drop the Attachment once no Asset still points at it.
+ */
+const releaseUnreferencedAttachment = async (
+  attachmentId: string,
+  tx: Awaited<ReturnType<typeof getDb>>,
+) => {
+  const [stillSharedByOtherAsset] = await tx
+    .select({ id: busabaseAssets.id })
+    .from(busabaseAssets)
+    .where(eq(busabaseAssets.attachmentId, attachmentId))
+    .limit(1);
+  if (!stillSharedByOtherAsset) {
+    await deleteAttachmentSafely(attachmentId, tx, attachments);
+  }
+};
+
 const findMountedAsset = async (
   node: NodePO,
   path: string,
@@ -361,7 +386,8 @@ const upsertFileAssetAtPath = async (
   if (input.assetId) {
     const incoming = await resolveAssetFileForMaterialization(input.assetId, tx);
     if (existing) {
-      const attachmentChanged = existing.attachmentId !== incoming.attachmentId;
+      const previousAttachmentId = existing.attachmentId;
+      const attachmentChanged = previousAttachmentId !== incoming.attachmentId;
       await tx
         .update(busabaseAssets)
         .set({
@@ -390,6 +416,9 @@ const upsertFileAssetAtPath = async (
       if (incoming.id !== existing.assetId) {
         await deleteOrphanedUploadedAsset(incoming.id, tx);
       }
+      if (attachmentChanged) {
+        await releaseUnreferencedAttachment(previousAttachmentId, tx);
+      }
       return existing.assetId;
     }
     await mountAssetAtPath(
@@ -407,7 +436,8 @@ const upsertFileAssetAtPath = async (
   const bytes = Buffer.from(content, "utf8");
   const attachmentId = await createAttachmentFromBuffer(path, bytes, mimeType, tx);
   if (existing) {
-    const attachmentChanged = existing.attachmentId !== attachmentId;
+    const previousAttachmentId = existing.attachmentId;
+    const attachmentChanged = previousAttachmentId !== attachmentId;
     await tx
       .update(busabaseAssets)
       .set({
@@ -429,6 +459,9 @@ const upsertFileAssetAtPath = async (
       { displayName: input.displayName ?? displayNameForPath(path) },
       tx,
     );
+    if (attachmentChanged) {
+      await releaseUnreferencedAttachment(previousAttachmentId, tx);
+    }
     return existing.assetId;
   }
 

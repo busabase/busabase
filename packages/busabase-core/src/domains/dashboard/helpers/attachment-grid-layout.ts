@@ -1,12 +1,16 @@
 /** Budget the complete overflow count and expand button before choosing a prefix. */
-export function attachmentGridLayout(width: number, itemWidths: number[]) {
+export function attachmentGridLayout(
+  width: number,
+  itemWidths: number[],
+  maxVisible = itemWidths.length,
+) {
   const gap = 6;
   const expandWidth = 24;
   const total = itemWidths.length;
   const overflowWidth = (hidden: number) => Math.max(32, String(hidden).length * 8 + 16);
   let visible = 0;
   let itemsWidth = 0;
-  for (let candidate = 1; candidate <= total; candidate++) {
+  for (let candidate = 1; candidate <= Math.min(total, maxVisible); candidate++) {
     itemsWidth += itemWidths[candidate - 1] ?? 0;
     const hidden = total - candidate;
     const required =
