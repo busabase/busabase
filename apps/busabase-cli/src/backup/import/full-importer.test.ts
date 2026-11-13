@@ -200,6 +200,7 @@ describe("raw v2 archive blob boundaries", () => {
   };
   const fake = () => {
     const sent: Array<{ table: string; rows: Array<Record<string, unknown>> }> = [];
+    const validated: Record<string, number> = {};
     const abort = vi.fn(async () => ({ ok: true }));
     const commit = vi.fn(
       async (): Promise<{ ok: boolean; warnings: string[]; notices?: string[] }> => ({
@@ -209,10 +210,31 @@ describe("raw v2 archive blob boundaries", () => {
     );
     const client = {
       dump: {
-        importBegin: async () => ({ sessionId: "test", blobChunkProtocol: 1 }),
-        importTables: async (input: { table: string; rows: Array<Record<string, unknown>> }) => {
-          sent.push(input);
-          return { inserted: input.rows.length };
+        importBegin: async () => ({
+          sessionId: "test",
+          blobChunkProtocol: 1,
+          exactReplayProtocol: 1,
+        }),
+        importTables: async (input: {
+          table: string;
+          rows?: Array<Record<string, unknown>>;
+          rowsJson?: string;
+          validateOnly?: boolean;
+          validationComplete?: boolean;
+        }) => {
+          const rows =
+            input.rowsJson === undefined ? (input.rows ?? []) : JSON.parse(input.rowsJson);
+          if (input.validateOnly) {
+            validated[input.table] = (validated[input.table] ?? 0) + rows.length;
+            return {
+              inserted: 0,
+              validated: true,
+              validationComplete: !!input.validationComplete,
+              validatedRows: validated[input.table],
+            };
+          }
+          sent.push({ table: input.table, rows });
+          return { inserted: rows.length };
         },
         importCommit: commit,
         importAbort: abort,
@@ -263,7 +285,7 @@ describe("raw v2 archive blob boundaries", () => {
     "tree/records.json",
   ])("rejects an operative unknown entry %s instead of returning success", async (entry) => {
     const path = await archive([[entry, "{}\n"]]);
-    await expect(verifyArchive(path)).resolves.toMatchObject({ formatVersion: 2 });
+    await expect(verifyArchive(path)).resolves.toMatchObject({ formatVersion: FORMAT_VERSION });
     const { client, sent, abort, commit } = fake();
     await expect(
       importFull({ client, archivePath: path, sourceSpaceId: "source" }),
@@ -279,7 +301,8 @@ describe("raw v2 archive blob boundaries", () => {
     await expect(
       importFull({ client, archivePath: path, sourceSpaceId: "source" }),
     ).rejects.toThrow(/unsupported table.*futureTable/);
-    expect(abort).toHaveBeenCalledOnce();
+    // The verified manifest is now checked before beginning a target session.
+    expect(abort).not.toHaveBeenCalled();
     expect(commit).not.toHaveBeenCalled();
   });
 

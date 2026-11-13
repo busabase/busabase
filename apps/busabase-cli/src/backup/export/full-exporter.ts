@@ -1,6 +1,5 @@
 import { mkdtemp, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { Readable } from "node:stream";
 import {
   type DumpTable,
   DumpTableSchema,
@@ -13,8 +12,11 @@ import { isTransientError } from "../../retry.js";
 import { ArchiveWriter } from "../format/archive-writer.js";
 import { FORMAT_VERSION, type Manifest } from "../format/manifest.js";
 import { IMPORT_ORDER } from "../import/full-importer.js";
+import { isSafeNodeIdentity } from "../node-identity.js";
+import { materializeAttachmentDependency } from "./attachment-dependencies.js";
 import { BackupContentIntegrityError, canonicalHash, RawBlobSpool } from "./raw-blob-spool.js";
 import { SpooledTable } from "./spooled-table.js";
+import { captureSqlSnapshot, type SnapshotDependency } from "./sql-snapshot.js";
 
 /**
  * The CLI's shared `withRetry` (retry.ts) wraps `fetch` and only inspects the
@@ -147,50 +149,29 @@ const forEachConcurrent = async <T, R>(
   }
 };
 
-/**
- * Write an NDJSON archive entry from already-collected rows without ever
- * concatenating them into a single JS string first. A real production table
- * (e.g. `fieldValues` holding long CMS/article-body content) can produce an
- * NDJSON blob well past V8's max string length — `"".join("\n")` on such a
- * table throws `RangeError: Invalid string length` and aborts the whole
- * backup. Streaming line-sized buffers through `ArchiveWriter.addStream`
- * (already built for exactly this — see its own doc comment) avoids ever
- * holding one oversized string/buffer.
- *
- * `addStream` needs the entry's total byte size up front (a tar constraint),
- * which used to be met by materializing every line as a `Buffer` in an array
- * and summing it. On `fieldValues` that is 1.1M `Buffer`s alive at once while
- * the 1.1M row objects they came from are also still live — the same
- * peak-heap shape `SpooledNdjsonEntry` was written to avoid, on the one table
- * that dwarfs the rest. Measure the size in a first pass (keeping only a
- * running total), then re-serialize lazily from a generator so at most one
- * line exists at a time. The cost is `JSON.stringify` twice per row, which is
- * CPU against a backup whose real bottleneck is the network.
- */
-const writeNdjsonEntry = async (
-  writer: ArchiveWriter,
-  path: string,
-  rows: Array<Record<string, unknown>>,
-): Promise<void> => {
-  let totalSize = 0;
-  for (const row of rows) {
-    totalSize += Buffer.byteLength(`${JSON.stringify(row)}\n`, "utf8");
-  }
-  const lines = function* () {
-    for (const row of rows) yield Buffer.from(`${JSON.stringify(row)}\n`, "utf8");
-  };
-  await writer.addStream(path, totalSize, Readable.from(lines()));
-};
-
 class BackupCoverageError extends Error {}
 const incomplete = (message: string): BackupCoverageError =>
   new BackupCoverageError(`Full backup incomplete: ${message}. No new archive was published.`);
 
+/**
+ * A row in the SQL snapshot whose live source was deleted before its bytes
+ * were read. Deleting the last row also deletes the object, so these bytes are
+ * gone; a fresh snapshot (which no longer has the row) is the only complete
+ * archive. `runBackup` retakes the snapshot and keeps verified downloads.
+ */
+export class SourceDeletedAfterSnapshotError extends BackupCoverageError {}
+const deletedAfterSnapshot = (error: unknown, what: string): unknown =>
+  (error as { code?: unknown } | null)?.code === "NOT_FOUND"
+    ? new SourceDeletedAfterSnapshotError(
+        `Full backup incomplete: ${what} was deleted after the SQL snapshot. No new archive was published.`,
+      )
+    : error;
+
 function validateNodeGraph(rows: Array<Record<string, unknown>>): void {
   const nodes = new Map<string, Record<string, unknown>>();
   for (const row of rows) {
-    if (typeof row.id !== "string" || !row.id || nodes.has(row.id))
-      throw incomplete("the nodes snapshot contains an invalid or duplicate node id");
+    if (!isSafeNodeIdentity(row.id) || nodes.has(row.id))
+      throw incomplete("the nodes snapshot contains an unsafe or duplicate node id");
     nodes.set(row.id, row);
   }
   const children = new Map<string, string[]>();
@@ -232,9 +213,9 @@ function validateBodies(bodies: ExportDocBodiesVO["bodies"], requested: Readonly
 export const SPOOL_SUFFIXES = [".attachment-blobs.part", ".asset-text-blobs.part"] as const;
 
 // Every dump-eligible table, taken straight from the contract enum (the single
-// source of truth). FETCH order here is irrelevant — each table is drained
-// independently into `tableRows` (or a leaf table's disk spool), and the
-// doc-body / attachment-blob passes read the smaller parent tables from that map. Deriving this instead of
+// source of truth). The snapshot protocol streams this fixed sequence into raw
+// disk spools. Compact indexes support references, document reads and downloads.
+// Deriving this instead of
 // hand-maintaining a parallel copy is what stops a newly-registered table
 // (e.g. the `nodePrincipals` permissions table) from being silently skipped
 // on backup.
@@ -317,14 +298,27 @@ const DUMP_FOREIGN_KEYS: Partial<Record<DumpTable, Record<string, DumpTable>>> =
 
 // Transcripts, command payloads and workflow outputs can be larger than record
 // history. Keep only parent session ids in memory; their payloads stay on disk.
-const ADDITIONAL_SPOOLED_TABLES: DumpTable[] = [
-  "workflowRuns",
-  "webhookDeliveries",
-  "agentSessions",
-  "agentSessionEvents",
-  "agentSessionCommands",
-  "commentMentions",
-];
+const ADDITIONAL_SPOOLED_TABLES: DumpTable[] = EXPORT_TABLES.filter(
+  (table) => table !== "fieldValues" && table !== "commits",
+);
+
+// Archive payloads stay on disk. Only identity/relationship metadata used by
+// validation, current-state pruning and byte downloads is retained in memory.
+const RETAINED_COLUMNS: Partial<Record<DumpTable, string[]>> = {
+  nodes: ["id", "parentId", "type", "archivedAt", "deletedAt"],
+  changeRequests: ["id", "status"],
+  operations: ["id", "changeRequestId", "headCommitId"],
+  records: ["id", "headCommitId"],
+  recordLinks: ["id", "commitId"],
+  comments: ["id", "changeRequestId", "commitId"],
+  reviews: ["id", "changeRequestId"],
+  attachments: ["id", "storageKey", "fileName", "mimeType", "sizeBytes", "contentHash"],
+  assets: ["id", "attachmentId", "createdBy", "createdAt", "updatedAt"],
+  assetTexts: ["id", "assetId", "status", "textStorageKey", "textContentHash"],
+};
+const REFERENCED_TABLES = new Set(
+  Object.values(DUMP_FOREIGN_KEYS).flatMap((references) => Object.values(references)),
+);
 
 const HISTORY_TABLES: DumpTable[] = [
   "commits",
@@ -376,6 +370,7 @@ const pruneToCurrentState = async (
   fieldValuesSpool: SpooledTable,
   commitsSpool: SpooledTable,
   commitIds: Set<string>,
+  tableSpools: ReadonlyMap<DumpTable, SpooledTable>,
 ): Promise<void> => {
   const before = Object.fromEntries(HISTORY_TABLES.map((t) => [t, tableCounts[t] ?? 0] as const));
   const beforeFieldValues = tableCounts.fieldValues ?? 0;
@@ -452,6 +447,13 @@ const pruneToCurrentState = async (
   // Audit events are a pure append-only trail — nothing references them, and
   // "who did what when" is exactly what `--no-history` is asked to leave out.
   assign("auditEvents", []);
+  for (const table of HISTORY_TABLES) {
+    if (table === "commits") continue;
+    const keep = new Set((tableRows[table] ?? []).map((row) => row.id));
+    const actual = await tableSpools.get(table)?.filter((row) => keep.has(row.id));
+    if (actual !== tableCounts[table])
+      throw incomplete(`history pruning count differs for ${table}`);
+  }
 
   const dropped = (table: DumpTable) => before[table] - (tableCounts[table] ?? 0);
   log(
@@ -628,44 +630,116 @@ async function exportFullWithSpool(
   // table dangles every record. `pruneToCurrentState` below does the dropping,
   // after it can see what it is dropping.
   const tables = EXPORT_TABLES;
+  if (
+    IMPORT_ORDER.length !== tables.length ||
+    new Set(IMPORT_ORDER).size !== tables.length ||
+    tables.some((table) => !IMPORT_ORDER.includes(table))
+  )
+    throw incomplete(
+      "SQL export and archive import registries differ; update the CLI before backing up",
+    );
 
-  for (const table of tables) {
-    const rows: Array<Record<string, unknown>> = [];
-    let count = 0;
-    const spool = spoolFor(table);
-    let cursor: string | undefined;
-    // A large table (fieldValues on a real space: hundreds of thousands of
-    // rows, thousands of pages) can otherwise go silent for many minutes
-    // between the "exported X: N rows" line for the PREVIOUS table and this
-    // one — indistinguishable from a hang.
-    const reportProgress = throttledProgress(log, () => `  ...${table}: ${count} rows so far`);
-    do {
-      const page = await fetchPageWithRetry(
-        () => client.dump.exportTables({ table, cursor, limit: pageLimit }),
-        (attempt, error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          log(`  retrying ${table} page (attempt ${attempt}/${retries}): ${message}`);
-        },
-        undefined,
-        retries,
+  const snapshotDependencies: SnapshotDependency[] = [];
+  const retainMetadata = (table: DumpTable, rows: Array<Record<string, unknown>>) => {
+    if (table === "commits") {
+      for (const row of rows) commitIds.add(row.id as string);
+      return;
+    }
+    if (table === "agentSessions") {
+      for (const row of rows) agentSessionIds.add(row.id as string);
+      return;
+    }
+    const columns = RETAINED_COLUMNS[table] ?? (REFERENCED_TABLES.has(table) ? ["id"] : undefined);
+    if (!columns) return;
+    tableRows[table] ??= [];
+    for (const row of rows)
+      tableRows[table].push(
+        Object.fromEntries(
+          columns.filter((key) => Object.hasOwn(row, key)).map((key) => [key, row[key]]),
+        ),
       );
-      const fetchedRows = page.rows as Array<Record<string, unknown>>;
-      if (table === "commits")
-        for (const row of fetchedRows) if (typeof row.id === "string") commitIds.add(row.id);
-      if (table === "agentSessions")
-        for (const row of fetchedRows) if (typeof row.id === "string") agentSessionIds.add(row.id);
-      if (spool) await spool.append(fetchedRows);
-      else rows.push(...fetchedRows);
-      count += fetchedRows.length;
-      cursor = page.nextCursor ?? undefined;
-      if (cursor) reportProgress();
-    } while (cursor);
+  };
+  const resetSqlCapture = async () => {
+    for (const key of Object.keys(tableRows)) delete tableRows[key as DumpTable];
+    for (const key of Object.keys(tableCounts)) delete tableCounts[key];
+    commitIds.clear();
+    agentSessionIds.clear();
+    snapshotDependencies.length = 0;
+    await Promise.all([
+      fieldValuesSpool.reset(),
+      commitsSpool.reset(),
+      ...[...additionalSpools.values()].map((spool) => spool.reset()),
+    ]);
+  };
+  const sqlCapture = await captureSqlSnapshot({
+    client,
+    spaceId,
+    limit: Math.min(pageLimit, 500),
+    retries,
+    log,
+    reset: resetSqlCapture,
+    rows: async (table, rows) => {
+      const spool = spoolFor(table);
+      if (!spool) throw incomplete(`no SQL spool for ${table}`);
+      await spool.append(rows);
+      retainMetadata(table, rows);
+    },
+    tableEnd: async (table, count) => {
+      tableCounts[table] = count;
+      log(`exported ${table}: ${count} rows (SQL snapshot)`);
+    },
+    dependency: async (dependency) => {
+      snapshotDependencies.push(dependency);
+    },
+    legacy: async () => {
+      for (const table of tables) {
+        let count = 0;
+        const spool = spoolFor(table);
+        let cursor: string | undefined;
+        // A large table (fieldValues on a real space: hundreds of thousands of
+        // rows, thousands of pages) can otherwise go silent for many minutes
+        // between the "exported X: N rows" line for the PREVIOUS table and this
+        // one — indistinguishable from a hang.
+        const reportProgress = throttledProgress(log, () => `  ...${table}: ${count} rows so far`);
+        do {
+          const page = await fetchPageWithRetry(
+            () => client.dump.exportTables({ table, cursor, limit: pageLimit }),
+            (attempt, error) => {
+              const message = error instanceof Error ? error.message : String(error);
+              log(`  retrying ${table} page (attempt ${attempt}/${retries}): ${message}`);
+            },
+            undefined,
+            retries,
+          );
+          if (
+            !page ||
+            !Array.isArray(page.rows) ||
+            !(page.nextCursor === null || typeof page.nextCursor === "string")
+          )
+            throw incomplete(`legacy server returned a malformed page for ${table}`);
+          if (page.nextCursor && (page.nextCursor === cursor || page.rows.length === 0))
+            throw incomplete(`legacy cursor did not advance for ${table}`);
+          const fetchedRows = page.rows as Array<Record<string, unknown>>;
+          if (!spool) throw incomplete(`no SQL spool for ${table}`);
+          await spool.append(fetchedRows);
+          retainMetadata(table, fetchedRows);
+          count += fetchedRows.length;
+          cursor = page.nextCursor ?? undefined;
+          if (cursor) reportProgress();
+        } while (cursor);
 
-    if (!spool) tableRows[table] = rows;
-    if (additionalSpools.has(table)) await spool?.seal();
-    tableCounts[table] = count;
-    log(`exported ${table}: ${count} rows`);
-  }
+        if (additionalSpools.has(table)) await spool?.seal();
+        tableCounts[table] = count;
+        log(`exported ${table}: ${count} rows`);
+      }
+
+      return { ...tableCounts };
+    },
+  });
+  // Source counts are immutable evidence even when the archive intentionally
+  // prunes history or materializes an independently readable file dependency.
+  sqlCapture.tables = { ...sqlCapture.tables };
+  for (const table of ADDITIONAL_SPOOLED_TABLES) await spoolFor(table)?.seal();
 
   if (!includeHistory) {
     await pruneToCurrentState(
@@ -675,6 +749,7 @@ async function exportFullWithSpool(
       fieldValuesSpool,
       commitsSpool,
       commitIds,
+      additionalSpools,
     );
   } else {
     await commitsSpool.seal();
@@ -688,6 +763,9 @@ async function exportFullWithSpool(
       tableCounts.commentMentions = await mentions.filter((row) => keptComments.has(row.commentId));
   }
 
+  // A native snapshot pins all SQL rows in one transaction. The following
+  // reference validation also protects against malformed scoped data, and is
+  // especially important for the explicitly weaker legacy pagination path.
   // A real, actively-used space keeps changing WHILE a large backup is
   // running (this one alone took over an hour): `dump.exportTables` for each
   // table is its own independent, paginated snapshot query, taken at whatever
@@ -1068,20 +1146,70 @@ async function exportFullWithSpool(
 
   // Physical rows are the complete byte registry. Assets cover only a subset:
   // attachments with no Asset still belong in a disaster-recovery archive.
-  const attachmentRows = tableRows.attachments ?? [];
+  const attachmentMaterializations: NonNullable<Manifest["attachmentMaterializations"]> = [];
+  const dependencyDownloads = new Map<string, string>();
+  const materializedRows: Array<Record<string, unknown>> = [];
+  tableRows.attachments ??= [];
+  const attachmentRows = tableRows.attachments;
   const attachmentsById = new Map(
     attachmentRows.map((attachment) => [attachment.id as string, attachment]),
   );
   const assetsByAttachmentId = new Map<string, Record<string, unknown>>();
   for (const asset of tableRows.assets ?? []) {
-    if (!assetsByAttachmentId.has(asset.attachmentId as string))
+    const prior = assetsByAttachmentId.get(asset.attachmentId as string);
+    if (
+      !prior ||
+      Buffer.compare(Buffer.from(asset.id as string), Buffer.from(prior.id as string)) < 0
+    )
       assetsByAttachmentId.set(asset.attachmentId as string, asset);
-    if (!attachmentsById.has(asset.attachmentId as string)) {
-      throw incomplete(
-        `asset ${asset.id} has no exported attachment row; upgrade an older server or repair the source registry before backing up`,
-      );
-    }
   }
+  const dependenciesById = new Map(
+    snapshotDependencies.map((entry) => [entry.attachmentId, entry]),
+  );
+  for (const entry of snapshotDependencies)
+    if (attachmentsById.has(entry.attachmentId))
+      throw incomplete(
+        `snapshot returned an unnecessary attachment projection for raw row ${entry.attachmentId}`,
+      );
+  for (const [attachmentId, asset] of assetsByAttachmentId) {
+    if (attachmentsById.has(attachmentId)) continue;
+    let dependency = dependenciesById.get(attachmentId);
+    if (!dependency && sqlCapture.mode === "legacy-paginated") {
+      const copy = (
+        client.dump as unknown as {
+          exportAssetAttachment?: (input: { assetId: string }) => Promise<SnapshotDependency>;
+        }
+      ).exportAssetAttachment;
+      if (typeof copy === "function")
+        dependency = await fetchPageWithRetry(
+          () => copy({ assetId: asset.id as string }),
+          undefined,
+          isTransientError,
+          retries,
+        );
+    }
+    if (!dependency)
+      throw incomplete(
+        `asset ${asset.id} has no exported attachment row or authorized snapshot dependency; upgrade the server or repair the source registry`,
+      );
+    const materialized = materializeAttachmentDependency(dependency, asset, spaceId, sourceHost);
+    materializedRows.push(materialized.row);
+    attachmentRows.push(materialized.row);
+    attachmentsById.set(attachmentId, materialized.row);
+    attachmentMaterializations.push(materialized.receipt);
+    dependencyDownloads.set(attachmentId, dependency.downloadUrl);
+    dependenciesById.delete(attachmentId);
+  }
+  if (dependenciesById.size > 0)
+    throw incomplete("snapshot supplied an attachment dependency with no matching source Asset");
+  const attachmentTableSpool = additionalSpools.get("attachments");
+  if (!attachmentTableSpool) throw incomplete("missing attachment table spool");
+  if (materializedRows.length) await attachmentTableSpool.mergeValidatedRows(materializedRows);
+  tableCounts.attachments = attachmentRows.length;
+  if (attachmentMaterializations.length)
+    log(
+      `materialized ${attachmentMaterializations.length} readable attachment dependencies as owned public-file projections; foreign ownership and metadata were not exported`,
+    );
   const uniqueAttachments = [
     ...new Map(
       attachmentRows.map((attachment) => [attachment.storageKey as string, attachment]),
@@ -1112,7 +1240,12 @@ async function exportFullWithSpool(
       registeredHashes.get(attachment.storageKey as string),
     ]),
   );
-  const recoveredBlobs = await attachmentBlobs.recover(allowedAttachmentKeys);
+  // A cache receipt proves only cached bytes. Unknown source hashes on legacy
+  // mutable keys require a fresh download from this SQL capture's identity.
+  const reusableAttachmentKeys = new Map(
+    [...allowedAttachmentKeys].filter(([, expected]) => expected !== undefined),
+  );
+  const recoveredBlobs = await attachmentBlobs.recover(reusableAttachmentKeys);
   let blobCount = recoveredBlobs.count;
   let blobBytes = recoveredBlobs.bytes;
   const skippedAttachments: string[] = [];
@@ -1126,7 +1259,9 @@ async function exportFullWithSpool(
   let attachmentRouteAvailable = typeof client.dump.exportAttachment === "function";
   const prefetched = new Map<string, ExportAttachmentVO>();
   const firstAttachment = uniqueAttachments.find(
-    (attachment) => !recoveredBlobs.keys.has(attachment.storageKey as string),
+    (attachment) =>
+      !recoveredBlobs.keys.has(attachment.storageKey as string) &&
+      !dependencyDownloads.has(attachment.id as string),
   );
   if (attachmentRouteAvailable && firstAttachment) {
     try {
@@ -1163,10 +1298,17 @@ async function exportFullWithSpool(
           let downloadUrl: string;
           let mimeType = attachment.mimeType as string;
           let registeredHash = registeredHashes.get(key);
-          if (attachmentRouteAvailable) {
+          const dependencyUrl = dependencyDownloads.get(attachment.id as string);
+          if (dependencyUrl) {
+            downloadUrl = dependencyUrl;
+          } else if (attachmentRouteAvailable) {
             const info =
               prefetched.get(attachment.id as string) ??
-              (await client.dump.exportAttachment({ attachmentId: attachment.id as string }));
+              (await client.dump
+                .exportAttachment({ attachmentId: attachment.id as string })
+                .catch((error: unknown) => {
+                  throw deletedAfterSnapshot(error, `attachment ${attachment.id}`);
+                }));
             prefetched.delete(attachment.id as string);
             if (info.storageKey !== key || info.attachmentId !== attachment.id)
               throw new BackupContentIntegrityError(
@@ -1215,7 +1357,11 @@ async function exportFullWithSpool(
     async (settled, attachment) => {
       reportBlobProgress();
       if (!settled.ok) {
-        if (settled.error instanceof BackupContentIntegrityError) throw settled.error;
+        if (
+          settled.error instanceof BackupContentIntegrityError ||
+          settled.error instanceof SourceDeletedAfterSnapshotError
+        )
+          throw settled.error;
         throw incomplete(
           `could not download attachment ${attachment.id} after retries (${settled.error instanceof Error ? settled.error.message : String(settled.error)})`,
         );
@@ -1270,7 +1416,10 @@ async function exportFullWithSpool(
   );
   const textBlobs = await RawBlobSpool.open(assetTextSpoolPath, "asset-texts", resume);
   blobSpools.push(textBlobs);
-  const recoveredTexts = await textBlobs.recover(allowedTextKeys);
+  const reusableTextKeys = new Map(
+    [...allowedTextKeys].filter(([, expected]) => expected !== undefined),
+  );
+  const recoveredTexts = await textBlobs.recover(reusableTextKeys);
   // Seeded with what a previous run already wrote, so the content-addressed
   // dedupe below still holds across the resume boundary.
   const seenTextKeys = new Set<string>(recoveredTexts.keys);
@@ -1295,9 +1444,11 @@ async function exportFullWithSpool(
       // dropping it.
       await fetchPageWithRetry(
         async () => {
-          const info = await client.dump.exportAssetText({
-            assetId: assetText.assetId as string,
-          });
+          const info = await client.dump
+            .exportAssetText({ assetId: assetText.assetId as string })
+            .catch((error: unknown) => {
+              throw deletedAfterSnapshot(error, `text for asset ${assetText.assetId}`);
+            });
           // No separate object to archive (auto-registered row, or `status: "none"`).
           if (!info.downloadUrl) {
             const key = assetText.textStorageKey;
@@ -1349,7 +1500,11 @@ async function exportFullWithSpool(
       const assetId = assetText.assetId as string;
       if (!settled.ok) {
         const { error } = settled;
-        if (error instanceof BackupContentIntegrityError) throw error;
+        if (
+          error instanceof BackupContentIntegrityError ||
+          error instanceof SourceDeletedAfterSnapshotError
+        )
+          throw error;
         throw incomplete(
           `could not download text for asset ${assetId} after retries (${error instanceof Error ? error.message : String(error)})`,
         );
@@ -1388,16 +1543,12 @@ async function exportFullWithSpool(
     );
     await textBlobs.finish(writer, [...seenTextKeys]);
     for (const table of IMPORT_ORDER) {
-      // `--no-history` never fetched these tables at all (see `tables` above)
-      // — omit the entry entirely rather than writing an empty one, matching
-      // the archive's previous shape for a `--no-history` backup.
+      // Every supported SQL table has a raw spool, including an empty table
+      // after deliberate history pruning. Never write compact indexes here.
       if (!tables.includes(table)) continue;
       const spool = spoolFor(table);
-      if (spool) {
-        await spool.writeArchive(writer, `tree/${table}.ndjson`);
-      } else {
-        await writeNdjsonEntry(writer, `tree/${table}.ndjson`, tableRows[table] ?? []);
-      }
+      if (!spool) throw incomplete(`missing raw SQL table spool for ${table}`);
+      await spool.writeArchive(writer, `tree/${table}.ndjson`);
     }
     for (const doc of docBodyEntries) {
       await writer.addBuffer(`docs/${doc.nodeId}.${doc.html ? "html" : "md"}`, doc.body);
@@ -1424,6 +1575,8 @@ async function exportFullWithSpool(
       blobBytes,
       textBlobCount,
       textBlobBytes,
+      sqlCapture,
+      ...(attachmentMaterializations.length ? { attachmentMaterializations } : {}),
     };
     return await writer.finalize(manifestWithoutChecksum);
   } catch (error) {

@@ -154,12 +154,13 @@ describe("archive version compatibility", () => {
 
   it("accepts existing version 1 archives and the rich-content version", () => {
     expect(ManifestSchema.parse({ ...manifest, formatVersion: 1 }).formatVersion).toBe(1);
+    expect(ManifestSchema.parse({ ...manifest, formatVersion: 2 }).formatVersion).toBe(2);
     expect(ManifestSchema.parse({ ...manifest, formatVersion: FORMAT_VERSION }).formatVersion).toBe(
-      2,
+      3,
     );
   });
 
   it("refuses versions whose required restore behavior is unknown", () => {
-    expect(() => ManifestSchema.parse({ ...manifest, formatVersion: 3 })).toThrow();
+    expect(() => ManifestSchema.parse({ ...manifest, formatVersion: 4 })).toThrow();
   });
 });

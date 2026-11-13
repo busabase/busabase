@@ -286,9 +286,9 @@ busabase-cli api --method get --path /nodes        # raw OpenAPI passthrough
 
 Run `busabase-cli --help` for the full command list.
 
-New full backups use archive format 2 so HTML, whiteboard, and workflow storage
-objects cannot be silently skipped by an older restore client. Use the updated
-CLI for restore; it also accepts existing format 1 archives. Restore rejects
+New full backups use archive format 3. Consistent snapshots require the updated
+server and CLI to retain six-digit timestamp precision and original view metadata. Older clients refuse the new format; the updated CLI still reads
+existing format 1 and 2 archives. Restore rejects
 unsupported table declarations and unknown content entries instead of silently
 skipping them; update the CLI when an archive requires newer support. Upgrade
 the server to capture physical attachments without Asset entries, archived rich
@@ -300,15 +300,38 @@ Normal empty folder readmes, unwritten rich documents, and intentional
 `--no-history` pruning are supported. Older-server fallbacks are accepted only
 when all required content remains readable.
 
+SQL rows are captured through one read-only repeatable-read transaction. The
+manifest records this SQL consistency mode and the original table counts.
+Only a missing/unsupported snapshot endpoint allows older paginated reads;
+that fallback prints a warning and records `legacy-paginated`, because it
+cannot guarantee a consistent view while the workspace changes. A dropped
+snapshot discards every captured SQL row before retrying the whole transaction.
+This SQL guarantee does not pin stored document or file bytes to the same
+instant: those are read separately, and registered hashes are checked.
+
+Some readable legacy Assets refer to a physical registration owned outside
+the space. Their accessible file content can be backed up as an owned public-file
+projection, retaining the Asset and attachment ids. Foreign ownership, context
+and arbitrary metadata are excluded. `attachmentMaterializations` records each
+projection and its own-Asset provenance; these rows are not copies of the
+original foreign registration. Unreadable dependencies still fail the backup.
+
 The archive is finalized in a private sibling staging directory, then atomically
 renamed to the requested output path. A failed attempt preserves an existing
 verified backup. Successful blob downloads remain resumable after a failed
-attempt; rerun with `--resume` to reuse that cache.
+attempt; rerun with `--resume` to reuse that cache when its bytes and the current
+source registration's SHA match. Legacy keys without a registered SHA are
+downloaded again, even when a cached file passes its own checksum.
 
 `restore --dry-run` verifies the archive without sending restore requests. It
 does not check whether the target is reachable or empty. A normal restore checks
 the target before writing. `--resume` continues the same archive into the same
-space; it does not make a different archive safe to merge.
+space; it does not make a different archive safe to merge. New archives and
+all resumes require the target to acknowledge exact replay support. A resume
+first validates every existing SQL row against the verified archive and requires
+all 35 table acknowledgements before writing any file or document. The target
+binds recovery to the archive checksum; completed recovery cannot be resumed
+with a different archive.
 Resume rechecks the references and physical files of already restored rows,
 including when replay inserts zero new rows. Missing data keeps recovery held
 until it is repaired.

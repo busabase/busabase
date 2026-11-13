@@ -78,14 +78,17 @@ interface RecordedImport {
 function createFakeImportClient(recorded: RecordedImport[]): BusabaseClient {
   return {
     dump: {
-      importBegin: async () => ({ sessionId: "sess_test" }),
+      importBegin: async () => ({ sessionId: "sess_test", exactReplayProtocol: 1 }),
       importTables: async ({
         table,
-        rows,
+        rows: nestedRows,
+        rowsJson,
       }: {
         table: string;
-        rows: Array<Record<string, unknown>>;
+        rows?: Array<Record<string, unknown>>;
+        rowsJson?: string;
       }) => {
+        const rows = rowsJson === undefined ? (nestedRows ?? []) : JSON.parse(rowsJson);
         recorded.push({ table, rows });
         return { inserted: rows.length };
       },
@@ -792,7 +795,10 @@ describe("exportFull -> verifyArchive -> importFull round trip", () => {
 
     expect(messages).toContain("fetched 1 doc bodies, skipped 0");
     expect(messages).toContain("fetched 2 folder readmes from 3 folders, skipped 0");
-    expect(messages.filter((m) => m.includes("WARNING"))).toEqual([]);
+    expect(messages.filter((m) => m.includes("WARNING"))).toEqual([
+      expect.stringContaining("legacy pagination"),
+    ]);
+    expect(manifest.sqlCapture?.mode).toBe("legacy-paginated");
     await expect(verifyArchive(archivePath)).resolves.toEqual(manifest);
 
     const recorded: RecordedImport[] = [];
@@ -892,7 +898,10 @@ describe("exportFull -> verifyArchive -> importFull round trip", () => {
     expect(manifest.tables.commits).toBe(2);
     // Pruning must leave the archive self-consistent — the FK drift check runs
     // after it as a safety net and must find nothing to complain about.
-    expect(messages.some((m) => m.includes("WARNING"))).toBe(false);
+    expect(messages.filter((m) => m.includes("WARNING"))).toEqual([
+      expect.stringContaining("legacy pagination"),
+    ]);
+    expect(manifest.sqlCapture?.mode).toBe("legacy-paginated");
     await expect(verifyArchive(archivePath)).resolves.toEqual(manifest);
 
     const recorded: RecordedImport[] = [];
@@ -1008,6 +1017,9 @@ describe("exportFull -> verifyArchive -> importFull round trip", () => {
     tables.attachments = Array.from({ length: total }, (_, i) => ({
       id: `att_${i}`,
       storageKey: `blobs/att_${i}.bin`,
+      contentHash: `sha256:${createHash("sha256")
+        .update(i < 2 ? `recovered-${i}` : `fresh-${i}`)
+        .digest("hex")}`,
     }));
     tables.assets = Array.from({ length: total }, (_, i) => ({
       id: `ast_${i}`,

@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-// Rich node objects are restore-critical. Version 1 readers ignore unknown
-// archive entries, so version 2 makes old CLIs reject an archive they cannot
-// restore completely. New readers continue to accept existing version 1 dumps.
-export const FORMAT_VERSION = 2;
+// Version 3 requires exact timestamp/view restore semantics and checksum-bound
+// replay protection. Older readers must refuse it before silently losing data.
+// The raw blob layout is unchanged from v2; v1/v2 archives remain readable.
+export const FORMAT_VERSION = 3;
 
 /**
  * `.bbdump` manifest — the archive's own table of contents + integrity
@@ -16,7 +16,7 @@ export const FORMAT_VERSION = 2;
  * file before any row hits the target space.
  */
 export const ManifestSchema = z.object({
-  formatVersion: z.union([z.literal(1), z.literal(FORMAT_VERSION)]),
+  formatVersion: z.union([z.literal(1), z.literal(2), z.literal(FORMAT_VERSION)]),
   toolVersion: z.string(),
   exportedAt: z.string(),
   spaceId: z.string(),
@@ -41,6 +41,32 @@ export const ManifestSchema = z.object({
    */
   textBlobCount: z.number().int().nonnegative().optional().default(0),
   textBlobBytes: z.number().int().nonnegative().optional().default(0),
+  /** SQL capture only; storage objects/documents are read and verified separately. */
+  sqlCapture: z
+    .object({
+      version: z.literal(1),
+      mode: z.enum(["repeatable-read", "legacy-paginated"]),
+      startedAt: z.string().optional(),
+      completedAt: z.string(),
+      /** Raw SQL counts before intentional history pruning or dependency projection. */
+      tables: z.record(z.string(), z.number().int().nonnegative()),
+    })
+    .optional(),
+  /** Readable content dependencies materialized as owned rows, never foreign PO copies. */
+  attachmentMaterializations: z
+    .array(
+      z.object({
+        version: z.literal(1),
+        assetId: z.string(),
+        attachmentId: z.string(),
+        sourceSpaceId: z.string(),
+        storageKey: z.string(),
+        projection: z.literal("readable-asset-content"),
+        originalAttachmentOwnershipOmitted: z.literal(true),
+        ownershipSource: z.literal("source-asset"),
+      }),
+    )
+    .optional(),
   /** sha256 hex digest — see the doc comment above for exactly what it covers. */
   checksum: z.string(),
 });

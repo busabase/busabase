@@ -70,6 +70,59 @@ describe("busabase-cli commands", () => {
     );
   });
 
+  it("keeps legacy row-array flags distinct from opaque SQL JSON strings", async () => {
+    const program = buildProgram();
+    const command = program.commands
+      .find((item) => item.name() === "dump")
+      ?.commands.find((item) => item.name() === "import-tables");
+    expect(command?.options.map((option) => option.long)).toEqual(
+      expect.arrayContaining(["--rows-json", "--opaque-rows-json"]),
+    );
+    const source =
+      '[{"id":"node","metadata":{"__proto__":{"own":true},"constructor":"literal","toJSON":"literal","array":[2,1]}}]';
+    const calls: unknown[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push(await requestBody(request));
+      return jsonResponse({ inserted: 1 });
+    }) as typeof fetch;
+    expect(
+      await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "dump",
+        "import-tables",
+        "--session-id",
+        "session",
+        "--table-json",
+        '"nodes"',
+        "--opaque-rows-json",
+        source,
+      ]),
+    ).toBe(0);
+    expect(calls[0]).toEqual(
+      expect.objectContaining({ sessionId: "session", table: "nodes", rowsJson: source }),
+    );
+    expect((calls[0] as { rows?: unknown[] }).rows ?? []).toEqual([]);
+    const legacyRows = [{ id: "legacy" }];
+    expect(
+      await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "dump",
+        "import-tables",
+        "--session-id",
+        "session",
+        "--table-json",
+        '"nodes"',
+        "--rows-json",
+        JSON.stringify(legacyRows),
+      ]),
+    ).toBe(0);
+    expect(calls[1]).toEqual(expect.objectContaining({ rows: legacyRows }));
+    expect(calls[1]).not.toHaveProperty("rowsJson");
+  });
+
   it("requires the bulk-update JSON before dispatching a request", async () => {
     global.fetch = vi.fn() as typeof fetch;
 

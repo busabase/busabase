@@ -49,8 +49,8 @@ async function* readLines(path: string): AsyncGenerator<string> {
 
 /**
  * A transient table snapshot. Table data is always fetched anew, including on
- * --resume; only content-addressed blob downloads are resumable. No caller may
- * use this for a table whose ids are needed by another exported table.
+ * --resume; only freshly hash-verified blob downloads are resumable. Callers
+ * retain necessary identity/relationship indexes separately from raw payloads.
  */
 export class SpooledTable {
   private raw: FileHandle | undefined;
@@ -80,6 +80,16 @@ export class SpooledTable {
       await rm(directory, { recursive: true, force: true });
       throw error;
     }
+  }
+
+  /** Discard an interrupted SQL transaction before capturing the next one. */
+  async reset(): Promise<void> {
+    await this.closeRaw();
+    await rm(this.rawPath, { force: true });
+    await rm(this.filteredPath, { force: true });
+    this.raw = await open(this.rawPath, "wx");
+    this.activePath = this.rawPath;
+    this.filtered = false;
   }
 
   async append(rows: readonly Row[]): Promise<void> {
@@ -142,6 +152,54 @@ export class SpooledTable {
     this.filtered = true;
     this.activePath = outputPath;
     return kept;
+  }
+
+  /** Merge validated projections in identity order without replacing any raw row. */
+  async mergeValidatedRows(rows: readonly Row[]): Promise<void> {
+    await this.closeRaw();
+    if (!this.filtered) throw new Error("Cannot extend an unvalidated table spool.");
+    const sorted = [...rows].sort((a, b) =>
+      Buffer.compare(Buffer.from(String(a.id)), Buffer.from(String(b.id))),
+    );
+    for (let i = 0; i < sorted.length; i++)
+      if (
+        typeof sorted[i].id !== "string" ||
+        !sorted[i].id ||
+        (i && sorted[i].id === sorted[i - 1].id)
+      )
+        throw new Error("Invalid or duplicate attachment projection identity.");
+    const input = this.activePath;
+    const outputPath = input === this.rawPath ? this.filteredPath : this.rawPath;
+    const handle = await open(outputPath, "w");
+    const lines = async function* () {
+      let index = 0;
+      let previous: string | undefined;
+      for await (const line of readLines(input)) {
+        const raw = JSON.parse(line) as Row;
+        if (
+          typeof raw.id !== "string" ||
+          (previous !== undefined &&
+            Buffer.compare(Buffer.from(previous), Buffer.from(raw.id)) >= 0)
+        )
+          throw new Error("Attachment source rows are not strictly identity ordered.");
+        previous = raw.id;
+        while (
+          index < sorted.length &&
+          Buffer.compare(Buffer.from(sorted[index].id as string), Buffer.from(raw.id)) < 0
+        )
+          yield `${JSON.stringify(sorted[index++])}\n`;
+        if (index < sorted.length && sorted[index].id === raw.id)
+          throw new Error("Projection would replace an original attachment row.");
+        yield `${line}\n`;
+      }
+      while (index < sorted.length) yield `${JSON.stringify(sorted[index++])}\n`;
+    };
+    try {
+      await writeLines(handle, lines());
+    } finally {
+      await handle.close();
+    }
+    this.activePath = outputPath;
   }
 
   /** Seal a table with no outgoing FK filter (e.g. commits in full-history mode). */
