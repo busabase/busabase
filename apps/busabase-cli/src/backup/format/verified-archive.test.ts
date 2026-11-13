@@ -68,10 +68,19 @@ describe("verified archive reuse", () => {
         importBegin: vi.fn(async () => {
           calls.push("begin");
           await writeFile(archivePath, "compressed source no longer exists");
-          return { sessionId: "session" };
+          return { sessionId: "session", exactReplayProtocol: 1 };
         }),
         importTables: vi.fn(
-          async ({ table, rows }: { table: string; rows: Array<Record<string, unknown>> }) => {
+          async ({
+            table,
+            rows: nestedRows,
+            rowsJson,
+          }: {
+            table: string;
+            rows?: Array<Record<string, unknown>>;
+            rowsJson?: string;
+          }) => {
+            const rows = rowsJson === undefined ? (nestedRows ?? []) : JSON.parse(rowsJson);
             calls.push(table);
             imported.push(...rows);
             return { inserted: rows.length };

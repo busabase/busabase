@@ -5,7 +5,11 @@
  */
 import { access } from "node:fs/promises";
 import type { BusabaseClient } from "busabase-sdk";
-import { exportFull, SPOOL_SUFFIXES } from "./export/full-exporter.js";
+import {
+  exportFull,
+  SourceDeletedAfterSnapshotError,
+  SPOOL_SUFFIXES,
+} from "./export/full-exporter.js";
 import { openVerifiedArchive } from "./format/archive-reader.js";
 import { assertSupportedRestoreTables, importFull } from "./import/full-importer.js";
 
@@ -60,6 +64,9 @@ const STATE_ONLY_RESTORE_MESSAGE = [
   "history, into an empty space).",
 ].join("\n");
 
+/** Snapshot retakes after a file is deleted mid-backup, before giving up. */
+const SOURCE_CHANGE_RETAKES = 3;
+
 export interface BackupCommandOptions {
   outFile: string;
   includeHistory: boolean;
@@ -104,17 +111,35 @@ export const runBackup = async (
     `Backing up space ${spaceId} → ${options.outFile} (full fidelity, history=${options.includeHistory}` +
       `${options.resume ? ", resuming" : ""})`,
   );
-  const manifest = await exportFull({
-    client,
-    outPath: options.outFile,
-    spaceId,
-    sourceHost: options.baseUrl,
-    includeHistory: options.includeHistory,
-    toolVersion: options.toolVersion,
-    resume: Boolean(options.resume),
-    retries: options.retries,
-    onProgress: (message) => reportProgress(`  ${message}`),
-  });
+  // A live workspace can delete a file while its bytes are still downloading.
+  // Retake the snapshot (which no longer has that row) and keep every verified
+  // download; each round only fetches what is new, so the window shrinks.
+  let resume = Boolean(options.resume);
+  let manifest: Awaited<ReturnType<typeof exportFull>>;
+  for (let round = 1; ; round++) {
+    try {
+      manifest = await exportFull({
+        client,
+        outPath: options.outFile,
+        spaceId,
+        sourceHost: options.baseUrl,
+        includeHistory: options.includeHistory,
+        toolVersion: options.toolVersion,
+        resume,
+        retries: options.retries,
+        onProgress: (message) => reportProgress(`  ${message}`),
+      });
+      break;
+    } catch (error) {
+      if (!(error instanceof SourceDeletedAfterSnapshotError) || round > SOURCE_CHANGE_RETAKES)
+        throw error;
+      reportProgress(
+        `  ${error.message.replace(/ No new archive was published\.$/, "")} ` +
+          `Taking a new snapshot and keeping verified downloads (${round}/${SOURCE_CHANGE_RETAKES}).`,
+      );
+      resume = true;
+    }
+  }
 
   const rows = Object.values(manifest.tables).reduce((total, count) => total + count, 0);
   if (options.json) {
@@ -159,6 +184,15 @@ export const runRestore = async (
     );
     if (manifest.fidelity !== "full") throw new Error(STATE_ONLY_RESTORE_MESSAGE);
     assertSupportedRestoreTables(manifest.tables);
+    if (manifest.sqlCapture?.mode === "legacy-paginated")
+      reportProgress(
+        "WARNING: this archive used legacy SQL pagination, which cannot guarantee a consistent view during concurrent changes.",
+      );
+    if (manifest.attachmentMaterializations?.length)
+      reportProgress(
+        `Archive includes ${manifest.attachmentMaterializations.length} readable attachment dependencies restored as owned public-file projections; original foreign ownership/metadata is intentionally absent.`,
+      );
+
     if (options.intoFolder) {
       throw new Error("--into-folder only applies to state-only archives.");
     }
@@ -188,8 +222,8 @@ export const runRestore = async (
 
     if (options.resume) {
       reportProgress(
-        "Resuming: rows already present are left alone, and this run will NOT roll back on " +
-          "failure. Only do this to continue THIS archive into THIS space.",
+        "Resuming: every existing SQL row is validated before stored objects are written. " +
+          "Mismatched data or a different archive is refused; this run will not roll back earlier progress.",
       );
     }
 
@@ -197,6 +231,7 @@ export const runRestore = async (
       client,
       archivePath: options.file,
       streamEntries: archive.streamEntries,
+      manifest,
       sourceSpaceId: manifest.spaceId,
       resume: Boolean(options.resume),
       onProgress: (message) => reportProgress(`  ${message}`),

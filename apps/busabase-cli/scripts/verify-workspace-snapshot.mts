@@ -661,12 +661,12 @@ export async function compareArchive(snapshotDirectory: string, archivePath: str
   }
   try {
     if (
-      archive.manifest.formatVersion !== 2 ||
+      ![2, 3].includes(archive.manifest.formatVersion) ||
       archive.manifest.fidelity !== "full" ||
       archive.manifest.spaceId !== metadata.source.spaceId
     )
       throw new Error(
-        "Archive comparison requires a full raw-blob v2 archive from the snapshot's space",
+        "Archive comparison requires a full raw-blob v2/v3 archive from the snapshot's space",
       );
     await archive.streamEntries(
       async (entry: { path: string; body: AsyncIterable<Buffer | string> }) => {

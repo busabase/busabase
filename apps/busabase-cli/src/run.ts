@@ -40,6 +40,7 @@ import {
   runSpaceUse,
 } from "./auth.js";
 import { runBackup, runRestore } from "./backup/commands.js";
+import { withStrictSnapshotTransport } from "./backup/export/snapshot-transport.js";
 import { banner } from "./banner.js";
 import {
   activeCredentialTarget,
@@ -222,7 +223,7 @@ function resolveConfig(
     // One wrapper serves the typed client (`createBusabaseClient` takes a
     // `fetch`) and `rawFetch`, so health / openapi / `api` retry the same way
     // every contract call does.
-    fetch: withRetry(fetch, { retries }),
+    fetch: withStrictSnapshotTransport(withRetry(fetch, { retries })),
   };
 }
 
@@ -1080,10 +1081,27 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
     const leaf = parent
       .command(name, superseded ? { hidden: true } : undefined)
       .description(description ?? route.summary ?? `${route.method} ${route.path}`);
+    // `rows` already owns --rows-json for an array. Its new opaque string
+    // sibling `rowsJson` must not register the same flag and break CLI startup.
+    const opaqueJsonFields = new Set(
+      fields
+        .filter(
+          (field) =>
+            field.kind === "string" &&
+            fields.some((sibling) => sibling.kind === "json" && `${sibling.key}Json` === field.key),
+        )
+        .map((field) => field.key),
+    );
+    const optionKey = (field: GenField) =>
+      field.kind === "json"
+        ? `${field.key}Json`
+        : opaqueJsonFields.has(field.key)
+          ? `opaque${field.key[0].toUpperCase()}${field.key.slice(1)}`
+          : field.key;
     for (const f of fields) {
       // Pinned by the command name (the union discriminator) — no flag for it.
       if (f.pinned !== undefined) continue;
-      const flag = `--${kebab(f.key)}`;
+      const flag = `--${opaqueJsonFields.has(f.key) ? "opaque-" : ""}${kebab(f.key)}`;
       // A body field named like a global flag (e.g. spaceId) is served by the global flag/header.
       if (GLOBAL_LONG_FLAGS.has(flag)) continue;
       if (f.kind === "boolean") {
@@ -1131,7 +1149,7 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
             continue;
           }
           if (GLOBAL_LONG_FLAGS.has(`--${kebab(f.key)}`)) continue;
-          const optKey = f.kind === "json" ? `${f.key}Json` : f.key;
+          const optKey = optionKey(f);
           const value = (opts as Record<string, unknown>)[optKey];
           if (value === undefined) continue;
           const parsed =

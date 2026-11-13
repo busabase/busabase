@@ -79,6 +79,15 @@ describe("full backup publishes only complete snapshots", () => {
       ),
     ).toEqual([]);
   };
+  it.each(["a/b", "a\\b", "a\0b", ".", ".."])(
+    "rejects unsafe legacy node id %s even without a stored body",
+    async (nodeId) => {
+      const client = clientFor({ nodes: [{ id: nodeId, type: "base", parentId: null }] });
+      await expect(exportFull(options(client))).rejects.toThrow(/unsafe or duplicate node id/);
+      await noPublication();
+    },
+  );
+
   const attachment = {
     id: "att_body",
     storageKey: "attachments/original.bin",

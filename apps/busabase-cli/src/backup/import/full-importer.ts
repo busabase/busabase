@@ -4,11 +4,14 @@ import type { Readable } from "node:stream";
 import type { DumpTable } from "busabase-contract/domains/dump/types";
 import type { BusabaseClient } from "busabase-sdk";
 import {
+  drainEntry,
+  openVerifiedArchive,
   readEntryText,
   type StreamedArchiveEntry,
   streamArchive,
 } from "../format/archive-reader.js";
-import { ManifestSchema } from "../format/manifest.js";
+import { type Manifest, ManifestSchema } from "../format/manifest.js";
+import { isSafeNodeIdentity } from "../node-identity.js";
 
 interface RawArchiveBlob {
   key: string;
@@ -271,6 +274,8 @@ export interface FullImportOptions {
   client: BusabaseClient;
   /** Path to a `.bbdump` archive already integrity-verified via `verifyArchive`. */
   archivePath: string;
+  /** Verified archive metadata; only a declared consistent snapshot suppresses legacy view repair. */
+  manifest?: Manifest;
   /** Replay an already verified private tar without re-decoding the original file. */
   streamEntries?: (onEntry: (entry: StreamedArchiveEntry) => Promise<void>) => Promise<void>;
   /** The archive's `manifest.spaceId` — the space it was ORIGINALLY exported from, needed so the server can remap the root node deterministically instead of guessing from row content. */
@@ -374,8 +379,8 @@ export async function streamNdjsonRows(
 function orderNodesParentFirst(rows: Array<Record<string, unknown>>) {
   const byId = new Map<string, Record<string, unknown>>();
   for (const row of rows) {
-    if (typeof row.id !== "string" || row.id.length === 0) {
-      throw new Error("Cannot restore nodes: a node has no valid id.");
+    if (!isSafeNodeIdentity(row.id)) {
+      throw new Error("Cannot restore nodes: a node id is not a safe single segment.");
     }
     if (byId.has(row.id)) {
       throw new Error(`Cannot restore nodes: duplicate node id "${row.id}" in the archive.`);
@@ -460,11 +465,133 @@ async function importNodeRows(
 export async function importFull(
   options: FullImportOptions,
 ): Promise<{ ok: boolean; warnings: string[]; notices?: string[] }> {
+  if (!options.manifest) {
+    if (options.streamEntries) {
+      let manifest: Manifest | undefined;
+      await options.streamEntries(async (entry) => {
+        if (entry.path === "manifest.json") {
+          if (manifest) throw new Error("Duplicate archive manifest.");
+          manifest = ManifestSchema.parse(JSON.parse(await readEntryText(entry.body)));
+        } else await drainEntry(entry.body);
+      });
+      if (!manifest) throw new Error("Verified archive has no manifest.");
+      return importFull({ ...options, manifest });
+    }
+    const verified = await openVerifiedArchive(options.archivePath);
+    try {
+      return await importFull({
+        ...options,
+        manifest: verified.manifest,
+        streamEntries: verified.streamEntries,
+      });
+    } finally {
+      await verified.cleanup();
+    }
+  }
   const { client, archivePath, sourceSpaceId, resume = false, onProgress } = options;
   const log = onProgress ?? (() => {});
 
-  const { sessionId, blobChunkProtocol } = await client.dump.importBegin({ sourceSpaceId, resume });
+  if (options.manifest && options.manifest.spaceId !== sourceSpaceId)
+    throw new Error("Verified manifest source space differs from the restore input.");
+  const manifest = options.manifest;
+  assertSupportedRestoreTables(manifest.tables);
+  const expectedTables = Object.fromEntries(
+    IMPORT_ORDER.map((table) => [table, manifest.tables[table] ?? 0]),
+  );
+  const preserveViewMetadata = manifest.sqlCapture?.mode === "repeatable-read";
+  const { sessionId, blobChunkProtocol, exactReplayProtocol } = await client.dump.importBegin({
+    sourceSpaceId,
+    resume,
+    sourceArchiveChecksum: manifest.checksum,
+    expectedTables,
+    ...(preserveViewMetadata ? { preserveViewMetadata: true } : {}),
+  });
   try {
+    if ((resume || manifest.formatVersion >= 3) && exactReplayProtocol !== 1)
+      throw new Error(
+        "The target server does not acknowledge exactReplayProtocol:1. Update the server before restoring this archive; no blob, document or SQL row was written.",
+      );
+    // The acknowledged modern protocol accepts opaque SQL arrays. This keeps
+    // arbitrary nested JSON keys outside generic RPC object sanitization.
+    const sqlRows = (rows: Array<Record<string, unknown>>) =>
+      exactReplayProtocol === 1 ? { rowsJson: JSON.stringify(rows) } : { rows };
+    const replay = options.streamEntries ?? ((onEntry) => streamArchive(archivePath, onEntry));
+    if (resume) {
+      log("Validating all existing SQL rows before any stored object is written");
+      const seenTables = new Set<DumpTable>();
+      const validate = async (
+        table: DumpTable,
+        rows: Array<Record<string, unknown>>,
+        expectedRows: number,
+        end = false,
+      ) => {
+        const ack = await client.dump.importTables({
+          sessionId,
+          table,
+          ...sqlRows(rows),
+          validateOnly: true,
+          ...(end ? { validationComplete: true } : {}),
+        });
+        if (
+          ack.inserted !== 0 ||
+          ack.validated !== true ||
+          ack.validationComplete !== end ||
+          ack.validatedRows !== expectedRows
+        )
+          throw new Error(
+            `Target did not acknowledge read-only exact validation for ${table}; no stored object was written.`,
+          );
+      };
+      // Confirm validateOnly acknowledgement with zero rows before handing a
+      // target any non-empty SQL batch (a partial/old implementation stays inert).
+      await validate("nodes", [], 0);
+      await replay(async (entry) => {
+        if (entry.path === ATTACHMENT_BLOBS_ENTRY || entry.path === ASSET_TEXT_BLOBS_ENTRY) {
+          await drainEntry(entry.body);
+          return;
+        }
+        if (entry.path.startsWith(TABLE_ENTRY_PREFIX) && entry.path.endsWith(TABLE_ENTRY_SUFFIX)) {
+          const table = entry.path.slice(
+            TABLE_ENTRY_PREFIX.length,
+            -TABLE_ENTRY_SUFFIX.length,
+          ) as DumpTable;
+          if (!IMPORT_ORDER.includes(table) || seenTables.has(table))
+            throw new Error(`Unsupported or duplicate SQL table in preflight: ${table}`);
+          seenTables.add(table);
+          let rowsSeen = 0;
+          const consume = table === "nodes" ? importNodeRows : streamNdjsonRows;
+          await consume(entry.body, async (rows) => {
+            rowsSeen += rows.length;
+            await validate(table, rows, rowsSeen);
+          });
+          if (rowsSeen !== expectedTables[table])
+            throw new Error(`Archive row count differs from its declared ${table} count`);
+          await validate(table, [], rowsSeen, true);
+          return;
+        }
+        if (
+          entry.path === "manifest.json" ||
+          entry.path === ATTACHMENT_BLOBS_ENTRY ||
+          entry.path === ASSET_TEXT_BLOBS_ENTRY ||
+          /^blobs\/(attachments|asset-texts)\/[a-f0-9]{64}\.(json|bin)$/.test(entry.path) ||
+          /^docs\/[^/]+\.(md|html)$/.test(entry.path) ||
+          /^rich\/[^/]+\.(html|whiteboard\.json|workflow\.json)$/.test(entry.path)
+        ) {
+          await drainEntry(entry.body);
+          return;
+        }
+        throw new Error(
+          `Unrecognized archive entry ${entry.path}; refusing to skip it during resume validation`,
+        );
+      });
+      for (const table of IMPORT_ORDER)
+        if (!seenTables.has(table)) {
+          if (expectedTables[table] !== 0)
+            throw new Error(`Archive is missing declared SQL table ${table}`);
+          await validate(table, [], 0, true);
+        }
+      log("All SQL rows passed exact read-only resume validation");
+    }
     const docBodyRows: Array<{
       nodeId: string;
       markdown: string;
@@ -474,7 +601,6 @@ export async function importFull(
 
     let pendingRawBlob: { path: string; info: RawArchiveBlob } | undefined;
     const rawKeys = new Set<string>();
-    const replay = options.streamEntries ?? ((onEntry) => streamArchive(archivePath, onEntry));
     await replay(async (entry) => {
       if (pendingRawBlob) {
         if (entry.path !== pendingRawBlob.path)
@@ -537,7 +663,7 @@ export async function importFull(
           );
         const importRows = table === "nodes" ? importNodeRows : streamNdjsonRows;
         const n = await importRows(entry.body, (rows) =>
-          client.dump.importTables({ sessionId, table, rows }),
+          client.dump.importTables({ sessionId, table, ...sqlRows(rows) }),
         );
         log(`imported ${table}: ${n} rows`);
         return;
