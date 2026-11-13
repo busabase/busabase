@@ -20,10 +20,8 @@ test("HTML preview keeps its iframe through fullscreen and pinned navigation", a
   await test.step("opens a fullscreen deep link without losing the demo query", async () => {
     await page.goto(`${HTML_PATH}&fullscreen=1`);
     await expect(page.locator("[data-topbar-current-item]")).toHaveText("Waitlist Form Prototype");
-    await expect(page.getByRole("tab", { name: "Preview" })).toHaveAttribute(
-      "data-state",
-      "active",
-    );
+    // HTML opens in reading mode: no Preview/Source switch until Edit.
+    await expect(page.getByRole("tab", { name: /^(Preview|Source)$/ })).toHaveCount(0);
     const fullscreen = fullscreenPreview(page);
     await expect(fullscreen).toBeVisible();
     await expect(fullscreen).toHaveCSS("position", "fixed");
@@ -58,9 +56,9 @@ test("HTML preview keeps its iframe through fullscreen and pinned navigation", a
 
     const topbar = page.locator("[data-dashboard-topbar]");
     const topbarActions = await Promise.all(
-      ["Pin to side panel", "Enter fullscreen", "Agent prompts", "More actions", "Save"].map(
+      ["Pin to side panel", "Enter fullscreen", "Edit", "Agent prompts", "More actions"].map(
         async (name) => {
-          const button = topbar.getByRole("button", { name });
+          const button = topbar.getByRole("button", { name, exact: name === "Edit" });
           await expect(button).toBeVisible();
           return button.boundingBox();
         },
@@ -69,22 +67,39 @@ test("HTML preview keeps its iframe through fullscreen and pinned navigation", a
     expect(topbarActions.every(Boolean)).toBe(true);
     const actionCenters = topbarActions.map((box) => (box?.y ?? 0) + (box?.height ?? 0) / 2);
     expect(Math.max(...actionCenters) - Math.min(...actionCenters)).toBeLessThan(2);
-    await expect(topbar.getByText("Saved", { exact: true })).toBeVisible();
+    // Reading mode has nothing to save.
+    await expect(topbar.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
+    await expect(page.locator("[data-rich-node-save-status]")).toHaveCount(0);
   });
 
-  await test.step("the topbar enters fullscreen, forces Preview, and exits with the floating control", async () => {
-    await page.getByRole("tab", { name: "Source" }).click();
-    await expect(page.getByRole("textbox", { name: "HTML source" })).toBeVisible();
-    await page.getByRole("button", { name: "Enter fullscreen" }).click();
-
-    const fullscreen = fullscreenPreview(page);
-    await expect(fullscreen).toBeVisible();
+  await test.step("Edit opens Source; fullscreen shows the preview and comes back to Source", async () => {
+    const topbar = page.locator("[data-dashboard-topbar]");
+    await topbar.getByRole("button", { name: "Edit", exact: true }).click();
+    const source = page.getByRole("textbox", { name: "HTML source" });
+    await expect(source).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Source" })).toHaveAttribute("data-state", "active");
+    await topbar.getByRole("button", { name: "Enter fullscreen" }).click();
+    await expect(fullscreenPreview(page)).toBeVisible();
     await expect(page.getByRole("tab", { name: "Preview" })).toHaveAttribute(
       "data-state",
       "active",
     );
+    await page.getByRole("button", { name: "Exit fullscreen" }).click();
+    await expect(fullscreenPreview(page)).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Source" })).toHaveAttribute("data-state", "active");
+    await expect(source).toBeVisible();
+    // Nothing was changed, so Cancel goes straight back to reading.
+    await topbar.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.getByRole("tab", { name: /^(Preview|Source)$/ })).toHaveCount(0);
+  });
+
+  await test.step("the topbar enters fullscreen while reading and exits with the floating control", async () => {
+    await page.getByRole("button", { name: "Enter fullscreen" }).click();
+
+    const fullscreen = fullscreenPreview(page);
+    await expect(fullscreen).toBeVisible();
     await mainPreview(page).evaluate((iframe) => {
-      iframe.setAttribute("data-e2e-iframe-identity", "main-html-after-source");
+      iframe.setAttribute("data-e2e-iframe-identity", "main-html-reading-fullscreen");
     });
     await mainPreviewFrame(page).getByPlaceholder("you@company.com").fill("owner@example.com");
     await mainPreviewFrame(page).getByRole("button", { name: "Request early access" }).click();
@@ -96,7 +111,7 @@ test("HTML preview keeps its iframe through fullscreen and pinned navigation", a
     await expect(fullscreen).toHaveCount(0);
     await expect(mainPreview(page)).toHaveAttribute(
       "data-e2e-iframe-identity",
-      "main-html-after-source",
+      "main-html-reading-fullscreen",
     );
     await expect(mainPreviewFrame(page).getByPlaceholder("you@company.com")).toHaveValue(
       "owner@example.com",
@@ -173,24 +188,36 @@ test.describe("mobile", () => {
     const header = page.locator("[data-dashboard-active-view] header");
     const topbar = page.locator("[data-dashboard-topbar]");
     await expect(page.locator("[data-topbar-current-item]")).toHaveText("Waitlist Form Prototype");
-    await expect(page.getByRole("tab", { name: "Preview" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Source" })).toBeVisible();
-    for (const surface of [header, topbar]) {
+    const expectInsideViewport = async (surface: typeof topbar, name: string) => {
       const metrics = await surface.evaluate((element) => ({
         clientWidth: element.clientWidth,
         scrollWidth: element.scrollWidth,
         rect: element.getBoundingClientRect().toJSON(),
       }));
-      expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth);
-      expect(metrics.rect.left).toBeGreaterThanOrEqual(0);
-      expect(metrics.rect.right).toBeLessThanOrEqual(390);
-    }
+      expect(metrics.scrollWidth, name).toBeLessThanOrEqual(metrics.clientWidth);
+      expect(metrics.rect.left, name).toBeGreaterThanOrEqual(0);
+      expect(metrics.rect.right, name).toBeLessThanOrEqual(390);
+    };
+    // Reading mode: Edit instead of the Preview/Source switch, and no editor header.
+    const edit = topbar.getByRole("button", { name: "Edit", exact: true });
+    await expect(edit).toBeVisible();
+    await expect(page.getByRole("tab", { name: /^(Preview|Source)$/ })).toHaveCount(0);
+    await expectInsideViewport(topbar, "reading topbar");
     const mobileShot = testInfo.outputPath("html-mobile-preview.png");
     await page.screenshot({ path: mobileShot });
     await testInfo.attach("HTML preview on mobile", {
       path: mobileShot,
       contentType: "image/png",
     });
+
+    // Editing adds the header with the Preview/Source tabs; it fits too.
+    await edit.click();
+    await expect(page.getByRole("tab", { name: "Preview" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Source" })).toBeVisible();
+    await expectInsideViewport(header, "editing header");
+    await expectInsideViewport(topbar, "editing topbar");
+    await topbar.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.getByRole("tab", { name: /^(Preview|Source)$/ })).toHaveCount(0);
 
     await page.getByRole("button", { name: "Enter fullscreen" }).click();
     const fullscreen = fullscreenPreview(page);

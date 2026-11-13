@@ -76,6 +76,13 @@ describe("self-hosted MCP catalog", () => {
     expect(names).not.toContain("comments_mark_mentions_read");
   });
 
+  it("withholds the CLI snapshot stream and attachment projection while retaining physical downloads", () => {
+    const names = publishedToolNames();
+    expect(names).not.toContain("dump_export_snapshot");
+    expect(names).not.toContain("dump_export_asset_attachment");
+    expect(names).toContain("dump_export_attachment");
+  });
+
   it("still publishes the everyday surface", () => {
     // The counterweight: the exclusions above must not have taken anything real
     // with them.

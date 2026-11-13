@@ -435,6 +435,42 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
     expect(fileDelete.status).toBe("in_review");
   });
 
+  // The reported repro: this exact command used to succeed and leave the Doc
+  // with `explicitVisibility: null` — readable by the whole space. `visibility`
+  // only reached the server for Skill/Drive/AirApp. One type per create route:
+  // `POST /docs`, `POST /bases`, and the generic node change request (folder).
+  it.each([
+    ["doc", ["--body", "hi"]],
+    ["base", ["--field", "title:Title:text"]],
+    ["folder", []],
+  ] as const)(
+    "honours --visibility private on `nodes create --type %s --auto-merge`",
+    async (type, extra) => {
+      const slug = `cli-private-${type}`;
+      const created = (await cli(
+        "nodes",
+        "create",
+        "--type",
+        type,
+        "--slug",
+        slug,
+        "--name",
+        `Private ${type}`,
+        ...extra,
+        "--visibility",
+        "private",
+        "--auto-merge",
+      )) as Record<string, unknown>;
+      // Nothing to report: the task confirmed the value took.
+      expect(created).not.toHaveProperty("visibilityWrite");
+
+      const detail = (await cli("nodes", "get", "--node-id", slug, "--type", type)) as {
+        node: { explicitVisibility: string | null };
+      };
+      expect(detail.node.explicitVisibility).toBe("private");
+    },
+  );
+
   it("runs full-text search (`busabase-cli search`)", async () => {
     const result = (await cli("search", "--query", "AI", "--limit", "5")) as {
       results: unknown[];
