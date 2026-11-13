@@ -498,6 +498,68 @@ describe("node ACL", () => {
     });
   });
 
+  it("lets only a change-request author withdraw their own pending proposal", async () => {
+    await seedScenario("acl-withdraw-own-change-request");
+    const raw: RawClient = createRouterClient(busabaseRouter);
+
+    const { baseId, nodeId } = await asManager("alice", async () => {
+      const base = await raw.bases.create({
+        name: "Proposals",
+        slug: "proposals-base",
+        autoMerge: true,
+      });
+      if ("status" in base) throw new Error("expected materialized base");
+      await raw.bases.createField({ baseId: base.id, name: "title", slug: "title", type: "text" });
+      await raw.nodes.updateVisibility({ nodeId: base.nodeId, visibility: "private" });
+      return { baseId: base.id, nodeId: base.nodeId };
+    });
+
+    for (const principalId of ["bob", "carol"]) {
+      await asManager("alice", () =>
+        raw.nodes.principals.add({
+          nodeId,
+          principalType: "user",
+          principalId,
+          role: "changeRequest",
+        }),
+      );
+    }
+
+    const own = await asMember("bob", () =>
+      raw.bases.createChangeRequest({
+        baseId,
+        fields: { title: "Bob's proposal" },
+        // The authenticated context, not this caller field, owns the CR.
+        submittedBy: "forged-author",
+      }),
+    );
+    expect(own.submittedBy).toBe("bob");
+    await asMember("bob", async () => {
+      const detail = await raw.changeRequests.get({ changeRequestId: own.id });
+      expect(detail?.viewerCanApprove).toBe(false);
+      expect(detail?.viewerCanClose).toBe(true);
+      const review = await raw.changeRequests.review({
+        changeRequestIds: [own.id],
+        verdict: "approved",
+      });
+      expect(review.results[0]).toMatchObject({ ok: false, code: "FORBIDDEN" });
+      expect((await raw.changeRequests.close({ changeRequestId: own.id })).status).toBe("rejected");
+    });
+
+    const pending = await asMember("bob", () =>
+      raw.bases.createChangeRequest({ baseId, fields: { title: "Still Bob's" } }),
+    );
+    await asMember("carol", async () => {
+      const detail = await raw.changeRequests.get({ changeRequestId: pending.id });
+      expect(detail?.viewerCanClose).toBe(false);
+      await expect(raw.changeRequests.close({ changeRequestId: pending.id })).rejects.toMatchObject(
+        {
+          code: "FORBIDDEN",
+        },
+      );
+    });
+  });
+
   it("uses member/viewer workspace roles as the visible-node baseline and gates review/merge", async () => {
     await seedScenario("acl-space-role-baseline");
     const raw: RawClient = createRouterClient(busabaseRouter);

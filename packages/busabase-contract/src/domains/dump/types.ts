@@ -75,6 +75,94 @@ export const ExportTablesVOSchema = z.object({
 });
 export type ExportTablesVO = z.infer<typeof ExportTablesVOSchema>;
 
+/** One READ ONLY REPEATABLE READ SQL cut; storage objects are not transactional. */
+export const ExportSnapshotInputSchema = z
+  .object({ limit: z.number().int().positive().max(2000).optional().default(500) })
+  .strict();
+export type ExportSnapshotInput = z.infer<typeof ExportSnapshotInputSchema>;
+
+/** A content-only dependency owned by the readable Asset, never its foreign PO. */
+export const ExportAssetAttachmentInputSchema = z.object({ assetId: z.string().min(1) }).strict();
+export type ExportAssetAttachmentInput = z.infer<typeof ExportAssetAttachmentInputSchema>;
+export const ExportAssetAttachmentVOSchema = z
+  .object({
+    assetId: z.string().min(1),
+    attachmentId: z.string().min(1),
+    /** Signed from the captured key with a requested 24-hour lifetime; bytes are not pinned. */
+    downloadUrl: z.string().min(1),
+    materializedAttachment: z
+      .object({
+        id: z.string().min(1),
+        spaceId: z.string().min(1),
+        storageKey: z.string().min(1),
+        fileName: z.string(),
+        mimeType: z.string(),
+        sizeBytes: z.number().int().nonnegative(),
+        contentHash: z.string().nullable(),
+        context: z.literal("busabase-backup-dependency"),
+        userId: z.string(),
+        metadata: z
+          .object({
+            busabaseBackupDependency: z
+              .object({
+                version: z.literal(1),
+                sourceAssetId: z.string().min(1),
+                sourceAttachmentId: z.string().min(1),
+                sourceSpaceId: z.string().min(1),
+                projection: z.literal("readable-asset-content"),
+                originalAttachmentOwnershipOmitted: z.literal(true),
+              })
+              .strict(),
+          })
+          .strict(),
+        createdAt: z.string().datetime(),
+        updatedAt: z.string().datetime(),
+      })
+      .strict(),
+  })
+  .strict();
+export type ExportAssetAttachmentVO = z.infer<typeof ExportAssetAttachmentVOSchema>;
+
+export const ExportSnapshotEventVOSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("start"),
+      version: z.literal(1),
+      spaceId: z.string().min(1),
+      startedAt: z.string().datetime(),
+      tables: z.array(DumpTableSchema),
+      columns: z.record(DumpTableSchema, z.array(z.string().min(1))),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("rows"),
+      table: DumpTableSchema,
+      /** Opaque JSON array: generic RPC object sanitizers must not discard legal user keys. */
+      rowsJson: z.string().min(2),
+      count: z.number().int().positive(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("tableEnd"),
+      table: DumpTableSchema,
+      count: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({ type: z.literal("attachmentDependency"), dependency: ExportAssetAttachmentVOSchema })
+    .strict(),
+  z
+    .object({
+      type: z.literal("complete"),
+      tables: z.record(DumpTableSchema, z.number().int().nonnegative()),
+      attachmentDependencies: z.number().int().nonnegative(),
+    })
+    .strict(),
+]);
+export type ExportSnapshotEventVO = z.infer<typeof ExportSnapshotEventVOSchema>;
+
 /** A physical object in this space, including legacy rows referenced by its Assets. */
 export const ExportAttachmentInputSchema = z.object({ attachmentId: z.string().min(1) });
 export type ExportAttachmentInput = z.infer<typeof ExportAttachmentInputSchema>;
@@ -184,6 +272,15 @@ export const ExportDocBodiesVOSchema = z.object({
 export type ExportDocBodiesVO = z.infer<typeof ExportDocBodiesVOSchema>;
 
 export const ImportBeginInputSchema = z.object({
+  /** Verified manifest checksum; mandatory for exact replay of interrupted imports. */
+  sourceArchiveChecksum: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  /** Archive SQL inventory including materialized dependencies; omitted tables mean zero. */
+  expectedTables: z.partialRecord(DumpTableSchema, z.number().int().nonnegative()).optional(),
+  /** Modern SQL snapshots retain exact view positions/configuration; legacy imports keep migration defaults. */
+  preserveViewMetadata: z.boolean().optional().default(false),
   /**
    * The space id the archive was ORIGINALLY exported from (`manifest.spaceId`
    * in the `.bbdump`, already integrity-verified before this is called).
@@ -207,15 +304,9 @@ export const ImportBeginInputSchema = z.object({
    * archive's rows had landed, and every subsequent attempt is refused
    * ("requires an empty target space") with no way forward except wiping it.
    *
-   * In this mode the empty-space guard is skipped and inserts become
-   * `ON CONFLICT DO NOTHING`, so replaying the same archive re-lands only what
-   * is missing. Blobs and doc bodies are content-addressed writes to object
-   * storage and were already idempotent.
-   *
-   * DANGEROUS if pointed at the wrong space: rows that collide are silently
-   * skipped rather than reported, so restoring archive A into a space holding
-   * archive B's data would interleave the two instead of refusing. Only pass
-   * it to continue the SAME archive into the SAME space.
+   * Requires archive identity and inventory. Before replaying any object or
+   * row, validateOnly batches and a validationComplete acknowledgement for
+   * every SQL table must establish exact values and identity coverage.
    */
   resume: z.boolean().optional().default(false),
 });
@@ -223,6 +314,8 @@ export type ImportBeginInput = z.infer<typeof ImportBeginInputSchema>;
 
 export const ImportBeginVOSchema = z.object({
   sessionId: z.string(),
+  /** Never send validateOnly to older servers that could silently write it. */
+  exactReplayProtocol: z.literal(1).optional(),
   /** Large blobs may be sent as bounded, session-scoped multipart chunks only when this capability is present. */
   blobChunkProtocol: z.literal(1).optional(),
 });
@@ -250,18 +343,27 @@ export type ImportBeginVO = z.infer<typeof ImportBeginVOSchema>;
  */
 export const ImportTablesInputSchema = z.object({
   sessionId: z.string(),
+  /** Read-only SQL preflight; requires exactReplayProtocol:1. */
+  validateOnly: z.boolean().optional().default(false),
+  /** End a table with rows:[]; empty tables also require this acknowledgement. */
+  validationComplete: z.boolean().optional().default(false),
   table: z.union([
     DumpTableSchema,
     z.literal("docBodies"),
     z.literal("attachmentBlobs"),
     z.literal("assetTextBlobs"),
   ]),
-  rows: z.array(z.record(z.string(), z.unknown())),
+  /** Opaque JSON avoids RPC serialization dropping legal nested keys such as __proto__. SQL tables only. */
+  rowsJson: z.string().optional(),
+  rows: z.array(z.record(z.string(), z.unknown())).optional().default([]),
 });
 export type ImportTablesInput = z.infer<typeof ImportTablesInputSchema>;
 
 export const ImportTablesVOSchema = z.object({
   inserted: z.number().int().nonnegative(),
+  validated: z.literal(true).optional(),
+  validationComplete: z.boolean().optional(),
+  validatedRows: z.number().int().nonnegative().optional(),
 });
 export type ImportTablesVO = z.infer<typeof ImportTablesVOSchema>;
 

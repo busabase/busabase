@@ -6,7 +6,8 @@ import type { HtmlDocument } from "busabase-contract/domains/rich-node/types";
 import type { NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
-import { Eye, FileCode2, Save } from "lucide-react";
+import { Eye, FileCode2 } from "lucide-react";
+import { registerPopstateInterceptor } from "openlib/ui/dashboard";
 import { useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
@@ -37,11 +38,107 @@ import {
   RichNodeNotFound,
   RichNodeReviewLink,
   richNodeActionClusterClass,
-  richNodeSaveStatusClass,
   richNodeSaveStatusLabel,
   useNodeContentSave,
   useServerDocumentSync,
 } from "./rich-node-shell";
+
+const historyPositionKey = "__busabaseHtmlHistoryPosition";
+const readHistoryPosition = (state: unknown = window.history.state) => {
+  const position =
+    state && typeof state === "object" && historyPositionKey in state
+      ? state[historyPositionKey]
+      : null;
+  return typeof position === "number" && Number.isSafeInteger(position) ? position : null;
+};
+let historyGuard: {
+  current: ((event: PopStateEvent) => void) | null;
+  protect?: (event: PopStateEvent) => void;
+  position?: number;
+  restoringPosition?: number | null;
+  trackingLegacyHistory?: boolean;
+} = { current: null };
+const nativeHistoryNavigation = () => {
+  const navigation = window.navigation;
+  return !historyGuard.trackingLegacyHistory &&
+    readHistoryPosition() === null &&
+    typeof navigation?.addEventListener === "function" &&
+    typeof navigation.removeEventListener === "function" &&
+    navigation.currentEntry?.url === window.location.href
+    ? navigation
+    : null;
+};
+if (typeof window !== "undefined") {
+  // Keep the forwarding cell through development hot reloads. The shared
+  // browser-location module installs the listener before router subscriptions.
+  const key = Symbol.for("busabase.html-history-guard");
+  const registry = window as unknown as Record<symbol, typeof historyGuard | undefined>;
+  const existing = registry[key];
+  if (existing) {
+    historyGuard = existing;
+  } else {
+    registry[key] = historyGuard;
+  }
+  registerPopstateInterceptor((event) => historyGuard.current?.(event));
+  if (historyGuard.position === undefined) {
+    const storedPosition = readHistoryPosition();
+    historyGuard.position = storedPosition ?? window.navigation?.currentEntry?.index ?? 0;
+    historyGuard.trackingLegacyHistory = nativeHistoryNavigation() === null;
+    historyGuard.restoringPosition = null;
+    let writingPosition = false;
+    const stampPosition = () => {
+      if (
+        !historyGuard.trackingLegacyHistory ||
+        writingPosition ||
+        readHistoryPosition() === historyGuard.position
+      )
+        return;
+      const state: unknown = window.history.state;
+      if (state !== null && typeof state !== "object") return;
+      writingPosition = true;
+      try {
+        // Preserve Next.js and other callers' state; wouter already emits these
+        // events, so no second History API patch is needed.
+        window.history.replaceState({ ...state, [historyPositionKey]: historyGuard.position }, "");
+      } finally {
+        writingPosition = false;
+      }
+    };
+    window.addEventListener("pushState", () => {
+      if (writingPosition) return;
+      historyGuard.position = (historyGuard.position ?? 0) + 1;
+      // A partially implemented Navigation API can leave currentEntry at the
+      // previous URL. Use the fallback before trusting its cancellation.
+      if (!nativeHistoryNavigation()) historyGuard.trackingLegacyHistory = true;
+      stampPosition();
+    });
+    window.addEventListener("replaceState", () => {
+      if (writingPosition) return;
+      if (!nativeHistoryNavigation()) historyGuard.trackingLegacyHistory = true;
+      stampPosition();
+    });
+    historyGuard.current = (event) => {
+      if (!historyGuard.trackingLegacyHistory) return;
+      const destinationPosition = readHistoryPosition(event.state);
+      if (historyGuard.restoringPosition !== null) {
+        // The router never saw the rejected destination. Keep the restoration
+        // traversal private too, and never ask the same question a second time.
+        event.stopImmediatePropagation();
+        historyGuard.position = destinationPosition ?? historyGuard.restoringPosition;
+        historyGuard.restoringPosition = null;
+        stampPosition();
+        return;
+      }
+      historyGuard.protect?.(event);
+      if (historyGuard.restoringPosition !== null) return;
+      // The dashboard loads this module before SPA navigation. An untagged
+      // same-document entry therefore predates its initial tagged entry.
+      historyGuard.position = destinationPosition ?? (historyGuard.position ?? 0) - 1;
+      stampPosition();
+    };
+    stampPosition();
+  }
+}
 
 /** The sandboxed HTML preview frame; also Home's welcome card when the welcome page is HTML. */
 export function HtmlPreviewSurface({
@@ -99,7 +196,7 @@ export function HtmlPreviewSurface({
   return (
     <FullscreenPreviewSurface
       aria-label={fmt(messages.richNodes.previewFrame, { name: node.name })}
-      bodyClassName={fullscreenState.fullscreen ? "bg-background p-0" : "bg-muted/20 p-3"}
+      bodyClassName="bg-background p-0"
       data-html-fullscreen={fullscreenState.fullscreen ? "true" : "false"}
       data-html-preview=""
       exitLabel={messages.airapp.exitFullscreen}
@@ -121,11 +218,8 @@ export function HtmlPreviewSurface({
       <iframe
         key={preview?.sessionId ?? "loading"}
         ref={frameRef}
-        className={
-          fullscreenState.fullscreen
-            ? "h-full w-full border-0 bg-card"
-            : "h-full w-full border border-border bg-card"
-        }
+        allowFullScreen
+        className="block h-full w-full border-0 bg-card"
         // New tabs need their own origin/COOP context; this preview remains
         // opaque and cannot read the workbench's cookies or DOM.
         sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts"
@@ -145,81 +239,192 @@ interface HtmlEditorProps {
 function HtmlEditor({ document: htmlDocument, node, orpc }: HtmlEditorProps) {
   const messages = useCoreI18n();
   const isAnonymous = useIsAnonymousVisitor();
+  const [isEditing, setIsEditing] = useState(false);
   const [source, setSource] = useState(htmlDocument.source);
-  const [selectedTab, setSelectedTab] = useState("preview");
+  const [baseline, setBaseline] = useState(htmlDocument.source);
+  const [submittedSource, setSubmittedSource] = useState<string | null>(null);
+  const [selectedTab, setSelectedTab] = useState("source");
   const fullscreenState = usePreviewFullscreen({ syncWithUrl: true });
-  const { error, markDirty, reviewRequestId, save, status } = useNodeContentSave(
+  const { error, markDirty, reset, reviewRequestId, save, status } = useNodeContentSave(
     orpc,
     node,
     "html",
   );
-  // Seed only after the real node document loads, then reconcile later updates
-  // from another tab or an agent without replacing unsaved local edits.
+  const dirty = isEditing && source !== baseline;
+  const saving = status === "saving";
+  const reviewing = status === "in_review" || status === "approved";
+
+  // Reading always uses the published document. A background update may refresh
+  // a clean editor, but cannot replace unsaved work or an unmerged proposal.
   useServerDocumentSync({
-    apply: (document: HtmlDocument) => setSource(document.source),
+    apply: (document: HtmlDocument) => {
+      setSource(document.source);
+      setBaseline(document.source);
+    },
     getLocalDocument: () => ({ version: 1 as const, source }),
     node,
     serverDocument: htmlDocument,
     status,
   });
 
-  const statusLabel = richNodeSaveStatusLabel(status, messages);
+  useEffect(() => {
+    if (isEditing && submittedSource !== null && status === "saved" && source === submittedSource) {
+      setIsEditing(false);
+      setSubmittedSource(null);
+    }
+  }, [isEditing, source, status, submittedSource]);
+
+  // Match the existing record editor's protection for refresh and link navigation.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Fullscreen rewrites the URL, so refresh the protected history entry too.
+  useEffect(() => {
+    if (!dirty && !saving) return;
+    const currentHref = window.location.href;
+    const currentHistoryPosition = historyGuard.position ?? 0;
+    const navigation =
+      typeof window.navigation?.addEventListener === "function" &&
+      typeof window.navigation.removeEventListener === "function"
+        ? window.navigation
+        : null;
+    const mayLeave = () => !saving && window.confirm(messages.richNodes.discardChanges);
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const confirmNavigation = (event: MouseEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (
+        !(anchor instanceof HTMLAnchorElement) ||
+        anchor.download ||
+        (anchor.target && anchor.target !== "_self")
+      )
+        return;
+      const target = new URL(anchor.href, window.location.href);
+      if (target.href === window.location.href || target.protocol === "javascript:") return;
+      if (!mayLeave()) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    const confirmTraversal = (event: NavigateEvent) => {
+      if (
+        !nativeHistoryNavigation() ||
+        event.navigationType !== "traverse" ||
+        !event.destination.sameDocument ||
+        !event.cancelable ||
+        new URL(event.destination.url).pathname === new URL(currentHref).pathname
+      )
+        return;
+      // Intercept before the URL changes or a router can discard the draft.
+      if (!mayLeave()) event.preventDefault();
+    };
+    const confirmHistoryNavigation = (event: PopStateEvent) => {
+      if (new URL(window.location.href).pathname === new URL(currentHref).pathname) return;
+      if (!mayLeave()) {
+        event.stopImmediatePropagation();
+        const destinationPosition = readHistoryPosition(event.state) ?? currentHistoryPosition - 1;
+        historyGuard.restoringPosition = currentHistoryPosition;
+        // Traverse back to the protected entry, in either direction. Appending
+        // an entry here would truncate Forward and change the meaning of Back.
+        window.history.go(currentHistoryPosition - destinationPosition);
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    // Keep both entry points ready: a later History API write can reveal a
+    // partial Navigation API without causing another React render.
+    navigation?.addEventListener("navigate", confirmTraversal);
+    historyGuard.protect = confirmHistoryNavigation;
+    document.addEventListener("click", confirmNavigation, true);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      navigation?.removeEventListener("navigate", confirmTraversal);
+      if (historyGuard.protect === confirmHistoryNavigation) historyGuard.protect = undefined;
+      document.removeEventListener("click", confirmNavigation, true);
+    };
+  }, [dirty, fullscreenState.fullscreen, messages.richNodes.discardChanges, saving]);
+
+  const finishEditing = () => {
+    if (saving || (dirty && !window.confirm(messages.richNodes.discardChanges))) return;
+    setIsEditing(false);
+    setSource(htmlDocument.source);
+    setBaseline(htmlDocument.source);
+    setSubmittedSource(null);
+    reset();
+  };
+  const saveDraft = async () => {
+    const submitted = source;
+    if (await save({ version: 1, source: submitted })) {
+      setBaseline(submitted);
+      setSubmittedSource(submitted);
+    }
+  };
+  const fullscreenButton = (
+    <PreviewFullscreenButton
+      fullscreenState={fullscreenState}
+      label={messages.airapp.enterFullscreen}
+    />
+  );
 
   useRegisterTopbarNodeActions(
     isAnonymous ? null : (
-      <>
-        <span
-          className={richNodeSaveStatusClass(status)}
-          data-rich-node-save-status=""
-          title={error ?? statusLabel}
-        >
-          {error ?? statusLabel}
-        </span>
-        {reviewRequestId ? <RichNodeReviewLink requestId={reviewRequestId} /> : null}
-        <div className={richNodeActionClusterClass} data-rich-node-actions="">
-          <NodePinButton
-            payload={{ nodeId: node.id }}
-            tabId={nodeSidePanelTabId("html", node.id)}
-            tabType="html-preview"
-            title={node.name}
-          />
-          <PreviewFullscreenButton
-            fullscreenState={fullscreenState}
-            label={messages.airapp.enterFullscreen}
-            onEnter={() => setSelectedTab("preview")}
-          />
-          <NodeAgentPromptsButton
-            orpc={orpc}
-            nodeId={node.id}
-            nodeName={node.name}
-            nodeType="html"
-          />
-          <NodeActionsMenu
-            nodeId={node.id}
-            nodeName={node.name}
-            nodeSlug={node.slug}
-            nodeType="html"
-            orpc={orpc}
-          />
+      <div className={richNodeActionClusterClass} data-rich-node-actions="">
+        {fullscreenButton}
+        {isEditing ? (
+          <>
+            <Button disabled={saving} onClick={finishEditing} size="sm" variant="outline">
+              {reviewing && !dirty ? messages.richNodes.returnToReading : messages.common.cancel}
+            </Button>
+            <Button
+              disabled={saving || (!dirty && (!reviewRequestId || reviewing))}
+              onClick={saveDraft}
+              size="sm"
+              title={messages.richNodes.save}
+            >
+              {saving ? messages.richNodes.saving : messages.richNodes.save}
+            </Button>
+          </>
+        ) : (
           <Button
-            aria-label={messages.richNodes.save}
-            disabled={
-              status === "saving" ||
-              status === "saved" ||
-              status === "in_review" ||
-              status === "approved"
-            }
-            onClick={() => save({ version: 1, source })}
-            size="icon-sm"
-            title={messages.richNodes.save}
-            type="button"
-            variant="default"
+            onClick={() => {
+              reset();
+              setSource(htmlDocument.source);
+              setBaseline(htmlDocument.source);
+              setSubmittedSource(null);
+              setSelectedTab("source");
+              setIsEditing(true);
+            }}
+            size="sm"
+            variant="outline"
           >
-            <Save className="size-3.5" />
+            {messages.common.edit}
           </Button>
-        </div>
-      </>
+        )}
+        <NodeAgentPromptsButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="html" />
+        <NodePinButton
+          payload={{ nodeId: node.id }}
+          tabId={nodeSidePanelTabId("html", node.id)}
+          tabType="html-preview"
+          title={node.name}
+        />
+        <NodeActionsMenu
+          nodeId={node.id}
+          nodeName={node.name}
+          nodeSlug={node.slug}
+          nodeType="html"
+          orpc={orpc}
+        />
+      </div>
     ),
+    true,
+    isAnonymous ? fullscreenButton : null,
   );
   useRegisterTopbarNodeInfo({
     description: node.description,
@@ -235,36 +440,53 @@ function HtmlEditor({ document: htmlDocument, node, orpc }: HtmlEditorProps) {
       <Tabs
         className="flex min-h-0 flex-1 flex-col"
         onValueChange={setSelectedTab}
-        value={fullscreenState.fullscreen ? "preview" : selectedTab}
+        value={isEditing && !fullscreenState.fullscreen ? selectedTab : "preview"}
       >
-        <header className="shrink-0 border-border/60 border-b px-4 py-2 md:px-6">
-          <TabsList className={PREVIEW_DETAIL_TAB_LIST_CLASS}>
-            <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="preview">
-              <Eye className="size-3.5" />
-              {messages.richNodes.preview}
-            </TabsTrigger>
-            <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="source">
-              <FileCode2 className="size-3.5" />
-              {messages.richNodes.source}
-            </TabsTrigger>
-          </TabsList>
-        </header>
+        {isEditing ? (
+          <header className="flex shrink-0 flex-wrap items-center gap-2 border-border/60 border-b px-4 py-2">
+            <TabsList className={PREVIEW_DETAIL_TAB_LIST_CLASS}>
+              <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="preview">
+                <Eye className="size-3.5" />
+                {messages.richNodes.preview}
+              </TabsTrigger>
+              <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="source">
+                <FileCode2 className="size-3.5" />
+                {messages.richNodes.source}
+              </TabsTrigger>
+            </TabsList>
+            {error || dirty || saving || reviewRequestId ? (
+              <span
+                className={error ? "text-destructive text-xs" : "text-muted-foreground text-xs"}
+                data-rich-node-save-status=""
+                role={error ? "alert" : "status"}
+              >
+                {error ?? richNodeSaveStatusLabel(status, messages)}
+              </span>
+            ) : null}
+            {reviewRequestId ? <RichNodeReviewLink requestId={reviewRequestId} /> : null}
+          </header>
+        ) : null}
         <TabsContent className="m-0 min-h-0 flex-1" value="preview">
-          <HtmlPreviewSurface fullscreenState={fullscreenState} node={node} source={source} />
-        </TabsContent>
-        <TabsContent className="m-0 min-h-0 flex-1" value="source">
-          <textarea
-            aria-label={messages.richNodes.htmlSource}
-            className="h-full w-full resize-none border-0 bg-background p-4 font-mono text-foreground text-sm leading-6 outline-none"
-            onChange={(event) => {
-              setSource(event.target.value);
-              markDirty();
-            }}
-            spellCheck={false}
-            readOnly={isAnonymous}
-            value={source}
+          <HtmlPreviewSurface
+            fullscreenState={fullscreenState}
+            node={node}
+            source={isEditing ? source : htmlDocument.source}
           />
         </TabsContent>
+        {isEditing ? (
+          <TabsContent className="m-0 min-h-0 flex-1" value="source">
+            <textarea
+              aria-label={messages.richNodes.htmlSource}
+              className="h-full w-full resize-none border-0 bg-background p-4 font-mono text-foreground text-sm leading-6 outline-none"
+              onChange={(event) => {
+                setSource(event.target.value);
+                markDirty();
+              }}
+              spellCheck={false}
+              value={source}
+            />
+          </TabsContent>
+        ) : null}
       </Tabs>
     </div>
   );

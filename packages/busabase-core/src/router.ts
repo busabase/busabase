@@ -77,6 +77,7 @@ import { getNodeSubscription, setNodeSubscription } from "./logic/node-subscript
 import { recordSearchInteraction } from "./logic/search-metrics";
 import {
   canApproveChangeRequest,
+  canCloseChangeRequest,
   closeChangeRequest,
   countChangeRequests,
   countReviewChangeRequests,
@@ -398,8 +399,11 @@ const busabaseRouterImpl: EnhancedRouter<
       }
       // Same gate review/merge/close enforce, so the client can hide controls
       // the server would refuse instead of failing on click.
-      const viewerCanApprove = await canApproveChangeRequest(changeRequest.id);
-      return { ...changeRequest, viewerCanApprove };
+      const [viewerCanApprove, viewerCanClose] = await Promise.all([
+        canApproveChangeRequest(changeRequest.id),
+        canCloseChangeRequest(changeRequest.id),
+      ]);
+      return { ...changeRequest, viewerCanApprove, viewerCanClose };
     }),
     review: busabase.changeRequests.review.handler(async ({ input }) => {
       const { changeRequestIds, ...rest } = input;

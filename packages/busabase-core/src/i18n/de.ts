@@ -841,6 +841,21 @@ export const dashboardDe: CoreI18nMessages = {
           "Eigene Domains sind für diese Bereitstellung nicht eingerichtet. Wende dich an einen Administrator.",
         empty:
           "Füge eine Domain hinzu, die dir gehört, und schließe die Einrichtung bei deinem DNS-Anbieter ab.",
+        guideToggle: "So richtest du DNS ein",
+        guideStepAdd:
+          "Gib unten die gewünschte Domain ein und klicke auf „{add}“. Am einfachsten ist eine Subdomain wie shop.company.com.",
+        guideStepDns:
+          "Lege bei deinem DNS-Anbieter (Cloudflare, IONOS, Strato, GoDaddy …) einen CNAME-Eintrag an:",
+        guideType: "Typ",
+        guideNameHint:
+          "Trage den Teil vor deiner Hauptdomain ein, z. B. shop für shop.company.com. Manche Anbieter verlangen den vollständigen Namen.",
+        guideStepCheck:
+          "Komm hierher zurück und klicke auf „{check}“. DNS-Änderungen können einige Minuten bis Stunden dauern; danach wird HTTPS automatisch eingerichtet. Wird zusätzlich ein TXT-Eintrag zur Verifizierung benötigt, erscheint er hier, sobald du die Domain hinzugefügt hast.",
+        guideRootDomain:
+          "Du willst eine Hauptdomain wie company.com nutzen? Das klappt nur, wenn dein DNS-Anbieter einen CNAME auf der Hauptdomain unterstützt (CNAME-Flattening, ALIAS oder ANAME; Cloudflare kann das). Sonst nimm eine Subdomain wie www oder shop.",
+        guideLink: "Einrichtungsanleitung öffnen",
+        recordNameHint:
+          "„Name“ zeigt die vollständige Domain. Viele DNS-Anbieter erwarten nur den Teil vor der Hauptdomain, z. B. shop für shop.company.com.",
         hostnameLabel: "Domainname",
         hostnameHint: "Gib einen Hostnamen ohne https:// oder Pfad ein.",
         invalidHostname:
@@ -859,6 +874,14 @@ export const dashboardDe: CoreI18nMessages = {
         activeHint: "DNS und HTTPS sind bereit.",
         error: "Aktion erforderlich",
         errorHint: "Prüfe die folgenden Details und versuche es erneut.",
+        // Keyed by `AirAppSiteDomainIssue`: this deployment's own findings about one domain.
+        issues: {
+          "target-missing":
+            "Eigene Domains sind für diese Bereitstellung nicht eingerichtet. Wende dich an einen Administrator.",
+          "route-unverified":
+            "Diese Domain führt noch nicht zu dieser Website. DNS-Änderungen können einige Minuten bis einige Stunden dauern.",
+          "check-failed": "Diese Domain kann gerade nicht geprüft werden. Prüfe sie erneut.",
+        },
         offlineHint:
           "Die Website ist offline. Alle Website-Adressen zeigen eine Nicht-gefunden-Seite.",
         dnsInstructions:
@@ -1623,6 +1646,8 @@ export const dashboardDe: CoreI18nMessages = {
   search: {
     all: "Inhalt",
     recent: "Zuletzt",
+    sectionSpaces: "Spaces",
+    switchToSpace: "Zu diesem Space wechseln",
     sectionRecent: "Zuletzt besucht",
     sectionElsewhere: "Anderswo in diesem Arbeitsbereich",
     sectionDocContent: "In Dokumenten",
@@ -2784,6 +2809,8 @@ export const dashboardDe: CoreI18nMessages = {
     failed: "Das Element konnte nicht verschoben werden. Bitte versuchen Sie es erneut.",
   },
   richNodes: {
+    discardChanges: "Ungespeicherte Änderungen verwerfen?",
+    returnToReading: "Zurück zur Leseansicht",
     defaultOutcome: "Standard",
     controlPanel: "Bedienfeld",
     zoomIn: "Vergrößern",

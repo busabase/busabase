@@ -110,6 +110,7 @@ const renderReview = (
   overrides: {
     auditEvents?: AuditEventVO[];
     changeRequest?: ChangeRequestVO;
+    currentUserId?: string | null;
     orpc?: BusabaseQueryUtils;
   } = {},
 ) =>
@@ -123,6 +124,7 @@ const renderReview = (
                 auditEvents={overrides.auditEvents ?? []}
                 changeRequest={overrides.changeRequest ?? changeRequest}
                 client={client}
+                currentUserId={overrides.currentUserId}
                 focusOperationId={null}
                 onApprove={() => undefined}
                 onClose={() => undefined}
@@ -165,6 +167,50 @@ describe("Change Request read-only preview", () => {
     expect(markup).toContain("Discussion");
     expect(markup).not.toContain("Comments on this change");
     expect(markup).not.toContain("No comments yet. Start the discussion below.");
+  });
+});
+
+describe("Change Request submitter actions", () => {
+  it("offers only withdrawal to a submitter who cannot review", () => {
+    const markup = renderReview(false, "member", {
+      changeRequest: {
+        ...changeRequest,
+        viewerCanApprove: false,
+        viewerCanClose: true,
+      },
+    });
+
+    expect(markup).toContain('data-testid="withdraw-change-request"');
+    expect(markup).toContain("Close change request");
+    expect(markup).not.toContain('name="cr-verdict"');
+  });
+
+  it("keeps withdrawal available while a list-seeded detail waits for close permission", () => {
+    const markup = renderReview(false, "member", {
+      currentUserId: "usr_submitter",
+      changeRequest: {
+        ...changeRequest,
+        submittedBy: "usr_submitter",
+        viewerCanApprove: false,
+      },
+    });
+
+    expect(markup).toContain('data-testid="withdraw-change-request"');
+  });
+
+  it("hides withdrawal when the server explicitly denies the submitter", () => {
+    const markup = renderReview(false, "member", {
+      currentUserId: "usr_submitter",
+      changeRequest: {
+        ...changeRequest,
+        submittedBy: "usr_submitter",
+        viewerCanApprove: false,
+        viewerCanClose: false,
+      },
+    });
+
+    expect(markup).not.toContain('data-testid="withdraw-change-request"');
+    expect(markup).toContain('data-testid="review-not-permitted"');
   });
 });
 

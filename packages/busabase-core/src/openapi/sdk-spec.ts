@@ -4,6 +4,7 @@ import { cloudContract } from "busabase-contract/contract/cloud";
 import {
   busabaseOpenApiCommonSchemas,
   busabaseOpenApiErrorResponseBodySchema,
+  nameBusabaseOpenApiEventSchemas,
 } from "busabase-contract/contract/openapi-components";
 import { isRpcOnly } from "openlib/openapi";
 
@@ -54,7 +55,7 @@ export async function getBusabaseSdkOpenApiSpec(): Promise<OpenAPI.Document> {
       },
     },
   });
-  return dropUnionObjectDefaults(spec);
+  return dropUnionObjectDefaults(nameBusabaseOpenApiEventSchemas(spec));
 }
 
 /** Keys whose value is a NAME -> thing map, where `default` is a name, not a keyword. */

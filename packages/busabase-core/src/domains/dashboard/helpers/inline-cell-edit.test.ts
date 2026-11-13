@@ -43,7 +43,7 @@ describe("which cells edit in place", () => {
     expect(canEditCellValueInline(reverse, LIST_OMITTED_FIELD_VALUE)).toBe(false);
   });
 
-  it("covers the MVP types and leaves everything else to the record", () => {
+  it("covers compact editors and leaves full-record fields to the record", () => {
     expect(
       (
         [
@@ -55,16 +55,28 @@ describe("which cells edit in place", () => {
           "url",
           "email",
           "phone",
+          "member",
           "relation",
+          "attachment",
         ] as const
       ).map((type) => getInlineCellEditorKind(field(type))),
-    ).toEqual(["text", "number", "select", "checkbox", "date", "url", "email", "tel", "relation"]);
+    ).toEqual([
+      "text",
+      "number",
+      "select",
+      "checkbox",
+      "date",
+      "url",
+      "email",
+      "tel",
+      "member",
+      "relation",
+      "attachment",
+    ]);
     for (const type of [
       "longtext",
       "markdown",
       "json",
-      "attachment",
-      "member",
       "multiselect",
       "lookup",
       "formula",
@@ -86,6 +98,9 @@ describe("which cells edit in place", () => {
     ).toBe(false);
     expect(canEditCellValueInline(field("text"), { not: "text" })).toBe(false);
     expect(canEditCellValueInline(field("number"), 129)).toBe(true);
+    expect(canEditCellValueInline(field("member"), "usr_alice")).toBe(true);
+    expect(canEditCellValueInline(field("member"), ["usr_alice", "usr_bob"])).toBe(true);
+    expect(canEditCellValueInline(field("member"), ["usr_alice", 2])).toBe(false);
     expect(canEditCellValueInline(field("text"), undefined)).toBe(true);
   });
 });

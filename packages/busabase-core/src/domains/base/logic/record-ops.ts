@@ -42,6 +42,7 @@ import {
 } from "../../../logic/live-events";
 import {
   assertBaseChangeRequestPermission,
+  createTimeVisibilityMetadata,
   hasNodePermission,
   initializeNodeAcl,
   shouldAutoMerge,
@@ -405,6 +406,8 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
       fields: parsed.fields,
       // Carried through review so materializeBaseNode honours the opt-out.
       ...(parsed.defaultView === false ? { defaultView: false } : {}),
+      // Same: materializeBaseNode copies it onto the row for initializeNodeAcl.
+      metadata: createTimeVisibilityMetadata(parsed.visibility),
       message: `Create base ${parsed.name}`,
       submittedBy: resolveActorId(CURRENT_USER_ID),
     });
@@ -430,6 +433,8 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
         slug: parsed.slug,
         name: parsed.name,
         description: parsed.description,
+        // Promoted into `explicit_visibility` by `initializeNodeAcl` below.
+        metadata: createTimeVisibilityMetadata(parsed.visibility),
         position: 0,
         createdAt,
         updatedAt: createdAt,

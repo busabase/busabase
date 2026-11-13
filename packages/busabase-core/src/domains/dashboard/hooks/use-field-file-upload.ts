@@ -43,7 +43,7 @@ export function useFieldFileUpload(field: BaseFieldVO, onUploadAttachment?: Fiel
    * others half-uploaded.
    */
   const upload = async (
-    fileList: FileList | null,
+    fileList: FileList | readonly File[] | null,
     commit: (uploaded: AssetAttachmentRef[]) => void,
   ) => {
     if (!fileList || fileList.length === 0 || !onUploadAttachment) {

@@ -101,7 +101,7 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 135 operations", async () => {
+  it("keeps the compressed public API at 146 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -228,6 +228,13 @@ describe("Busabase OpenAPI record get route", () => {
     expect(
       spec.paths?.["/api/v1/dump/export/attachments/{attachmentId}/content"]?.get,
     ).toBeDefined();
-    expect(operationCount).toBe(136);
+    // SQL repeatable-read SSE and readable-Asset dependency export (+2 -> 138).
+    // +8 -> 146: an AirApp's website is public, not only the dashboard's: state,
+    // preview (Restart), Go live, republish, unpublish, and the domain list/add/remove,
+    // so an agent can publish what it changed. The local runtime stays app-only.
+    expect(spec.paths?.["/api/v1/airapps/{nodeId}/site"]?.get).toBeDefined();
+    expect(spec.paths?.["/api/v1/airapps/{nodeId}/site/go-live"]?.post).toBeDefined();
+    expect(spec.paths?.["/api/v1/airapps/{nodeId}/site/domains/{hostname}"]?.delete).toBeDefined();
+    expect(operationCount).toBe(146);
   });
 });

@@ -61,6 +61,7 @@ const fields = [
   field("stocked", "checkbox"),
   field("launch", "date"),
   field("notes", "longtext"),
+  field("owner", "member", { multiple: false }),
   field("sku", "text"),
 ];
 
@@ -123,6 +124,7 @@ const robot = makeRecord("rec_robot", {
   launch: "2026-11-20",
   notes: "Long description",
   sku: "TT-ROBOT",
+  owner: "usr_alice",
 });
 const blocks = makeRecord("rec_blocks", {
   name: "Rainbow Stacking Blocks",
@@ -132,6 +134,7 @@ const blocks = makeRecord("rec_blocks", {
   launch: "",
   notes: "",
   sku: "TT-BLOCKS",
+  owner: "",
 });
 const relatedRecord = {
   ...makeRecord("rec_related", { name: "Related record" }),
@@ -164,13 +167,21 @@ function renderGrid({
   const onUpdateRecordCell =
     props.onUpdateRecordCell ?? vi.fn<UpdateRecordCell>(async () => merged());
   const onOpenRecord = props.onOpenRecord ?? vi.fn();
+  const client =
+    props.client ??
+    ({
+      listSpaceMembers: vi.fn().mockResolvedValue([
+        { id: "usr_alice", name: "Alice", email: "alice@example.com", image: null, role: null },
+        { id: "usr_bob", name: "Bob", email: "bob@example.com", image: null, role: null },
+      ]),
+    } as unknown as BusabaseDashboardApiClient);
   const element = (rows: RecordVO[]) =>
     harness(
       level,
       <BusaBaseTable
         activeView={null}
         base={base}
-        client={{} as BusabaseDashboardApiClient}
+        client={client}
         onCreateView={vi.fn()}
         onDeleteView={vi.fn()}
         onUpdateView={vi.fn()}
@@ -223,11 +234,135 @@ describe("selecting and moving between cells", () => {
     expect(price.className).toContain("ring-primary");
   });
 
-  it("keeps the title cell's link, so the record still opens with a click", () => {
+  it("edits the frozen title cell and renders record expansion within the first field", () => {
+    const { container, onOpenRecord, onUpdateRecordCell } = renderGrid();
+    const title = cell(container, robot.id, "name");
+    expect(title.getAttribute("aria-readonly")).toBe("false");
+    const expand = within(title).getByRole("button", {
+      name: "Open: Walking Robot Buddy",
+    });
+    expect(expand.parentElement).toBe(title);
+    fireEvent.doubleClick(title);
+    const input = editorInput(title);
+    fireEvent.change(input, { target: { value: "Walking Robot Buddy v2" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onUpdateRecordCell).toHaveBeenCalledWith(
+      robot,
+      "name",
+      "Walking Robot Buddy v2",
+      expect.anything(),
+    );
+
+    fireEvent.click(expand);
+    expect(onOpenRecord).toHaveBeenCalledWith(robot);
+  });
+
+  it("opens an Airtable-style member menu and saves the selected person", async () => {
+    const { container, onOpenRecord, onUpdateRecordCell } = renderGrid();
+    const owner = cell(container, robot.id, "owner");
+    expect(owner.getAttribute("aria-readonly")).toBe("false");
+
+    fireEvent.click(owner);
+    expect(await screen.findByRole("listbox", { name: "Owner" })).toBeTruthy();
+    expect(onOpenRecord).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("option", { name: /Bob/ }));
+
+    expect(onUpdateRecordCell).toHaveBeenCalledWith(robot, "owner", "usr_bob", {
+      baseCommitId: robot.headCommitId,
+      mergeImmediately: true,
+    });
+    await waitFor(() => expect(owner.textContent).toContain("Bob"));
+  });
+
+  it("keeps a required member session cancellable after clearing it fails validation", async () => {
+    const requiredOwner = field("owner", "member", { multiple: false }, { required: true });
+    const requiredBase = {
+      ...base,
+      fields: fields.map((current) => (current.slug === "owner" ? requiredOwner : current)),
+    };
+    const requiredRobot = { ...robot, base: requiredBase };
+    const { container, onUpdateRecordCell } = renderGrid({
+      base: requiredBase,
+      records: [requiredRobot],
+    });
+    const owner = cell(container, requiredRobot.id, "owner");
+
+    fireEvent.click(owner);
+    fireEvent.click(await screen.findByRole("option", { name: "Unassigned" }));
+    expect(screen.getByRole("alert").textContent).toContain("required");
+
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search members - Owner" }), {
+      key: "Escape",
+    });
+    await waitFor(() => expect(owner.querySelector("[data-inline-cell-editor]")).toBeNull());
+    expect(onUpdateRecordCell).not.toHaveBeenCalled();
+  });
+
+  it("does not assign the first member while an IME confirms search text", async () => {
+    const { container, onUpdateRecordCell } = renderGrid();
+    const owner = cell(container, robot.id, "owner");
+
+    fireEvent.click(owner);
+    const search = await screen.findByRole("searchbox", { name: "Search members - Owner" });
+    fireEvent.keyDown(search, { isComposing: true, key: "Enter", keyCode: 229 });
+
+    expect(onUpdateRecordCell).not.toHaveBeenCalled();
+    expect(owner.querySelector("[data-inline-cell-editor]")).not.toBeNull();
+  });
+
+  it("lets a multi-member editor remove a selected former member", async () => {
+    const members = field("owner", "member", { multiple: true });
+    const memberBase = {
+      ...base,
+      fields: fields.map((current) => (current.slug === "owner" ? members : current)),
+    };
+    const memberRobot = {
+      ...robot,
+      base: memberBase,
+      fieldUsers: {
+        usr_former: {
+          id: "usr_former",
+          name: "Former Teammate",
+          email: "former@example.com",
+          image: null,
+          role: null,
+        },
+      },
+      headCommit: {
+        ...robot.headCommit,
+        payload: { ...robot.headCommit.payload, owner: ["usr_former"] },
+      },
+    };
+    const { container } = renderGrid({ base: memberBase, records: [memberRobot] });
+    const owner = cell(container, memberRobot.id, "owner");
+
+    fireEvent.click(owner);
+    fireEvent.click(screen.getByRole("button", { name: "Remove Former Teammate" }));
+
+    expect(screen.queryByRole("button", { name: "Remove Former Teammate" })).toBeNull();
+  });
+
+  it("suppresses member candidates when loading the roster fails", async () => {
+    const client = {
+      listSpaceMembers: vi.fn().mockRejectedValue({ code: "FORBIDDEN" }),
+    } as unknown as BusabaseDashboardApiClient;
+    const { container, onUpdateRecordCell } = renderGrid({ client });
+    const owner = cell(container, robot.id, "owner");
+
+    fireEvent.click(owner);
+    expect((await screen.findByRole("alert")).textContent).toContain("do not have permission");
+    expect(screen.queryByRole("option")).toBeNull();
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: "Search members - Owner" }), {
+      key: "Enter",
+    });
+    expect(onUpdateRecordCell).not.toHaveBeenCalled();
+  });
+
+  it("expands the selected primary-field record with Space", () => {
     const { container, onOpenRecord } = renderGrid();
     const title = cell(container, robot.id, "name");
-    expect(title.getAttribute("aria-readonly")).toBe("true");
-    fireEvent.click(within(title).getByRole("link"));
+    act(() => title.focus());
+    fireEvent.keyDown(title, { key: " " });
     expect(onOpenRecord).toHaveBeenCalledWith(robot);
   });
 
@@ -257,12 +392,79 @@ describe("selecting and moving between cells", () => {
   });
 });
 
+describe("attachment cells", () => {
+  const attachmentField = field("files", "attachment");
+  const attachmentRecord = makeRecord("rec_attachment", {
+    ...robot.headCommit.payload,
+    files: [],
+  });
+
+  it("uploads a picked file and saves its asset ref through the cell update path", async () => {
+    const uploaded = {
+      id: "ast_uploaded",
+      assetId: "ast_uploaded",
+      attachmentId: "att_uploaded",
+      fileName: "release-notes.txt",
+      mimeType: "text/plain",
+      size: 12,
+      url: "/api/assets/ast_uploaded/raw",
+    };
+    const onUploadAttachment = vi.fn(async () => uploaded);
+    const onUpdateRecordCell = vi.fn<UpdateRecordCell>(async () => merged());
+    const { container } = renderGrid({
+      base: { ...base, fields: [...fields, attachmentField] },
+      onUpdateRecordCell,
+      onUploadAttachment,
+      records: [attachmentRecord],
+    });
+    const target = cell(container, attachmentRecord.id, "files");
+
+    expect(target.getAttribute("aria-readonly")).toBe("false");
+    expect(within(target).queryByRole("button", { name: "Add file" })).toBeNull();
+    fireEvent.click(target);
+    const uploadButton = within(target).getByRole("button", { name: "Add file" });
+    expect(uploadButton.querySelector("svg.lucide-paperclip")).toBeTruthy();
+    const pickerClick = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    fireEvent.click(uploadButton);
+    expect(pickerClick).toHaveBeenCalledTimes(1);
+    const input = within(target).getByLabelText("Files") as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(["release notes"], "release-notes.txt", { type: "text/plain" })] },
+    });
+
+    await waitFor(() => expect(onUploadAttachment).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(onUpdateRecordCell).toHaveBeenCalledWith(
+        attachmentRecord,
+        "files",
+        [uploaded],
+        expect.objectContaining({
+          baseCommitId: attachmentRecord.headCommitId,
+          mergeImmediately: true,
+        }),
+      ),
+    );
+  });
+
+  it("keeps attachment cells read-only when the host did not provide an uploader", () => {
+    const { container } = renderGrid({
+      base: { ...base, fields: [...fields, attachmentField] },
+      records: [attachmentRecord],
+    });
+
+    expect(cell(container, attachmentRecord.id, "files").getAttribute("aria-readonly")).toBe(
+      "true",
+    );
+  });
+});
+
 describe("relation cells", () => {
   it("keeps the add button first and retains an invalid required draft until corrected or cancelled", async () => {
     const row = makeRecord(robot.id, { ...robot.headCommit.payload, related: [relatedRecord.id] });
     const onUpdateRecordCell = vi.fn<UpdateRecordCell>(async () => merged());
     const client = {
       getBase: vi.fn(async () => relatedBase),
+      listSpaceMembers: vi.fn().mockResolvedValue([]),
       listRecordsPage: vi.fn(async () => ({ records: [relatedRecord], totalPages: 1 })),
     } as unknown as BusabaseDashboardApiClient;
     const { container } = renderGrid({
@@ -303,6 +505,7 @@ describe("relation cells", () => {
       const onUpdateRecordCell = vi.fn<UpdateRecordCell>(async () => merged());
       const client = {
         getBase: vi.fn(async () => relatedBase),
+        listSpaceMembers: vi.fn().mockResolvedValue([]),
         listRecordsPage: vi.fn(async () => ({
           records: [relatedRecord],
           total: 1,
@@ -355,6 +558,7 @@ describe("relation cells", () => {
       }));
       const client = {
         getBase: vi.fn(async () => relatedBase),
+        listSpaceMembers: vi.fn().mockResolvedValue([]),
         listRecordsPage: vi.fn(async () => ({
           records: [relatedRecord],
           total: 1,

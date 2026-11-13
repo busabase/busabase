@@ -18,9 +18,14 @@ import { create } from "zustand";
 export interface TopbarNodeActionsStoreState {
   actions: ReactNode | null;
   setActions: (actions: ReactNode | null) => void;
+  /** Reading-only controls exposed by a view to a public host, never member actions. */
+  readActions: ReactNode | null;
+  setReadActions: (actions: ReactNode | null) => void;
 }
 
 export const useTopbarNodeActionsStore = create<TopbarNodeActionsStoreState>()((set) => ({
   actions: null,
   setActions: (actions) => set({ actions }),
+  readActions: null,
+  setReadActions: (readActions) => set({ readActions }),
 }));

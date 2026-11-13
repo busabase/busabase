@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isHostSection,
   isNodeSection,
   KIND_FOR_SECTION,
   SEARCH_FILTERS,
@@ -14,6 +15,7 @@ describe("sectionsFor", () => {
   it("browses your own things with an empty query, and matches everything with one", () => {
     expect(sectionsFor("all", false)).toEqual(["recent", "apps", "skills"]);
     expect(sectionsFor("all", true)).toEqual([
+      "spaces",
       "recent",
       "workspace",
       "records",
@@ -59,12 +61,13 @@ describe("anonymous visitors", () => {
     expect(searchFiltersFor(false)).toEqual(SEARCH_FILTERS);
   });
 
-  it("never renders an apps or skills section, whichever filter is active", () => {
+  it("never renders an apps, skills or spaces section, whichever filter is active", () => {
     for (const filter of SEARCH_FILTERS) {
       for (const hasQuery of [true, false]) {
         const sections = visibleSectionsFor(filter, hasQuery, true);
         expect(sections).not.toContain("apps");
         expect(sections).not.toContain("skills");
+        expect(sections).not.toContain("spaces");
       }
     }
   });
@@ -92,9 +95,15 @@ describe("section classification", () => {
   // request is not enough on its own — each content section also pins its kind.
   it("pins a result kind for every content section", () => {
     for (const section of sectionsFor("all", true)) {
-      if (isNodeSection(section)) continue;
+      if (isNodeSection(section) || isHostSection(section)) continue;
       expect(KIND_FOR_SECTION[section]).toBeDefined();
     }
+  });
+
+  it("keeps the host-fed spaces section out of both node and search() paths", () => {
+    expect(isHostSection("spaces")).toBe(true);
+    expect(isNodeSection("spaces")).toBe(false);
+    expect(KIND_FOR_SECTION.spaces).toBeUndefined();
   });
 
   it("gives node sections no kind — they never read search() results", () => {

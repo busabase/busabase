@@ -17,6 +17,7 @@ import { rootNodeIdForSpace } from "../src/logic/kernel";
 import { hashSharePassword, verifySharePassword } from "../src/logic/node-share";
 import { busabaseRouter } from "../src/router";
 import { createDumpBusinessFixture } from "./helpers/dump-business-fixture";
+import { createExactDumpReplayFixture } from "./helpers/exact-dump-replay";
 
 type Row = Record<string, unknown>;
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
@@ -89,6 +90,7 @@ describe("business-table completeness with real PGLite", () => {
   const sourceRows = new Map<DumpTable, Row[]>();
   const targetRows = new Map<DumpTable, Row[]>();
   let passwordHash: string;
+  let sourceArchive: ReturnType<typeof createExactDumpReplayFixture>;
 
   beforeAll(async () => {
     cwd = process.cwd();
@@ -124,10 +126,14 @@ describe("business-table completeness with real PGLite", () => {
       .where(eq(busabaseNodes.id, rootNodeIdForSpace(source)));
     for (const table of DumpTableSchema.options)
       sourceRows.set(table, await exportRows(source, table));
+    sourceArchive = createExactDumpReplayFixture({
+      sourceSpaceId: source,
+      rows: Object.fromEntries(sourceRows),
+    });
     await closeDb();
     resetStorage();
     process.env.PG_DATABASE_URL = `pglite://${targetDir}`;
-    const begin = await inSpace(target, () => client.dump.importBegin({ sourceSpaceId: source }));
+    const begin = await inSpace(target, () => sourceArchive.begin(client));
     expect(await isRestoreAutomationBlocked(target)).toBe(true);
     for (const table of DUMP_IMPORT_ORDER)
       if (sourceRows.get(table)?.length)
@@ -193,9 +199,8 @@ describe("business-table completeness with real PGLite", () => {
       description: "Original root description",
       metadata: { backupNote: "Original root metadata" },
     });
-    const begun = await inSpace(target, () =>
-      client.dump.importBegin({ sourceSpaceId: source, resume: true }),
-    );
+    const begun = await inSpace(target, () => sourceArchive.begin(client, { resume: true }));
+    await inSpace(target, () => sourceArchive.preflight(client, begun.sessionId));
     for (const table of DUMP_IMPORT_ORDER)
       if (sourceRows.get(table)?.length) {
         const result = await inSpace(target, () =>
@@ -375,6 +380,7 @@ describe("business-table completeness with real PGLite", () => {
 
   it("rechecks missing bytes after resume replays only already-landed rows", async () => {
     const spaceId = "dump35-resume-missing-bytes";
+    const bytes = Buffer.from("restored");
     const row = {
       id: "att_resume_missing_bytes",
       spaceId,
@@ -382,7 +388,7 @@ describe("business-table completeness with real PGLite", () => {
       storageKey: "attachments/resume-missing-bytes.txt",
       fileName: "resume.txt",
       mimeType: "text/plain",
-      sizeBytes: 7,
+      sizeBytes: bytes.length,
     };
     const node = {
       id: "nod_resume_missing_bytes",
@@ -392,7 +398,13 @@ describe("business-table completeness with real PGLite", () => {
       slug: "resume-integrity",
       name: "Resumed document",
     };
-    const first = await inSpace(spaceId, () => client.dump.importBegin({ sourceSpaceId: spaceId }));
+    const archive = createExactDumpReplayFixture({
+      sourceSpaceId: spaceId,
+      rows: { nodes: [node], attachments: [row] },
+      blobs: [{ key: row.storageKey, bytes, mimeType: row.mimeType }],
+    });
+    const first = await inSpace(spaceId, () => archive.begin(client));
+    await inSpace(spaceId, () => archive.offerRoot(client, first.sessionId));
     await inSpace(spaceId, () =>
       client.dump.importTables({ sessionId: first.sessionId, table: "nodes", rows: [node] }),
     );
@@ -405,9 +417,8 @@ describe("business-table completeness with real PGLite", () => {
     expect(failed.ok).toBe(false);
     expect(failed.warnings.join(" ")).toMatch(/attachment.*no bytes/i);
     expect(await isRestoreAutomationBlocked(spaceId)).toBe(true);
-    const resumed = await inSpace(spaceId, () =>
-      client.dump.importBegin({ sourceSpaceId: spaceId, resume: true }),
-    );
+    const resumed = await inSpace(spaceId, () => archive.begin(client, { resume: true }));
+    await inSpace(spaceId, () => archive.preflight(client, resumed.sessionId));
     for (const [table, rows] of [
       ["nodes", [node]],
       ["attachments", [row]],
@@ -424,7 +435,7 @@ describe("business-table completeness with real PGLite", () => {
     expect(stillIncomplete.ok).toBe(false);
     expect(stillIncomplete.warnings.join(" ")).toMatch(/attachment.*no bytes/i);
     expect(await isRestoreAutomationBlocked(spaceId)).toBe(true);
-    await storage.uploadFileToKey(Buffer.from("restored"), row.storageKey, row.mimeType);
+    await storage.uploadFileToKey(bytes, row.storageKey, row.mimeType);
     expect(
       await inSpace(spaceId, () => client.dump.importCommit({ sessionId: resumed.sessionId })),
     ).toEqual({ ok: true, warnings: [] });
@@ -447,7 +458,30 @@ describe("business-table completeness with real PGLite", () => {
       attachmentId: "att_resume_orphan",
       name: "Unregistered asset",
     };
-    const first = await inSpace(spaceId, () => client.dump.importBegin({ sourceSpaceId: spaceId }));
+    // This deliberately incomplete source archive has no attachment row. Its
+    // identity/inventory must not be rewritten from target state on resume.
+    const archive = createExactDumpReplayFixture({
+      sourceSpaceId: spaceId,
+      rows: { nodes: [node], assets: [asset] },
+    });
+    const repairedAttachment = {
+      id: asset.attachmentId,
+      spaceId,
+      userId: "fixture-user",
+      storageKey: "attachments/resume-orphan.txt",
+      fileName: "asset.txt",
+      mimeType: "text/plain",
+      sizeBytes: 5,
+    };
+    const repairedArchive = createExactDumpReplayFixture({
+      sourceSpaceId: spaceId,
+      rows: { nodes: [node], assets: [asset], attachments: [repairedAttachment] },
+      blobs: [
+        { key: repairedAttachment.storageKey, bytes: Buffer.from("asset"), mimeType: "text/plain" },
+      ],
+    });
+    const first = await inSpace(spaceId, () => archive.begin(client));
+    await inSpace(spaceId, () => archive.offerRoot(client, first.sessionId));
     await inSpace(spaceId, () =>
       client.dump.importTables({ sessionId: first.sessionId, table: "nodes", rows: [node] }),
     );
@@ -457,9 +491,8 @@ describe("business-table completeness with real PGLite", () => {
     expect(
       (await inSpace(spaceId, () => client.dump.importCommit({ sessionId: first.sessionId }))).ok,
     ).toBe(false);
-    const resumed = await inSpace(spaceId, () =>
-      client.dump.importBegin({ sourceSpaceId: spaceId, resume: true }),
-    );
+    const resumed = await inSpace(spaceId, () => archive.begin(client, { resume: true }));
+    await inSpace(spaceId, () => archive.preflight(client, resumed.sessionId));
     expect(
       await inSpace(spaceId, () =>
         client.dump.importTables({ sessionId: resumed.sessionId, table: "assets", rows: [asset] }),
@@ -471,32 +504,13 @@ describe("business-table completeness with real PGLite", () => {
     expect(incomplete.ok).toBe(false);
     expect(incomplete.warnings.join(" ")).toMatch(/attachmentId that was not imported/);
     expect(await isRestoreAutomationBlocked(spaceId)).toBe(true);
-    await storage.uploadFileToKey(
-      Buffer.from("asset"),
-      "attachments/resume-orphan.txt",
-      "text/plain",
-    );
-    await inSpace(spaceId, () =>
-      client.dump.importTables({
-        sessionId: resumed.sessionId,
-        table: "attachments",
-        rows: [
-          {
-            id: asset.attachmentId,
-            spaceId,
-            userId: "fixture-user",
-            storageKey: "attachments/resume-orphan.txt",
-            fileName: "asset.txt",
-            mimeType: "text/plain",
-            sizeBytes: 5,
-          },
-        ],
-      }),
-    );
-    expect(
-      (await inSpace(spaceId, () => client.dump.importCommit({ sessionId: resumed.sessionId }))).ok,
-    ).toBe(true);
-    expect(await isRestoreAutomationBlocked(spaceId)).toBe(false);
+    // Fixing the source creates another archive. It cannot be substituted for
+    // the original incomplete one while reusing its restore identity.
+    await expect(
+      inSpace(spaceId, () => repairedArchive.begin(client, { resume: true })),
+    ).rejects.toThrow(/archive|checksum|same|different/i);
+    expect(await exportRows(spaceId, "attachments")).toEqual([]);
+    expect(await isRestoreAutomationBlocked(spaceId)).toBe(true);
   });
 
   it("scans a later attachment-key page and independently rechecks derived text on resume", async () => {
@@ -531,6 +545,7 @@ describe("business-table completeness with real PGLite", () => {
         id: "text_resume_present",
         spaceId,
         assetId: assets[0].id,
+        writtenBy: "fixture-writer",
         status: "present",
         textStorageKey: textKey,
       },
@@ -542,7 +557,22 @@ describe("business-table completeness with real PGLite", () => {
         textStorageKey: "",
       },
     ];
-    const first = await inSpace(spaceId, () => client.dump.importBegin({ sourceSpaceId: spaceId }));
+    const archive = createExactDumpReplayFixture({
+      sourceSpaceId: spaceId,
+      rows: { nodes: [node], attachments: rows, assets, assetTexts: texts },
+      blobs: [
+        { key: presentKey, bytes: Buffer.from("present"), mimeType: "text/plain" },
+        { key: missingKey, bytes: Buffer.from("present"), mimeType: "text/plain" },
+        {
+          key: textKey,
+          bytes: Buffer.from("derived"),
+          table: "assetTextBlobs",
+          mimeType: "text/plain",
+        },
+      ],
+    });
+    const first = await inSpace(spaceId, () => archive.begin(client));
+    await inSpace(spaceId, () => archive.offerRoot(client, first.sessionId));
     for (const [table, batch] of [
       ["nodes", [node]],
       ["attachments", rows],
@@ -555,9 +585,8 @@ describe("business-table completeness with real PGLite", () => {
     expect(
       (await inSpace(spaceId, () => client.dump.importCommit({ sessionId: first.sessionId }))).ok,
     ).toBe(false);
-    const resumed = await inSpace(spaceId, () =>
-      client.dump.importBegin({ sourceSpaceId: spaceId, resume: true }),
-    );
+    const resumed = await inSpace(spaceId, () => archive.begin(client, { resume: true }));
+    await inSpace(spaceId, () => archive.preflight(client, resumed.sessionId));
     for (const [table, batch] of [
       ["attachments", rows],
       ["assets", assets],
@@ -591,23 +620,20 @@ describe("business-table completeness with real PGLite", () => {
 
   it("retains recovery ownership when final cleanup hits a real object-storage IO error", async () => {
     const spaceId = "dump35-finalize-io";
-    const begin = await inSpace(spaceId, () => client.dump.importBegin({ sourceSpaceId: spaceId }));
-    await inSpace(spaceId, () =>
-      client.dump.importTables({
-        sessionId: begin.sessionId,
-        table: "nodes",
-        rows: [
-          {
-            id: rootNodeIdForSpace(spaceId),
-            spaceId,
-            type: "folder",
-            parentId: null,
-            name: "Safe recovered root",
-            slug: "root",
-          },
-        ],
-      }),
-    );
+    const root = {
+      id: rootNodeIdForSpace(spaceId),
+      spaceId,
+      type: "folder",
+      parentId: null,
+      name: "Safe recovered root",
+      slug: "root",
+    };
+    const archive = createExactDumpReplayFixture({
+      sourceSpaceId: spaceId,
+      rows: { nodes: [root] },
+    });
+    const begin = await inSpace(spaceId, () => archive.begin(client));
+    await inSpace(spaceId, () => archive.offerRoot(client, begin.sessionId));
     // Put a directory where unlink expects an object file, producing a real
     // EISDIR from the local storage provider at the final cleanup boundary.
     const brokenKey = "cleanup-io-error.bin";
@@ -632,25 +658,9 @@ describe("business-table completeness with real PGLite", () => {
     }
     // A restarted/native --resume path may take ownership after the IO issue
     // is resolved, complete normally and leave no activity/staging objects.
-    const resumed = await inSpace(spaceId, () =>
-      client.dump.importBegin({ sourceSpaceId: spaceId, resume: true }),
-    );
-    await inSpace(spaceId, () =>
-      client.dump.importTables({
-        sessionId: resumed.sessionId,
-        table: "nodes",
-        rows: [
-          {
-            id: rootNodeIdForSpace(spaceId),
-            spaceId,
-            type: "folder",
-            parentId: null,
-            name: "Safe recovered root",
-            slug: "root",
-          },
-        ],
-      }),
-    );
+    const resumed = await inSpace(spaceId, () => archive.begin(client, { resume: true }));
+    await inSpace(spaceId, () => archive.preflight(client, resumed.sessionId));
+    await inSpace(spaceId, () => archive.offerRoot(client, resumed.sessionId));
     expect(
       await inSpace(spaceId, () => client.dump.importCommit({ sessionId: resumed.sessionId })),
     ).toEqual({ ok: true, warnings: [] });

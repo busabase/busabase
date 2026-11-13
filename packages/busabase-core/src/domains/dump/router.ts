@@ -1,11 +1,13 @@
 import { implement } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
+import { exportAssetAttachment } from "./logic/asset-attachment-backup";
 import {
   exportAssetTextBlob,
   exportAttachmentBlob,
   exportDocBodies,
   exportTableRows,
 } from "./logic/export-logic";
+import { exportSnapshot } from "./logic/export-snapshot";
 import {
   abortImportSession,
   beginImportSession,
@@ -19,6 +21,12 @@ import {
 const os = implement(busabaseContract);
 
 export const dumpRouter = {
+  exportSnapshot: os.dump.exportSnapshot.handler(({ input, signal }) =>
+    exportSnapshot(input, { signal }),
+  ),
+  exportAssetAttachment: os.dump.exportAssetAttachment.handler(({ input }) =>
+    exportAssetAttachment(input),
+  ),
   exportTables: os.dump.exportTables.handler(async ({ input }) => exportTableRows(input)),
   exportAttachment: os.dump.exportAttachment.handler(async ({ input }) =>
     exportAttachmentBlob(input),

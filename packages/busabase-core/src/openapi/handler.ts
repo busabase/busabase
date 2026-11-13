@@ -3,6 +3,7 @@ import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import type { Context, Router } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { encodeBusabaseOpenApiError } from "./error-envelope";
+import { snapshotEventStream } from "./snapshot-event-stream";
 
 /**
  * The one `/api/v1` handler factory. Both servers (the open-source app and
@@ -32,5 +33,35 @@ import { encodeBusabaseOpenApiError } from "./error-envelope";
 export const createBusabaseOpenApiHandler = <T extends Context>(router: Router<any, T>) =>
   new OpenAPIHandler<T>(router, {
     customErrorResponseBodyEncoder: encodeBusabaseOpenApiError,
+    interceptors: [
+      async ({ request, next }) => {
+        const result = await next();
+        if (
+          request.url.pathname === "/api/v1/dump/export/snapshot" &&
+          result.matched &&
+          result.response.status >= 200 &&
+          result.response.status < 300
+        ) {
+          const body = result.response.body;
+          if (
+            body &&
+            typeof body === "object" &&
+            "next" in body &&
+            typeof body.next === "function" &&
+            Symbol.asyncIterator in body
+          ) {
+            return {
+              ...result,
+              response: {
+                ...result.response,
+                headers: { ...result.response.headers, "content-type": "text/event-stream" },
+                body: snapshotEventStream(body as AsyncIterator<unknown, unknown, void>),
+              },
+            };
+          }
+        }
+        return result;
+      },
+    ],
     plugins: [new SmartCoercionPlugin({ schemaConverters: [new ZodToJsonSchemaConverter()] })],
   });

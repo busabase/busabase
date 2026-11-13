@@ -58,8 +58,10 @@ import {
   searchFiltersFor,
   visibleSectionsFor,
 } from "../helpers/search-sections";
+import { matchSearchSpaces } from "../helpers/search-spaces";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { EmptyState } from "./primitives";
+import { type SearchSpace, useSearchSpacesSlot } from "./search-spaces-slot";
 
 // "Recent" replaces the old static-tiles "Bases" landing tab — it's a
 // keyboard-first quick-jump over every node the dashboard has ever shown the
@@ -98,7 +100,22 @@ interface DisplayResult {
    * something has to check this rather than assume every result is pinnable.
    */
   nodeType?: NodeType;
-  resultKind: SearchResultVO["kind"];
+  /** Absent for rows that are not search results at all — a space to switch to. */
+  resultKind?: SearchResultVO["kind"];
+  /** Runs instead of navigating to `href` — a space row switches space. */
+  activate?: () => void;
+}
+
+/** Only an actual image address is drawn as one; anything else falls back to the letter. */
+const isImageAddress = (value: string | undefined): value is string =>
+  Boolean(value && /^(https?:|data:image\/|\/)/.test(value));
+
+/** A space's logo, else its first letter — the same fallback as the space selector. */
+function SpaceGlyph({ space }: { space: SearchSpace }) {
+  if (isImageAddress(space.logo)) {
+    return <img alt="" className="size-full object-cover" src={space.logo} />;
+  }
+  return <span className="font-medium text-sm">{space.name.trim().charAt(0).toUpperCase()}</span>;
 }
 
 const searchResultToDisplay = (result: SearchResultVO): DisplayResult => ({
@@ -605,6 +622,7 @@ export function SearchDialog({
   // "fixing" dependency arrays with expressions that do not exist in scope.
   const sectionTitle: Record<SearchSectionKey, string> = useMemo(
     () => ({
+      spaces: messages.search.sectionSpaces,
       recent: messages.search.sectionRecent,
       workspace: messages.search.sectionElsewhere,
       apps: messages.search.apps,
@@ -627,6 +645,27 @@ export function SearchDialog({
    * person actually opened (see `partitionByVisited`), so it is sliced rather
    * than re-derived — the same list the keyboard walks.
    */
+  /**
+   * Other spaces a typed query names. Left out while the dialog is in pin mode
+   * (`onSelect`): a space is not something the side panel can pin.
+   */
+  const spacesSlot = useSearchSpacesSlot();
+  const spaceRows = useMemo((): DisplayResult[] => {
+    if (!spacesSlot || onSelect) return [];
+    return matchSearchSpaces(spacesSlot.spaces, spacesSlot.activeSpaceId, normalizedQuery).map(
+      (space) => ({
+        key: `space-${space.id}`,
+        id: space.id,
+        href: "",
+        title: space.name,
+        body: messages.search.switchToSpace,
+        eyebrow: space.subtitle,
+        icon: <SpaceGlyph space={space} />,
+        activate: () => spacesSlot.onSwitch(space.id),
+      }),
+    );
+  }, [spacesSlot, onSelect, normalizedQuery, messages]);
+
   const populatedSections = useMemo(() => {
     const built: { key: SearchSectionKey; rows: DisplayResult[] }[] = [];
     /**
@@ -656,17 +695,19 @@ export function SearchDialog({
     const seenHrefs = new Set<string>();
     for (const key of sections) {
       const rows =
-        key === "recent"
-          ? recentMatches
-              .slice(0, hasQuery ? recentVisitedCount : recentMatches.length)
-              .map(knownNodeToDisplay)
-          : key === "workspace"
-            ? recentMatches.slice(recentVisitedCount).map(knownNodeToDisplay)
-            : key === "apps"
-              ? appMatches.map(nodeVOToDisplay)
-              : key === "skills"
-                ? skillMatches.map(nodeVOToDisplay)
-                : rowsForSection(key);
+        key === "spaces"
+          ? spaceRows
+          : key === "recent"
+            ? recentMatches
+                .slice(0, hasQuery ? recentVisitedCount : recentMatches.length)
+                .map(knownNodeToDisplay)
+            : key === "workspace"
+              ? recentMatches.slice(recentVisitedCount).map(knownNodeToDisplay)
+              : key === "apps"
+                ? appMatches.map(nodeVOToDisplay)
+                : key === "skills"
+                  ? skillMatches.map(nodeVOToDisplay)
+                  : rowsForSection(key);
       const deduped = DEDUPED_SECTIONS.includes(key)
         ? rows.filter((row) => {
             if (seenHrefs.has(row.href)) return false;
@@ -679,6 +720,7 @@ export function SearchDialog({
     return built;
   }, [
     sections,
+    spaceRows,
     hasQuery,
     recentMatches,
     recentVisitedCount,
@@ -739,7 +781,14 @@ export function SearchDialog({
   // after their data loads successfully.
   const select = useCallback(
     (result: DisplayResult) => {
-      if (hasQuery) {
+      // A space row switches space: it is a command, not a search result, so it
+      // neither navigates within this space nor counts toward search metrics.
+      if (result.activate) {
+        onClose();
+        result.activate();
+        return;
+      }
+      if (hasQuery && result.resultKind) {
         const session = ensureSearchSession();
         reportSearchMetric.mutate({
           event: "result_click",

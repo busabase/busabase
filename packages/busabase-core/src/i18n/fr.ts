@@ -833,6 +833,21 @@ export const dashboardFr: CoreI18nMessages = {
           "Les domaines personnalisés ne sont pas configurés sur cette installation. Contactez un administrateur.",
         empty:
           "Ajoutez un domaine qui vous appartient, puis terminez la configuration chez votre fournisseur DNS.",
+        guideToggle: "Comment configurer le DNS",
+        guideStepAdd:
+          "Saisissez ci-dessous le domaine souhaité, puis cliquez sur « {add} ». Le plus simple est un sous-domaine comme shop.company.com.",
+        guideStepDns:
+          "Chez le fournisseur DNS de votre domaine (Cloudflare, OVHcloud, Gandi, GoDaddy…), ajoutez un enregistrement CNAME :",
+        guideType: "Type",
+        guideNameHint:
+          "Indiquez la partie avant votre domaine racine, par exemple shop pour shop.company.com. Certains fournisseurs demandent le nom complet.",
+        guideStepCheck:
+          "Revenez ici et cliquez sur « {check} ». La propagation DNS peut prendre de quelques minutes à quelques heures ; le HTTPS est ensuite configuré automatiquement. Si un enregistrement TXT de vérification est aussi nécessaire, il s’affichera ici après l’ajout du domaine.",
+        guideRootDomain:
+          "Vous voulez utiliser un domaine racine comme company.com ? Cela ne fonctionne que si votre fournisseur DNS accepte un CNAME à la racine (aplatissement CNAME, ALIAS ou ANAME ; Cloudflare le permet). Sinon, utilisez un sous-domaine comme www ou shop.",
+        guideLink: "Voir le guide de configuration",
+        recordNameHint:
+          "« Nom » affiche le domaine complet. De nombreux fournisseurs DNS n’attendent que la partie avant le domaine racine, par exemple shop pour shop.company.com.",
         hostnameLabel: "Nom de domaine",
         hostnameHint: "Saisissez un nom d’hôte, sans https:// ni chemin.",
         invalidHostname:
@@ -851,6 +866,14 @@ export const dashboardFr: CoreI18nMessages = {
         activeHint: "DNS et HTTPS sont prêts.",
         error: "Action requise",
         errorHint: "Consultez les détails ci-dessous, puis vérifiez à nouveau.",
+        // Keyed by `AirAppSiteDomainIssue`: this deployment's own findings about one domain.
+        issues: {
+          "target-missing":
+            "Les domaines personnalisés ne sont pas configurés sur cette installation. Contactez un administrateur.",
+          "route-unverified":
+            "Ce domaine ne mène pas encore à ce site. Les changements DNS peuvent prendre de quelques minutes à quelques heures.",
+          "check-failed": "Impossible de vérifier ce domaine pour le moment. Vérifiez à nouveau.",
+        },
         offlineHint: "Le site est hors ligne. Toutes ses adresses affichent une page introuvable.",
         dnsInstructions:
           "Ajoutez ces enregistrements chez votre fournisseur DNS. Conservez les autres enregistrements nécessaires à votre domaine. Le proxy Cloudflare est pris en charge une fois le routage vers le site vérifié.",
@@ -1615,6 +1638,8 @@ export const dashboardFr: CoreI18nMessages = {
   search: {
     all: "Contenu",
     recent: "Récents",
+    sectionSpaces: "Espaces",
+    switchToSpace: "Basculer vers cet espace",
     sectionRecent: "Consultés récemment",
     sectionElsewhere: "Ailleurs dans cet espace de travail",
     sectionDocContent: "Dans les documents",
@@ -2781,6 +2806,8 @@ export const dashboardFr: CoreI18nMessages = {
     failed: "Impossible de déplacer l'élément. Veuillez réessayer.",
   },
   richNodes: {
+    discardChanges: "Abandonner les modifications non enregistrées ?",
+    returnToReading: "Revenir à la lecture",
     defaultOutcome: "Par défaut",
     controlPanel: "Panneau de contrôle",
     zoomIn: "Zoom avant",

@@ -18,7 +18,7 @@ import type {
   CreateTextUploadUrlVO,
   PutTextInput,
 } from "busabase-contract/domains/assets/types";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, getTableColumns, inArray, ne } from "drizzle-orm";
 import { generateNanoID } from "openlib/nanoid";
 import { storage } from "openlib/storage";
 import { type BusabaseDatabase, getContextSpaceId, resolveActorId } from "../../../context";
@@ -30,6 +30,7 @@ import { ensureReady } from "../../../logic/seed";
 import { busabaseAssetTextSearch } from "../schema/asset-text-search";
 import { type AssetTextPO, type AssetTextStatus, busabaseAssetTexts } from "../schema/asset-texts";
 import { assertAssetPermission } from "./asset-permissions";
+import { assertReadableAssetTextKey } from "./asset-text-key";
 import {
   AssetSearchProjectionBuilder,
   publishAssetTextProjection,
@@ -118,10 +119,24 @@ export const loadAssetTextRows = async (
   const map = new Map<string, AssetTextPO>();
   for (const batch of batchAssetIds(assetIds)) {
     const rows = await db
-      .select()
+      .select({
+        ...getTableColumns(busabaseAssetTexts),
+        assetSpaceId: busabaseAssets.spaceId,
+        attachmentStorageKey: attachments.storageKey,
+      })
       .from(busabaseAssetTexts)
+      .leftJoin(busabaseAssets, eq(busabaseAssets.id, busabaseAssetTexts.assetId))
+      .leftJoin(attachments, eq(attachments.id, busabaseAssets.attachmentId))
       .where(inArray(busabaseAssetTexts.assetId, batch));
-    for (const row of rows) map.set(row.assetId, row);
+    for (const value of rows) {
+      assertReadableAssetTextKey(value, value.assetSpaceId, value.attachmentStorageKey);
+      const {
+        assetSpaceId: _assetSpaceId,
+        attachmentStorageKey: _attachmentStorageKey,
+        ...row
+      } = value;
+      map.set(row.assetId, row);
+    }
   }
   return map;
 };

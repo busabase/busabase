@@ -277,6 +277,8 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "vault.update": workspace("manage"),
   "vault.updatePreviewFileCredential": workspace("manage"),
   "vault.clear": workspace("manage"),
+  "dump.exportSnapshot": workspace("manage"),
+  "dump.exportAssetAttachment": workspace("manage"),
   "dump.exportTables": workspace("manage"),
   "dump.exportAssetText": workspace("manage"),
   "dump.exportAttachment": workspace("manage"),

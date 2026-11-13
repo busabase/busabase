@@ -12,6 +12,7 @@ import { id } from "../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
 import { buildNodeVisibilityCondition } from "../../logic/node-acl";
 import { registerNodeRuntime } from "../../logic/node-runtime";
+import { assertNodeStorageId } from "../../logic/node-storage-key";
 import { ensureReady } from "../../logic/seed";
 import { loadNodesByIds, type MergeCtx, toNodeVO } from "../../logic/store";
 import { syncDocAssetUsages } from "../assets/handlers";
@@ -21,7 +22,10 @@ const FOLDER_README_MIME: Record<FolderBodyFormat, string> = {
   html: "text/html; charset=utf-8",
 };
 
-export const folderStoragePrefix = (nodeId: string) => `busabase/nodes/${nodeId}/folder/`;
+export const folderStoragePrefix = (nodeId: string) => {
+  assertNodeStorageId(nodeId);
+  return `busabase/nodes/${nodeId}/folder/`;
+};
 // Exported so grep/readLines address the same object `readFolderBody` reads.
 // Never Doc's `…/doc/doc.md`.
 export const folderReadmeKey = (nodeId: string) => `${folderStoragePrefix(nodeId)}readme.md`;

@@ -2,10 +2,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type {
-  AirAppSiteDomainBindingVO,
-  AirAppSiteDomainsVO,
-  AirAppSiteStateVO,
+import {
+  type AirAppSiteDomainBindingVO,
+  type AirAppSiteDomainIssue,
+  type AirAppSiteDomainsVO,
+  type AirAppSiteStateVO,
+  airAppSiteDomainIssueSchema,
 } from "busabase-contract/domains/airapp/contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider, type CoreLocale } from "../../../i18n";
@@ -40,6 +42,7 @@ const binding = (
   sslStatus: "pending_validation",
   dnsRecords: [{ type: "CNAME", name: "shop.company.com", value: "site-dns.sites.test" }],
   errors: [],
+  issues: [],
   ...overrides,
 });
 
@@ -125,6 +128,148 @@ afterEach(() => {
   for (const client of clients) client.clear();
   clients.length = 0;
   vi.restoreAllMocks();
+});
+
+describe("website custom domain setup guide", () => {
+  const guide = () => document.querySelector<HTMLElement>("[data-airapp-site-domain-guide]");
+  const toggle = (name = "How to set up DNS") => screen.findByRole("button", { name });
+  const mockClipboard = () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    return writeText;
+  };
+
+  it("keeps the guide to one closed toggle line before any domain is added", async () => {
+    renderSettings();
+    const button = await toggle();
+    expect(button.tagName).toBe("BUTTON");
+    expect(button.getAttribute("type")).toBe("button");
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    const controlled = document.getElementById(button.getAttribute("aria-controls") ?? "");
+    expect(controlled).toBe(guide());
+    expect(guide()?.hidden).toBe(true);
+    expect(screen.queryByRole("button", { name: "Copy DNS value site-dns.sites.test" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Read the setup guide" })).toBeNull();
+    expect(screen.queryByRole("listitem")).toBeNull();
+    expect(screen.queryByText(coreMessagesByLocale.en.airapp.site.domains.empty)).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Domain name" })).toBeTruthy();
+  });
+
+  it("opens the exact CNAME record on click, copies it, and folds away again", async () => {
+    const writeText = mockClipboard();
+    renderSettings();
+    const button = await toggle();
+    fireEvent.click(button);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(guide()?.hidden).toBe(false);
+    const steps = guide()?.querySelectorAll("ol > li");
+    expect(steps?.length).toBe(3);
+    expect(steps?.[0]?.textContent).toContain("click “Add domain”");
+    expect(steps?.[2]?.textContent).toContain("click “Check again”");
+    expect(guide()?.querySelector("[data-airapp-site-domain-guide-record]")?.textContent).toContain(
+      "CNAME",
+    );
+    expect(guide()?.querySelector("[data-airapp-site-domain-guide-target]")?.textContent).toBe(
+      "site-dns.sites.test",
+    );
+    expect(guide()?.textContent).toContain("CNAME flattening");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy DNS value site-dns.sites.test" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledExactlyOnceWith("site-dns.sites.test"));
+
+    const link = screen.getByRole("link", { name: "Read the setup guide" });
+    expect(link.getAttribute("href")).toBe(
+      "https://busabase.com/docs/airapp-websites#custom-domains",
+    );
+    expect(link.getAttribute("target")).toBe("_blank");
+
+    fireEvent.click(button);
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(guide()?.hidden).toBe(true);
+    expect(screen.queryByRole("button", { name: "Copy DNS value site-dns.sites.test" })).toBeNull();
+  });
+
+  it("is reachable and operable from the keyboard as a native button", async () => {
+    renderSettings();
+    const button = await toggle();
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    // jsdom does not synthesize a native button's Enter/Space activation; browsers
+    // turn both into this click, which the real-browser check exercises by key.
+    fireEvent.click(button);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("lets an unpublished site prepare DNS while adding stays gated", async () => {
+    renderSettings({
+      state: siteState({ liveVersion: null, publication: "not-live", isPublic: false }),
+    });
+    fireEvent.click(await toggle());
+    expect(guide()?.textContent).toContain("site-dns.sites.test");
+    expect(screen.getByRole("textbox", { name: "Domain name" })).toHaveProperty("disabled", true);
+    expect(screen.getByText("Go live first, then add your domain.")).toBeTruthy();
+  });
+
+  it("replaces the toggle with the domain's own records once one is added", async () => {
+    renderSettings();
+    fireEvent.click(await toggle());
+    submitHostname("shop.company.com");
+    await screen.findByText("Setup pending");
+    expect(screen.queryByRole("button", { name: "How to set up DNS" })).toBeNull();
+    expect(guide()).toBeNull();
+    expect(screen.getAllByText("site-dns.sites.test").length).toBe(1);
+    expect(document.querySelector("[data-airapp-site-domain-name-hint]")?.textContent).toBe(
+      coreMessagesByLocale.en.airapp.site.domains.recordNameHint,
+    );
+    expect(screen.getByRole("link", { name: "Read the setup guide" })).toBeTruthy();
+  });
+
+  it("comes back closed after the last domain is removed", async () => {
+    const { unbind } = renderSettings();
+    fireEvent.click(await toggle());
+    submitHostname("shop.company.com");
+    await screen.findByText("Setup pending");
+    fireEvent.click(screen.getByRole("button", { name: "Remove shop.company.com" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove domain" }));
+    await waitFor(() => expect(unbind).toHaveBeenCalledOnce());
+    const button = await toggle();
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    expect(guide()?.hidden).toBe(true);
+  });
+
+  it.each([
+    ["a lapsed plan", { state: siteState({ engine: "locked" }) }],
+    ["a missing CNAME target", { domains: { ...domainsState(), cnameTarget: null } }],
+  ])("shows neither toggle nor guide on %s", async (_reason, options) => {
+    renderSettings(options);
+    await screen.findByText(coreMessagesByLocale.en.airapp.site.domains.empty);
+    expect(screen.queryByRole("button", { name: "How to set up DNS" })).toBeNull();
+    expect(guide()).toBeNull();
+  });
+
+  it("links the localized guide and names the localized buttons", async () => {
+    renderSettings({ locale: "zh-CN" });
+    const button = await toggle("怎么配置 DNS？");
+    expect(guide()?.hidden).toBe(true);
+    fireEvent.click(button);
+    expect(guide()?.textContent).toContain("点「添加域名」");
+    expect(guide()?.textContent).toContain("点「重新检查」");
+    expect(screen.getByRole("link", { name: "查看配置说明" }).getAttribute("href")).toBe(
+      "https://busabase.com/zh-CN/docs/airapp-websites#custom-domains",
+    );
+  });
+
+  it("links the English guide for a language without its own page", async () => {
+    renderSettings({ locale: "de" });
+    fireEvent.click(await toggle("So richtest du DNS ein"));
+    expect(
+      screen.getByRole("link", { name: "Einrichtungsanleitung öffnen" }).getAttribute("href"),
+    ).toBe("https://busabase.com/docs/airapp-websites#custom-domains");
+  });
 });
 
 describe("website custom domain settings", () => {
@@ -374,6 +519,36 @@ describe("website custom domain settings", () => {
     expect(screen.getByRole("switch", { name: "Public" })).toBeTruthy();
   });
 
+  it("words the server's own findings in the viewer's language and keeps provider text as written", async () => {
+    renderSettings({
+      domains: domainsState([
+        binding({ issues: ["route-unverified"], errors: ["Certificate blocked by CAA"] }),
+      ]),
+      locale: "zh-CN",
+    });
+    expect(await screen.findByText("等待完成配置")).toBeTruthy();
+    const issue = document.querySelector('[data-airapp-site-domain-issue="route-unverified"]');
+    expect(issue?.textContent).toBe(
+      coreMessagesByLocale["zh-CN"].airapp.site.domains.issues["route-unverified"],
+    );
+    expect(screen.getByText("Certificate blocked by CAA")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("route-unverified");
+    expect(document.body.textContent).not.toContain("Could not verify");
+  });
+
+  it("shows a failed check as the finding itself, not the generic hint", async () => {
+    renderSettings({
+      domains: domainsState([binding({ status: "error", issues: ["check-failed"] })]),
+      locale: "zh-CN",
+    });
+    const copy = coreMessagesByLocale["zh-CN"].airapp.site.domains;
+    expect(await screen.findByText(copy.issues["check-failed"])).toBeTruthy();
+    expect(screen.getByText(copy.issues["check-failed"]).closest("ul")?.className).toContain(
+      "text-destructive",
+    );
+    expect(screen.queryByText(copy.errorHint)).toBeNull();
+  });
+
   it("uses the active locale for the complete hostname form and removal flow", async () => {
     renderSettings({ domains: domainsState([binding()]), locale: "zh-CN" });
     expect(await screen.findByRole("textbox", { name: "域名" })).toBeTruthy();
@@ -519,8 +694,17 @@ describe("custom domain translations", () => {
       const english = coreMessagesByLocale.en.airapp.site.domains;
       const copy = messages.airapp.site.domains;
       expect(Object.keys(copy)).toEqual(Object.keys(english));
-      for (const value of Object.values(copy)) {
+      const { issues, ...strings } = copy;
+      for (const value of Object.values(strings)) {
         expect(value.length).toBeGreaterThan(0);
+      }
+      // Every finding the server can report has words in this language.
+      expect(Object.keys(issues).sort()).toEqual([...airAppSiteDomainIssueSchema.options].sort());
+      for (const [issue, value] of Object.entries(issues)) {
+        expect(value.length).toBeGreaterThan(0);
+        if (locale !== "en") {
+          expect(value, issue).not.toBe(english.issues[issue as AirAppSiteDomainIssue]);
+        }
       }
       if (locale !== "en") expect(copy.title).not.toBe(english.title);
       expect(copy.copyValue).toContain("{value}");
@@ -529,6 +713,12 @@ describe("custom domain translations", () => {
       expect(copy.removeConfirm).toContain("{hostname}");
       expect(copy.dnsInstructions).toContain("Cloudflare");
       expect(copy.dnsInstructions).toContain("DNS");
+      expect(copy.guideStepAdd).toContain("{add}");
+      expect(copy.guideStepCheck).toContain("{check}");
+      expect(copy.guideStepDns).toContain("CNAME");
+      expect(copy.guideRootDomain).toContain("company.com");
+      expect(copy.guideNameHint).toContain("shop.company.com");
+      expect(copy.recordNameHint).toContain("shop.company.com");
     },
   );
 });

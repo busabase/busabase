@@ -813,6 +813,21 @@ export const dashboardVi: CoreI18nMessages = {
         unavailable:
           "Bản triển khai này chưa cấu hình tên miền tùy chỉnh. Hãy liên hệ quản trị viên.",
         empty: "Thêm tên miền bạn sở hữu, rồi hoàn tất thiết lập tại nhà cung cấp DNS.",
+        guideToggle: "Cách thiết lập DNS",
+        guideStepAdd:
+          "Nhập tên miền bạn muốn dùng bên dưới rồi nhấn “{add}”. Đơn giản nhất là tên miền phụ như shop.company.com.",
+        guideStepDns:
+          "Tại nhà cung cấp DNS của tên miền (Cloudflare, GoDaddy, Mắt Bão, Namecheap…), thêm một bản ghi CNAME:",
+        guideType: "Loại",
+        guideNameHint:
+          "Nhập phần đứng trước tên miền gốc, ví dụ shop cho shop.company.com. Một số nhà cung cấp yêu cầu tên đầy đủ.",
+        guideStepCheck:
+          "Quay lại đây và nhấn “{check}”. DNS có thể mất vài phút đến vài giờ để có hiệu lực; sau đó HTTPS được thiết lập tự động. Nếu cần thêm bản ghi TXT để xác minh, bản ghi đó sẽ hiện ở đây sau khi bạn thêm tên miền.",
+        guideRootDomain:
+          "Muốn dùng tên miền gốc như company.com? Chỉ dùng được khi nhà cung cấp DNS hỗ trợ CNAME ở tên miền gốc (CNAME flattening, ALIAS hoặc ANAME; Cloudflare có hỗ trợ). Nếu không, hãy dùng tên miền phụ như www hoặc shop.",
+        guideLink: "Xem hướng dẫn thiết lập",
+        recordNameHint:
+          "“Tên” hiển thị tên miền đầy đủ. Nhiều nhà cung cấp DNS chỉ cần phần đứng trước tên miền gốc, ví dụ shop cho shop.company.com.",
         hostnameLabel: "Tên miền",
         hostnameHint: "Nhập tên máy chủ, không kèm https:// hoặc đường dẫn.",
         invalidHostname:
@@ -831,6 +846,14 @@ export const dashboardVi: CoreI18nMessages = {
         activeHint: "DNS và HTTPS đã sẵn sàng.",
         error: "Cần xử lý",
         errorHint: "Xem thông tin bên dưới rồi kiểm tra lại.",
+        // Keyed by `AirAppSiteDomainIssue`: this deployment's own findings about one domain.
+        issues: {
+          "target-missing":
+            "Bản triển khai này chưa cấu hình tên miền tùy chỉnh. Hãy liên hệ quản trị viên.",
+          "route-unverified":
+            "Tên miền này chưa trỏ đến trang web này. Thay đổi DNS có thể mất từ vài phút đến vài giờ để có hiệu lực.",
+          "check-failed": "Hiện không thể kiểm tra tên miền này. Vui lòng kiểm tra lại.",
+        },
         offlineHint:
           "Trang web đang ngoại tuyến. Mọi địa chỉ của trang web đều hiển thị trang không tìm thấy.",
         dnsInstructions:
@@ -1582,6 +1605,8 @@ export const dashboardVi: CoreI18nMessages = {
   search: {
     all: "Nội dung",
     recent: "Gần đây",
+    sectionSpaces: "Không gian",
+    switchToSpace: "Chuyển sang không gian này",
     sectionRecent: "Truy cập gần đây",
     sectionElsewhere: "Nơi khác trong không gian làm việc này",
     sectionDocContent: "Bên trong tài liệu",
@@ -2710,6 +2735,8 @@ export const dashboardVi: CoreI18nMessages = {
     failed: "Không thể di chuyển mục này. Vui lòng thử lại.",
   },
   richNodes: {
+    discardChanges: "Bỏ các thay đổi chưa lưu?",
+    returnToReading: "Quay lại đọc",
     defaultOutcome: "Mặc định",
     controlPanel: "Bảng điều khiển",
     zoomIn: "Phóng to",

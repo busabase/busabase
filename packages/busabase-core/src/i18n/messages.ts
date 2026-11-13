@@ -874,6 +874,21 @@ export const coreMessagesEn = {
         lastKnown: "The details below are from the last successful check.",
         unavailable: "Custom domains are not configured on this deployment. Ask an administrator.",
         empty: "Add a domain you own, then finish setup at your DNS provider.",
+        guideToggle: "How to set up DNS",
+        guideStepAdd:
+          "Enter the domain you want to use below, then click “{add}”. A subdomain such as shop.company.com is easiest.",
+        guideStepDns:
+          "At your domain’s DNS provider (Cloudflare, GoDaddy, Namecheap, Route 53…), add a CNAME record:",
+        guideType: "Type",
+        guideNameHint:
+          "Use the part before your root domain, e.g. shop for shop.company.com. Some providers want the full name.",
+        guideStepCheck:
+          "Come back and click “{check}”. DNS can take a few minutes to a few hours; HTTPS is set up automatically once it resolves. If a TXT verification record is also needed, it appears here after you add the domain.",
+        guideRootDomain:
+          "Using a root domain such as company.com? That only works if your DNS provider supports a CNAME at the root (CNAME flattening, ALIAS or ANAME; Cloudflare does). Otherwise use a subdomain such as www or shop.",
+        guideLink: "Read the setup guide",
+        recordNameHint:
+          "Name shows the full domain. Many DNS providers want only the part before your root domain, e.g. shop for shop.company.com.",
         hostnameLabel: "Domain name",
         hostnameHint: "Enter a hostname, without https:// or a path.",
         invalidHostname:
@@ -892,6 +907,14 @@ export const coreMessagesEn = {
         activeHint: "DNS and HTTPS are ready.",
         error: "Needs attention",
         errorHint: "Review the details below, then check again.",
+        // Keyed by `AirAppSiteDomainIssue`: this deployment's own findings about one domain.
+        issues: {
+          "target-missing":
+            "Custom domains are not configured on this deployment. Ask an administrator.",
+          "route-unverified":
+            "This domain does not reach this website yet. DNS changes can take a few minutes to a few hours to take effect.",
+          "check-failed": "Couldn't check this domain right now. Check again.",
+        },
         offlineHint: "The site is offline. All website addresses show a not-found page.",
         dnsInstructions:
           "Add these records at your DNS provider. Keep any other records your domain needs. Cloudflare proxying is supported once the website route is verified.",
@@ -1688,6 +1711,10 @@ export const coreMessagesEn = {
      * action. "Jump" had no precedent and was reverted before it shipped.
      */
     recent: "Recent",
+    /** Section heading over other spaces a query names; picking one switches space. */
+    sectionSpaces: "Spaces",
+    /** Second line on a space row: says the row switches space rather than opening something. */
+    switchToSpace: "Switch to this space",
     /** Section heading over the rows that came from this browser's own cache. */
     sectionRecent: "Recently visited",
     /** Section heading over rows the server returned that the cache had not seen. */
@@ -2842,6 +2869,8 @@ export const coreMessagesEn = {
     failed: "Couldn't move the item. Please try again.",
   },
   richNodes: {
+    discardChanges: "Discard unsaved changes?",
+    returnToReading: "Return to reading",
     defaultOutcome: "Default",
     controlPanel: "Control Panel",
     zoomIn: "Zoom In",

@@ -35,14 +35,20 @@ import { useTopbarNodeActionsStore } from "../store/topbar-node-actions-store";
  * clear the slot) — only an instance that actually registered something is
  * responsible for clearing it on unmount/disable.
  */
-export function useRegisterTopbarNodeActions(actions: ReactNode | null, enabled = true): void {
+export function useRegisterTopbarNodeActions(
+  actions: ReactNode | null,
+  enabled = true,
+  readActions: ReactNode | null = null,
+): void {
   useEffect(() => {
     if (!enabled) {
       return;
     }
     useTopbarNodeActionsStore.getState().setActions(actions);
+    useTopbarNodeActionsStore.getState().setReadActions(readActions);
     return () => {
       useTopbarNodeActionsStore.getState().setActions(null);
+      useTopbarNodeActionsStore.getState().setReadActions(null);
     };
   });
 }

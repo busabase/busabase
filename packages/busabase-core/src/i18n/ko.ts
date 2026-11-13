@@ -806,6 +806,21 @@ export const dashboardKo: CoreI18nMessages = {
         unavailable:
           "이 배포에는 사용자 지정 도메인이 설정되어 있지 않습니다. 관리자에게 문의하세요.",
         empty: "소유한 도메인을 추가한 뒤 DNS 제공업체에서 설정을 완료하세요.",
+        guideToggle: "DNS 설정 방법",
+        guideStepAdd:
+          "아래에 사용할 도메인을 입력하고 “{add}” 버튼을 클릭하세요. shop.company.com 같은 하위 도메인이 가장 간단합니다.",
+        guideStepDns:
+          "도메인의 DNS 제공업체(Cloudflare, 가비아, GoDaddy, Namecheap 등)에서 CNAME 레코드를 추가하세요:",
+        guideType: "유형",
+        guideNameHint:
+          "루트 도메인 앞부분을 입력하세요. 예를 들어 shop.company.com이면 shop입니다. 전체 도메인을 요구하는 제공업체도 있습니다.",
+        guideStepCheck:
+          "여기로 돌아와 “{check}” 버튼을 클릭하세요. DNS 반영에는 몇 분에서 몇 시간이 걸릴 수 있으며, 반영되면 HTTPS가 자동으로 설정됩니다. TXT 인증 레코드가 추가로 필요하면 도메인을 추가한 뒤 여기에 표시됩니다.",
+        guideRootDomain:
+          "company.com 같은 루트 도메인을 쓰려면 DNS 제공업체가 루트에서 CNAME(CNAME 플래트닝, ALIAS 또는 ANAME)을 지원해야 합니다. Cloudflare는 지원합니다. 지원하지 않으면 www나 shop 같은 하위 도메인을 사용하세요.",
+        guideLink: "설정 가이드 보기",
+        recordNameHint:
+          "“이름”에는 전체 도메인이 표시됩니다. 대부분의 DNS 제공업체에서는 루트 도메인 앞부분만 입력합니다. 예: shop.company.com이면 shop.",
         hostnameLabel: "도메인 이름",
         hostnameHint: "https:// 또는 경로 없이 호스트 이름을 입력하세요.",
         invalidHostname:
@@ -824,6 +839,14 @@ export const dashboardKo: CoreI18nMessages = {
         activeHint: "DNS와 HTTPS가 준비되었습니다.",
         error: "확인 필요",
         errorHint: "아래 세부 내용을 검토한 뒤 다시 확인하세요.",
+        // Keyed by `AirAppSiteDomainIssue`: this deployment's own findings about one domain.
+        issues: {
+          "target-missing":
+            "이 배포에는 사용자 지정 도메인이 설정되어 있지 않습니다. 관리자에게 문의하세요.",
+          "route-unverified":
+            "이 도메인이 아직 이 사이트로 연결되지 않았습니다. DNS 변경이 적용되기까지 몇 분에서 몇 시간이 걸릴 수 있습니다.",
+          "check-failed": "지금은 이 도메인을 확인할 수 없습니다. 다시 확인하세요.",
+        },
         offlineHint:
           "웹사이트가 비공개 상태입니다. 모든 웹사이트 주소에 페이지를 찾을 수 없다고 표시됩니다.",
         dnsInstructions:
@@ -1573,6 +1596,8 @@ export const dashboardKo: CoreI18nMessages = {
   search: {
     all: "콘텐츠",
     recent: "최근",
+    sectionSpaces: "스페이스",
+    switchToSpace: "이 스페이스로 전환",
     sectionRecent: "최근 방문",
     sectionElsewhere: "워크스페이스의 다른 위치",
     sectionDocContent: "문서 내부",
@@ -2692,6 +2717,8 @@ export const dashboardKo: CoreI18nMessages = {
     failed: "항목을 이동하지 못했습니다. 다시 시도해 주세요.",
   },
   richNodes: {
+    discardChanges: "저장하지 않은 변경 사항을 버릴까요?",
+    returnToReading: "읽기로 돌아가기",
     defaultOutcome: "기본값",
     controlPanel: "컨트롤 패널",
     zoomIn: "확대",

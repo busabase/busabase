@@ -197,3 +197,329 @@ describe("nodeCreateTask agentPrompts", () => {
     expect(result).not.toHaveProperty("agentPromptsWrite");
   });
 });
+
+describe("nodeCreateTask visibility", () => {
+  /** A materialized node as every current server returns it. */
+  const nodeVO = (id: string, explicitVisibility: string | null) => ({
+    id,
+    metadata: {},
+    explicitVisibility,
+  });
+
+  /**
+   * One client covering every create endpoint. Each create echoes back the
+   * visibility it was sent, the way a current server does; tests that model an
+   * older server override the endpoint they care about.
+   */
+  const fullClient = () => {
+    const visibilityOf = (input: unknown) =>
+      ((input as { visibility?: string }).visibility ?? null) as string | null;
+    // Return types are left open (`unknown`) on purpose: individual tests swap in
+    // other server shapes with `mockImplementationOnce` — an old server, a pending
+    // proposal — and those must type-check against the same spy.
+    const spies = {
+      fileTreesCreate: vi.fn(
+        async (input: unknown): Promise<unknown> => ({
+          materialized: true,
+          node: nodeVO("nod_tree", visibilityOf(input)),
+          visibility: visibilityOf(input) ?? "workspace",
+          files: [],
+        }),
+      ),
+      docsCreate: vi.fn(
+        async (input: unknown): Promise<unknown> => ({
+          materialized: true,
+          node: nodeVO("nod_doc", visibilityOf(input)),
+          body: "",
+        }),
+      ),
+      basesCreate: vi.fn(
+        async (_input: unknown): Promise<unknown> => ({
+          materialized: true,
+          id: "bas_1",
+          nodeId: "nod_base",
+        }),
+      ),
+      filesCreate: vi.fn(
+        async (input: unknown): Promise<unknown> => ({
+          materialized: true,
+          node: nodeVO("nod_file", visibilityOf(input)),
+          asset: {},
+        }),
+      ),
+      createChangeRequest: vi.fn(
+        async (_input: unknown): Promise<unknown> => ({
+          id: "cr_1",
+          status: "merged",
+          node: null,
+          operations: [{ operation: "node_create", nodeId: "nod_generic" }],
+        }),
+      ),
+      // The read-back for the two endpoints that return no node record.
+      nodesGet: vi.fn(async ({ nodeId }: { nodeId: string }) => ({
+        type: "base",
+        node: nodeVO(nodeId, "private"),
+      })),
+    };
+    const client = {
+      nodes: {
+        createChangeRequest: spies.createChangeRequest,
+        get: spies.nodesGet,
+        updateAgentPrompts: vi.fn(),
+        updateMetadata: vi.fn(),
+      },
+      fileTrees: { create: spies.fileTreesCreate },
+      docs: { create: spies.docsCreate },
+      bases: { create: spies.basesCreate },
+      files: { create: spies.filesCreate },
+    } as unknown as BusabaseTaskClient;
+    return { client, ...spies };
+  };
+
+  const inputFor = (type: string) => ({
+    type: type as Parameters<typeof nodeCreateTask.execute>[1]["type"],
+    slug: "secret",
+    name: "Secret",
+    visibility: "private",
+    ...(type === "file" ? { assetId: "ast_1" } : {}),
+    ...(type === "base" ? { fields: [{ slug: "title", name: "Title", type: "text" }] } : {}),
+  });
+
+  it("is a parameter of every type, so no per-type CLI variant hides it", () => {
+    const param = nodeCreateTask.params.find((p) => p.name === "visibility");
+    expect(param?.appliesWhen).toBeUndefined();
+    expect(param?.description).not.toMatch(/Skill\/Drive\/AirApp only/);
+  });
+
+  it.each([
+    ["skill", "fileTreesCreate"],
+    ["drive", "fileTreesCreate"],
+    ["airapp", "fileTreesCreate"],
+    ["doc", "docsCreate"],
+    ["base", "basesCreate"],
+    ["file", "filesCreate"],
+  ] as const)("forwards visibility to the %s create endpoint", async (type, spy) => {
+    const mocks = fullClient();
+
+    const result = await nodeCreateTask.execute(mocks.client, inputFor(type));
+
+    expect(mocks[spy]).toHaveBeenCalledWith(expect.objectContaining({ visibility: "private" }));
+    expect(result).not.toHaveProperty("visibilityWrite");
+  });
+
+  it.each(["folder", "form", "whiteboard", "workflow", "html"])(
+    "puts visibility in the create operation's metadata for %s",
+    async (type) => {
+      const mocks = fullClient();
+
+      const result = await nodeCreateTask.execute(mocks.client, inputFor(type));
+
+      expect(mocks.createChangeRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operations: [
+            expect.objectContaining({ nodeType: type, metadata: { visibility: "private" } }),
+          ],
+        }),
+      );
+      // A merged change request names the node but does not return it, so the
+      // task reads it back once to confirm.
+      expect(mocks.nodesGet).toHaveBeenCalledTimes(1);
+      expect(mocks.nodesGet).toHaveBeenCalledWith({ nodeId: "nod_generic" });
+      expect(result).not.toHaveProperty("visibilityWrite");
+    },
+  );
+
+  it("sends nothing and reads nothing back when no visibility was asked for", async () => {
+    const mocks = fullClient();
+
+    await nodeCreateTask.execute(mocks.client, { type: "folder", slug: "cms", name: "CMS" });
+    await nodeCreateTask.execute(mocks.client, { type: "doc", slug: "readme", name: "README" });
+
+    const operation = (
+      mocks.createChangeRequest.mock.calls[0]?.[0] as unknown as {
+        operations: Record<string, unknown>[];
+      }
+    ).operations[0];
+    expect(operation).not.toHaveProperty("metadata");
+    expect(mocks.docsCreate.mock.calls[0]?.[0]).not.toHaveProperty("visibility");
+    expect(mocks.nodesGet).not.toHaveBeenCalled();
+  });
+
+  it("confirms a Base from one read-back of its owning node", async () => {
+    const mocks = fullClient();
+
+    const result = await nodeCreateTask.execute(mocks.client, inputFor("base"));
+
+    expect(mocks.nodesGet).toHaveBeenCalledTimes(1);
+    expect(mocks.nodesGet).toHaveBeenCalledWith({ nodeId: "nod_base" });
+    expect(result).not.toHaveProperty("visibilityWrite");
+  });
+
+  // Version skew: a new CLI against an old server. The server's schema strips
+  // the unknown key, the create succeeds, and the node is NOT private. That
+  // must not read as plain success.
+  it("reports an old server that silently dropped visibility on a Doc", async () => {
+    const mocks = fullClient();
+    mocks.docsCreate.mockImplementationOnce(async () => ({
+      materialized: true,
+      node: nodeVO("nod_doc", null),
+      body: "",
+    }));
+
+    const result = await nodeCreateTask.execute(mocks.client, inputFor("doc"));
+
+    expect(result).toMatchObject({
+      node: { id: "nod_doc" },
+      visibilityWrite: { applied: false, requested: "private", nodeId: "nod_doc", actual: null },
+    });
+    expect((result as { visibilityWrite: { nextStep: string } }).visibilityWrite.nextStep).toBe(
+      "busabase-cli nodes update-visibility --node-id nod_doc --visibility private",
+    );
+    // The node came back in the response, so no extra call was needed.
+    expect(mocks.nodesGet).not.toHaveBeenCalled();
+  });
+
+  it("reports an old server that dropped visibility on a Base, found by the read-back", async () => {
+    const mocks = fullClient();
+    mocks.nodesGet.mockImplementationOnce(async ({ nodeId }) => ({
+      type: "base",
+      node: nodeVO(nodeId, null),
+    }));
+
+    const result = await nodeCreateTask.execute(mocks.client, inputFor("base"));
+
+    expect(result).toMatchObject({
+      nodeId: "nod_base",
+      visibilityWrite: { applied: false, requested: "private", nodeId: "nod_base", actual: null },
+    });
+  });
+
+  it("reports a pending proposal that does not carry visibility", async () => {
+    const mocks = fullClient();
+    mocks.docsCreate.mockImplementationOnce(async () => ({
+      materialized: false,
+      id: "cr_1",
+      status: "in_review",
+      operations: [{ operation: "node_create", headCommit: { payload: { metadata: {} } } }],
+    }));
+
+    const result = await nodeCreateTask.execute(mocks.client, {
+      ...inputFor("doc"),
+      requireReview: true,
+    });
+
+    expect(result).toMatchObject({
+      id: "cr_1",
+      visibilityWrite: { applied: false, requested: "private" },
+    });
+    expect((result as { visibilityWrite: { nextStep: string } }).visibilityWrite.nextStep).toMatch(
+      /^Once the change request merges: busabase-cli nodes update-visibility/,
+    );
+    expect(mocks.nodesGet).not.toHaveBeenCalled();
+  });
+
+  it("accepts a pending proposal that carries visibility to the merge", async () => {
+    const mocks = fullClient();
+    mocks.basesCreate.mockImplementationOnce(async () => ({
+      materialized: false,
+      id: "cr_1",
+      status: "in_review",
+      operations: [
+        {
+          operation: "node_create",
+          headCommit: { payload: { metadata: { visibility: "private" } } },
+        },
+      ],
+    }));
+
+    const result = await nodeCreateTask.execute(mocks.client, {
+      ...inputFor("base"),
+      requireReview: true,
+    });
+
+    expect(result).not.toHaveProperty("visibilityWrite");
+    expect(mocks.nodesGet).not.toHaveBeenCalled();
+  });
+
+  // A server from before the `explicit_visibility` column kept a Skill's
+  // visibility in metadata and honoured it; that is not a skew to report.
+  it("reads metadata.visibility only from a server that sends no explicitVisibility", async () => {
+    const mocks = fullClient();
+    mocks.fileTreesCreate.mockImplementationOnce(async () => ({
+      materialized: true,
+      node: { id: "nod_tree", metadata: { visibility: "private" } },
+      visibility: "private",
+      files: [],
+    }));
+
+    const result = await nodeCreateTask.execute(mocks.client, inputFor("skill"));
+
+    expect(result).not.toHaveProperty("visibilityWrite");
+  });
+
+  it("reports, rather than fails, when the confirming read-back errors", async () => {
+    const mocks = fullClient();
+    mocks.nodesGet.mockRejectedValueOnce(new Error("Service Unavailable"));
+
+    const result = await nodeCreateTask.execute(mocks.client, inputFor("base"));
+
+    expect(result).toMatchObject({
+      nodeId: "nod_base",
+      visibilityWrite: { applied: false, requested: "private", nodeId: "nod_base" },
+    });
+    expect((result as { visibilityWrite: { reason: string } }).visibilityWrite.reason).toContain(
+      "Service Unavailable",
+    );
+  });
+
+  it("refuses an unknown visibility before creating anything", async () => {
+    const mocks = fullClient();
+
+    await expect(
+      nodeCreateTask.execute(mocks.client, { ...inputFor("doc"), visibility: "secret" }),
+    ).rejects.toThrow(/visibility must be one of/);
+    expect(mocks.docsCreate).not.toHaveBeenCalled();
+  });
+
+  it("keeps reporting the prompt write alongside a visibility report", async () => {
+    const mocks = fullClient();
+    mocks.docsCreate.mockImplementationOnce(async () => ({
+      materialized: true,
+      node: nodeVO("nod_doc", null),
+      body: "",
+    }));
+
+    const result = await nodeCreateTask.execute(mocks.client, {
+      ...inputFor("doc"),
+      agentPrompts: prompts,
+    });
+
+    expect(result).toMatchObject({
+      visibilityWrite: { applied: false },
+      agentPromptsWrite: { written: true, nodeId: "nod_doc" },
+    });
+  });
+});
+
+describe("nodeCreateTask version", () => {
+  // Only the file-tree endpoint has a version; every other branch used to drop
+  // it without a word.
+  it.each(["doc", "base", "folder"])("rejects version for --type %s", async (type) => {
+    const create = vi.fn();
+    const { client } = clientFor({
+      docs: { create },
+      bases: { create },
+      nodes: { createChangeRequest: create },
+    });
+
+    await expect(
+      nodeCreateTask.execute(client, {
+        type: type as "doc",
+        slug: "x",
+        name: "X",
+        version: "1.0.0",
+      }),
+    ).rejects.toThrow(/version is not valid for --type/);
+    expect(create).not.toHaveBeenCalled();
+  });
+});

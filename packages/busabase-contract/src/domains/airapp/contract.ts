@@ -153,6 +153,20 @@ export const airAppSiteDomainInputSchema = airAppSiteInputSchema.extend({
   hostname: airAppSiteHostnameSchema,
 });
 
+/**
+ * What this deployment itself found wrong with a domain, as codes the client
+ * words in the viewer's language. Provider messages stay in `errors`.
+ * - `target-missing`: the deployment has no CNAME target configured.
+ * - `route-unverified`: the hostname does not reach this website yet.
+ * - `check-failed`: the provider could not be asked; check again.
+ */
+export const airAppSiteDomainIssueSchema = z.enum([
+  "target-missing",
+  "route-unverified",
+  "check-failed",
+]);
+export type AirAppSiteDomainIssue = z.infer<typeof airAppSiteDomainIssueSchema>;
+
 export const airAppSiteDomainSchema = z.object({
   hostname: z.string(),
   url: z.string(),
@@ -160,7 +174,9 @@ export const airAppSiteDomainSchema = z.object({
   hostnameStatus: z.string().nullable(),
   sslStatus: z.string().nullable(),
   dnsRecords: z.array(z.object({ type: z.string(), name: z.string(), value: z.string() })),
+  /** The hosting provider's own messages, verbatim (not translated). */
   errors: z.array(z.string()),
+  issues: z.array(airAppSiteDomainIssueSchema).default([]),
 });
 export type AirAppSiteDomainVO = z.infer<typeof airAppSiteDomainSchema>;
 export type AirAppSiteDomainBindingVO = AirAppSiteDomainVO;
@@ -172,21 +188,109 @@ export const airAppSiteDomainsSchema = z.object({
 });
 export type AirAppSiteDomainsVO = z.infer<typeof airAppSiteDomainsSchema>;
 
+/**
+ * The Website engine's actions are public (`/api/v1/airapps/{nodeId}/site…`), not
+ * only the dashboard's: an agent that changes a site's files must be able to put
+ * the reviewed result up, the way a deploy CLI does, without a person clicking.
+ * Same `node("write")` level as the buttons.
+ */
+const SITE_TAGS = ["Websites"];
+
 export const airappRuntimeContract = {
   runLocal: oc.input(airAppRunLocalInputSchema).output(eventIterator(airAppRuntimeEventSchema)),
   stopLocal: oc.input(airAppStopLocalInputSchema).output(airAppStopLocalOutputSchema),
-  siteState: oc.input(airAppSiteInputSchema).output(airAppSiteStateSchema),
+  siteState: oc
+    .route({
+      method: "GET",
+      path: "/airapps/{nodeId}/site",
+      tags: SITE_TAGS,
+      summary: "Get an AirApp website's state",
+      successDescription:
+        "Whether the Website engine is available here (`engine`), the public `address`, `publication` (not live / live / live with unpublished changes), the public switch (`isPublic`), the preview and live versions, `currentVersion` (what the files would deploy as now), `previewStale` (files changed since the preview), and `blockers` that stop the files from deploying.",
+    })
+    .input(airAppSiteInputSchema)
+    .output(airAppSiteStateSchema),
   /** Uploads the current files as the members-only preview, unless they already are it. */
-  siteDeployPreview: oc.input(airAppSiteInputSchema).output(airAppSiteActionOutputSchema),
+  siteDeployPreview: oc
+    .route({
+      method: "POST",
+      path: "/airapps/{nodeId}/site/preview",
+      tags: SITE_TAGS,
+      summary: "Deploy the website preview (Restart)",
+      successDescription:
+        "Uploads the AirApp's current files as the members-only preview (the dashboard's Restart), unless the preview already is this version. `outcome: blocked` means the files cannot deploy; `state.blockers` says why. Nothing public changes.",
+    })
+    .input(airAppSiteInputSchema)
+    .output(airAppSiteActionOutputSchema),
   /** Promotes the previewed version to the public address. Never publishes anything else. */
-  siteGoLive: oc.input(airAppSiteInputSchema).output(airAppSiteActionOutputSchema),
+  siteGoLive: oc
+    .route({
+      method: "POST",
+      path: "/airapps/{nodeId}/site/go-live",
+      tags: SITE_TAGS,
+      summary: "Publish the previewed version (Go live)",
+      successDescription:
+        "Puts the previewed version on the public address, and only that version. `outcome: preview-stale` means the files changed after the preview, so nothing was published: deploy the preview again first. `outcome: no-preview` means there is no preview yet. Anyone with the address can use a public site.",
+    })
+    .input(airAppSiteInputSchema)
+    .output(airAppSiteActionOutputSchema),
   /** Turns the public switch back on for the version already live. */
-  siteRepublish: oc.input(airAppSiteInputSchema).output(airAppSiteActionOutputSchema),
+  siteRepublish: oc
+    .route({
+      method: "POST",
+      path: "/airapps/{nodeId}/site/republish",
+      tags: SITE_TAGS,
+      summary: "Turn the public address back on",
+      successDescription:
+        "Serves the version that was already live again after an unpublish. Publishes nothing new; `outcome: no-preview` means nothing has ever gone live.",
+    })
+    .input(airAppSiteInputSchema)
+    .output(airAppSiteActionOutputSchema),
   /** Turns the public switch off. Available whatever the plan, so a site can always come down. */
-  siteUnpublish: oc.input(airAppSiteInputSchema).output(airAppSiteActionOutputSchema),
+  siteUnpublish: oc
+    .route({
+      method: "POST",
+      path: "/airapps/{nodeId}/site/unpublish",
+      tags: SITE_TAGS,
+      summary: "Take the website offline",
+      successDescription:
+        "Turns the public switch off: every website address answers not found until it is republished. Works whatever the plan, so a site can always come down.",
+    })
+    .input(airAppSiteInputSchema)
+    .output(airAppSiteActionOutputSchema),
   /** Fresh domain status and DNS instructions; remains readable after a plan lapses. */
-  siteDomains: oc.input(airAppSiteInputSchema).output(airAppSiteDomainsSchema),
-  siteBindDomain: oc.input(airAppSiteDomainInputSchema).output(airAppSiteDomainsSchema),
+  siteDomains: oc
+    .route({
+      method: "GET",
+      path: "/airapps/{nodeId}/site/domains",
+      tags: SITE_TAGS,
+      summary: "List a website's custom domains",
+      successDescription:
+        "Each bound domain's fresh status (`pending`, `active`, `error`), the DNS records to add (`dnsRecords`), this deployment's findings as codes (`issues`) and the provider's own messages (`errors`), plus the CNAME target (`cnameTarget`) a new domain should point to. Checks again on every call.",
+    })
+    .input(airAppSiteInputSchema)
+    .output(airAppSiteDomainsSchema),
+  siteBindDomain: oc
+    .route({
+      method: "POST",
+      path: "/airapps/{nodeId}/site/domains",
+      tags: SITE_TAGS,
+      summary: "Add a custom domain to a website",
+      successDescription:
+        "Binds a hostname the space owns (`shop.company.com`, no scheme or path) to a website that has gone live, and returns the domains with the DNS records to add at the DNS provider. The domain serves the site once DNS and HTTPS are ready.",
+    })
+    .input(airAppSiteDomainInputSchema)
+    .output(airAppSiteDomainsSchema),
   /** Removal remains possible after a plan lapses. */
-  siteUnbindDomain: oc.input(airAppSiteDomainInputSchema).output(airAppSiteDomainsSchema),
+  siteUnbindDomain: oc
+    .route({
+      method: "DELETE",
+      path: "/airapps/{nodeId}/site/domains/{hostname}",
+      tags: SITE_TAGS,
+      summary: "Remove a custom domain from a website",
+      successDescription:
+        "The hostname stops serving this website; its generated address keeps working. Possible after a plan lapses.",
+    })
+    .input(airAppSiteDomainInputSchema)
+    .output(airAppSiteDomainsSchema),
 };

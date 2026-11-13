@@ -1114,6 +1114,12 @@ export const busabaseDemoRouter: EnhancedRouter<
   // Dump domain needs real per-space DB rows and object storage the stateless
   // in-memory demo dataset doesn't have — unsupported in demo mode.
   dump: {
+    exportSnapshot: os.dump.exportSnapshot.handler(() => {
+      throw demoUnsupported("Export space snapshot");
+    }),
+    exportAssetAttachment: os.dump.exportAssetAttachment.handler(() => {
+      throw demoUnsupported("Copy space asset attachment for backup");
+    }),
     exportTables: os.dump.exportTables.handler(() => {
       throw demoUnsupported("Export space");
     }),
