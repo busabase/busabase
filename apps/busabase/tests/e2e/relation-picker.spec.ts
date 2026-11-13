@@ -171,7 +171,8 @@ test("selected relations survive searching, saving, list navigation and reload",
   await page.getByRole("button", { name: "Save Now", exact: true }).click();
   await expect(row.getByRole("link", { name: "Mathematics", exact: true })).toBeVisible();
   await expect(row.getByRole("link", { name: "Biology", exact: true })).toBeVisible();
-  await row.getByRole("link", { name: "Zhang San", exact: true }).click();
+  // The first column edits in place; the record opens from its expand button.
+  await row.getByRole("button", { name: "Open: Zhang San", exact: true }).click();
   await page.getByRole("link", { name: "Edit", exact: true }).click();
   await page.locator(`#record-field-${relationField.id}`).click();
   const search = page.getByRole("searchbox", { name: /Subjects/ });

@@ -140,11 +140,10 @@ test("Beijing turns on Include time and sets a Friday 18:00 deadline", async ({ 
     ["Ship mobile build", "2026-10-03T01:00"],
   ] as const) {
     await page.goto(`/dashboard/local/base/${baseSlug}`, { waitUntil: "commit" });
+    // The first column edits in place; the record opens from its expand button.
     await page
       .getByTestId("base-records-grid")
-      .locator("[data-record-id]")
-      .filter({ hasText: title })
-      .getByText(title)
+      .getByRole("button", { name: `Open: ${title}`, exact: true })
       .click({ timeout: 60_000 });
     await page.getByText("Edit", { exact: true }).first().click();
     // The picker opens on the value's month (or today's), so steer it to the target day.

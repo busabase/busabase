@@ -130,15 +130,11 @@ const config = {
     // Prevent header-based RSC responses from sharing a URL cache key with HTML.
     validateRSCRequestHeaders: true,
     // The proxy.ts middleware layer enforces its own body-size cap ahead of
-    // any Route Handler, defaulting to 10MB — `busabase-cli restore` batches
-    // `dump.import.tables` rows by both count AND bytes, but a single
-    // attachment's base64-encoded bytes can still exceed that on its own
-    // (observed live against a real production space: individual files
-    // large enough to push even a same-request batch of one over 10MB),
-    // and the server rejected it as a generic "malformed request" with no
-    // indication of the real cause. Match the export side's own tolerance
-    // for large single files.
-    proxyClientMaxBodySize: "100mb",
+    // any Route Handler. Restore batches by bytes, but a single historical
+    // commit can be 95 MiB; its opaque JSON envelope is about 130 MiB.
+    // Match Cloud's bounded envelope so an exact restore reaches the handler.
+    // File bodies still use bounded multipart parts and their own size policy.
+    proxyClientMaxBodySize: "256mb",
   },
   turbopack: {
     root: monorepoRoot,
