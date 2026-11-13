@@ -32,6 +32,9 @@ interface DashboardLayoutProps {
   onInviteMembersClick?: () => void;
   spaceSelectorReadonly?: boolean;
   spaceSelectorExtraMenuItems?: React.ReactNode;
+  /** See `SpaceSelectorProps.maxVisibleSpaces` — applies only with `onViewAllSpaces`. */
+  spaceSelectorMaxVisibleSpaces?: number;
+  onViewAllSpaces?: () => void;
   isLoadingSpaces?: boolean;
   /**
    * App branding configuration displayed when no spaces are available
@@ -91,6 +94,7 @@ interface DashboardLayoutProps {
     inviteMembers?: string;
     addSpace?: string;
     focusMode?: string;
+    viewAllSpaces?: string;
   };
   /**
    * Called when the user clicks the "enter agent focus mode" button in the SpaceSelector dropdown.
@@ -130,6 +134,8 @@ export function DashboardLayout({
   onInviteMembersClick,
   spaceSelectorReadonly,
   spaceSelectorExtraMenuItems,
+  spaceSelectorMaxVisibleSpaces,
+  onViewAllSpaces,
   isLoadingSpaces,
   branding,
   appLogo,
@@ -185,6 +191,8 @@ export function DashboardLayout({
         onInviteMembersClick={onInviteMembersClick}
         spaceSelectorReadonly={spaceSelectorReadonly}
         spaceSelectorExtraMenuItems={spaceSelectorExtraMenuItems}
+        spaceSelectorMaxVisibleSpaces={spaceSelectorMaxVisibleSpaces}
+        onViewAllSpaces={onViewAllSpaces}
         isLoadingSpaces={isLoadingSpaces}
         branding={branding}
         appLogo={appLogo}

@@ -19,6 +19,7 @@ import {
   ChevronUp,
   Cloud,
   Focus,
+  LayoutList,
   Monitor,
   Plus,
   Settings,
@@ -130,6 +131,27 @@ const getPlanBadgeStyle = (plan: string) => {
   return "bg-transparent text-muted-foreground/50 border border-border/30";
 };
 
+/**
+ * The spaces listed in the menu when a host caps the list (`maxVisibleSpaces`).
+ *
+ * Keeps the host's own order and always includes the active space — swapped in
+ * for the last visible row when it falls past the cap — so the check mark never
+ * points at a row that was cut. Uncapped, or under the cap, it is the list as-is.
+ */
+export const pickVisibleSpaces = <T extends Pick<Space, "id">>(
+  spaces: T[],
+  activeSpaceId: string | undefined,
+  maxVisibleSpaces?: number,
+): T[] => {
+  if (!maxVisibleSpaces || maxVisibleSpaces < 1 || spaces.length <= maxVisibleSpaces) {
+    return spaces;
+  }
+  const head = spaces.slice(0, maxVisibleSpaces);
+  if (!activeSpaceId || head.some((space) => space.id === activeSpaceId)) return head;
+  const active = spaces.find((space) => space.id === activeSpaceId);
+  return active ? [...head.slice(0, maxVisibleSpaces - 1), active] : head;
+};
+
 export interface SpaceSelectorProps {
   spaces: Space[];
   activeSpace?: Space;
@@ -148,6 +170,8 @@ export interface SpaceSelectorProps {
     addSpace?: string;
     /** Tooltip for the focus-mode button (top-right of dropdown header). */
     focusMode?: string;
+    /** Row that opens the full list once the menu is capped (`maxVisibleSpaces`). */
+    viewAllSpaces?: string;
   };
   /** Use compact button size (md:h-8 md:p-0) */
   compact?: boolean;
@@ -155,6 +179,16 @@ export interface SpaceSelectorProps {
   appLogo?: string;
   /** Optional secondary workspace actions rendered after the primary Space actions. */
   extraMenuItems?: React.ReactNode;
+  /**
+   * Cap on how many spaces the menu lists. Past it, the menu shows that many
+   * (always including the active one) plus a "view all" row that calls
+   * `onViewAllSpaces`. Both must be set for the cap to apply; omit them and every
+   * space is listed, exactly as before. For people who belong to dozens of
+   * spaces (agencies, partners), where a full list buries the menu's other
+   * destinations.
+   */
+  maxVisibleSpaces?: number;
+  onViewAllSpaces?: () => void;
 }
 
 const defaultLabels = {
@@ -177,6 +211,8 @@ export function SpaceSelector({
   compact = false,
   appLogo,
   extraMenuItems,
+  maxVisibleSpaces,
+  onViewAllSpaces,
 }: SpaceSelectorProps) {
   const { isMobile, state } = useSidebar();
   const isCollapsed = state === "collapsed";
@@ -261,7 +297,18 @@ export function SpaceSelector({
     onAddSpace?.();
   };
 
+  const handleViewAllSpaces = () => {
+    setIsOpen(false);
+    onViewAllSpaces?.();
+  };
+
   if (!currentSpace) return null;
+
+  // The cap only applies when the host also gives a way to reach the rest.
+  const listedSpaces = onViewAllSpaces
+    ? pickVisibleSpaces(spaces, currentSpace.id, maxVisibleSpaces)
+    : spaces;
+  const hasHiddenSpaces = listedSpaces.length < spaces.length;
 
   if (readonly) {
     const logoSrc = currentSpace.logo || appLogo;
@@ -443,7 +490,7 @@ export function SpaceSelector({
                   <DropdownMenuLabel className="px-2 py-1.5 text-muted-foreground text-xs">
                     {labels.spaces} · {spaces.length}
                   </DropdownMenuLabel>
-                  {spaces.map((space) => {
+                  {listedSpaces.map((space) => {
                     const isActive = space.id === currentSpace.id;
                     return (
                       <DropdownMenuItem
@@ -474,6 +521,20 @@ export function SpaceSelector({
                       </DropdownMenuItem>
                     );
                   })}
+
+                  {hasHiddenSpaces && (
+                    <DropdownMenuItem
+                      className="cursor-pointer gap-2 p-2"
+                      onClick={handleViewAllSpaces}
+                    >
+                      <div className="flex size-6 items-center justify-center rounded-md border bg-background">
+                        <LayoutList className="size-4" />
+                      </div>
+                      <span className="text-muted-foreground">
+                        {labels.viewAllSpaces ?? "View all spaces"} · {spaces.length}
+                      </span>
+                    </DropdownMenuItem>
+                  )}
 
                   {onAddSpace && (
                     <>

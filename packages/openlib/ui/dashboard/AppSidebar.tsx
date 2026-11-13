@@ -41,6 +41,9 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   onInviteMembersClick?: () => void;
   spaceSelectorReadonly?: boolean;
   spaceSelectorExtraMenuItems?: React.ReactNode;
+  /** See `SpaceSelectorProps.maxVisibleSpaces` — applies only with `onViewAllSpaces`. */
+  spaceSelectorMaxVisibleSpaces?: number;
+  onViewAllSpaces?: () => void;
   isLoadingSpaces?: boolean;
   /**
    * App branding configuration displayed when no spaces are available
@@ -82,6 +85,7 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
     inviteMembers?: string;
     addSpace?: string;
     focusMode?: string;
+    viewAllSpaces?: string;
   };
   /**
    * Called when the user clicks the "enter agent focus mode" button in the SpaceSelector dropdown.
@@ -159,6 +163,8 @@ export function AppSidebar({
   onInviteMembersClick,
   spaceSelectorReadonly,
   spaceSelectorExtraMenuItems,
+  spaceSelectorMaxVisibleSpaces,
+  onViewAllSpaces,
   isLoadingSpaces,
   branding,
   appLogo,
@@ -235,6 +241,8 @@ export function AppSidebar({
             labels={spaceSelectorLabels}
             appLogo={appLogo}
             extraMenuItems={spaceSelectorExtraMenuItems}
+            maxVisibleSpaces={spaceSelectorMaxVisibleSpaces}
+            onViewAllSpaces={onViewAllSpaces}
           />
         ) : null}
       </SidebarHeader>
