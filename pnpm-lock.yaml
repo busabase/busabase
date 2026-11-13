@@ -816,6 +816,9 @@ importers:
       '@orpc/server':
         specifier: ^1.14.6
         version: 1.14.6(@opentelemetry/api@1.10.0)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
+      '@orpc/standard-server':
+        specifier: ^1.14.6
+        version: 1.14.6(@opentelemetry/api@1.10.0)
       '@orpc/tanstack-query':
         specifier: 1.14.6
         version: 1.14.6(@opentelemetry/api@1.10.0)(@orpc/client@1.14.6(@opentelemetry/api@1.10.0))(@tanstack/query-core@5.101.0)
