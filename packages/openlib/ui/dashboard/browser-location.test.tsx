@@ -2,13 +2,27 @@
 
 import { act, cleanup, render } from "@testing-library/react";
 import { type ReactElement, useInsertionEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { navigate, useSearch as useWouterSearch } from "wouter/use-browser-location";
-import { useNextSafeBrowserLocation, useNextSafeSearch } from "./browser-location";
+import {
+  registerPopstateInterceptor,
+  useNextSafeBrowserLocation,
+  useNextSafeSearch,
+} from "./browser-location";
+
+// Next's root router can register before this module is evaluated. Its update
+// can render a mounted route before the later location guard sees popstate.
+const earlierRouter = vi.hoisted(() => {
+  const listener: { current: (() => void) | null } = { current: null };
+  window.addEventListener("popstate", () => listener.current?.());
+  return listener;
+});
 
 const INSERTION_UPDATE_ERROR = "useInsertionEffect must not schedule updates";
 
 afterEach(() => {
+  earlierRouter.current = null;
   cleanup();
   vi.restoreAllMocks();
   window.history.replaceState(null, "", "/");
@@ -133,6 +147,26 @@ describe("every other location change", () => {
 });
 
 describe("location notification timing", () => {
+  it("keeps the snapshot current while no location hook is subscribed", async () => {
+    const first = render(<SafeProbe />);
+    first.unmount();
+    navigate("/settings?tab=channels");
+    const visited: string[] = [];
+    function Probe() {
+      const [path] = useNextSafeBrowserLocation();
+      const search = useNextSafeSearch();
+      visited.push(path + search);
+      return <output>{path + search}</output>;
+    }
+    const second = render(<Probe />);
+    expect(visited).toEqual(["/settings?tab=channels"]);
+    expect(second.container.textContent).toBe("/settings?tab=channels");
+    await act(async () => {
+      navigate("/settings?tab=billing", { replace: true });
+    });
+    expect(second.container.textContent).toBe("/settings?tab=billing");
+  });
+
   it("updates the URL synchronously while notifying hooks after a microtask", async () => {
     const view = render(<SafeProbe />);
     await act(async () => {
@@ -180,5 +214,109 @@ describe("location notification timing", () => {
       view.unmount();
     });
     expect(error).not.toHaveBeenCalled();
+  });
+});
+
+describe("history interception", () => {
+  it("keeps a draft mounted when an earlier router renders before the traversal is intercepted", async () => {
+    navigate("/previous");
+    navigate("/editing");
+    const visited: string[] = [];
+    let renderParent: (update: (value: number) => number) => void = () => undefined;
+    function EditorRoute() {
+      const [path] = useNextSafeBrowserLocation();
+      visited.push(path);
+      return path === "/editing" ? <textarea defaultValue="Unsaved draft" /> : <p>Other route</p>;
+    }
+    function Parent() {
+      const [revision, setRevision] = useState(0);
+      renderParent = setRevision;
+      return (
+        <section data-revision={revision}>
+          <EditorRoute />
+        </section>
+      );
+    }
+    const view = render(<Parent />);
+    const draft = view.container.querySelector("textarea");
+    expect(draft).not.toBeNull();
+    let finishRestoration: () => void = () => undefined;
+    const restored = new Promise<void>((resolve) => {
+      finishRestoration = resolve;
+    });
+    const unregister = registerPopstateInterceptor((event) => {
+      event.stopImmediatePropagation();
+      if (location.pathname === "/previous") history.forward();
+      else finishRestoration();
+    });
+    earlierRouter.current = () => flushSync(() => renderParent((value) => value + 1));
+    try {
+      await act(async () => {
+        history.back();
+        await restored;
+      });
+      expect(location.pathname).toBe("/editing");
+      expect(visited).not.toContain("/previous");
+      expect(view.container.querySelector("textarea")).toBe(draft);
+      expect(draft?.value).toBe("Unsaved draft");
+    } finally {
+      earlierRouter.current = null;
+      unregister();
+    }
+  });
+
+  it("protects a mounted draft before an existing location subscriber observes Back", async () => {
+    navigate("/previous");
+    navigate("/editing");
+    const visited: string[] = [];
+    function EditorRoute() {
+      const [path] = useNextSafeBrowserLocation();
+      visited.push(path);
+      return path === "/editing" ? <textarea defaultValue="Unsaved draft" /> : <p>Other route</p>;
+    }
+    const view = render(<EditorRoute />);
+    const draft = view.container.querySelector("textarea");
+    expect(draft).not.toBeNull();
+    const historyLength = history.length;
+    let finishRestoration: () => void = () => undefined;
+    const restored = new Promise<void>((resolve) => {
+      finishRestoration = resolve;
+    });
+    const interceptor = vi.fn((event: PopStateEvent) => {
+      event.stopImmediatePropagation();
+      if (location.pathname === "/previous") history.forward();
+      else finishRestoration();
+    });
+    // Registration may happen after the hook subscribes. Its forwarding
+    // listener was installed when browser-location itself loaded.
+    const unregister = registerPopstateInterceptor(interceptor);
+    try {
+      await act(async () => {
+        history.back();
+        await restored;
+      });
+      expect(interceptor).toHaveBeenCalledTimes(2);
+      expect(location.pathname).toBe("/editing");
+      expect(history.length).toBe(historyLength);
+      expect(visited).not.toContain("/previous");
+      expect(view.container.querySelector("textarea")).toBe(draft);
+      expect(draft?.value).toBe("Unsaved draft");
+    } finally {
+      unregister();
+    }
+  });
+
+  it("does not let an old registration remove its replacement", () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const removeFirst = registerPopstateInterceptor(first);
+    const removeSecond = registerPopstateInterceptor(second);
+    removeFirst();
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+    removeSecond();
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(second).toHaveBeenCalledTimes(1);
   });
 });

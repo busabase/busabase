@@ -4,6 +4,29 @@ import { type ReactNode, useSyncExternalStore } from "react";
 import { Router } from "wouter";
 import { navigate } from "wouter/use-browser-location";
 
+type PopstateInterceptor = (event: PopStateEvent) => void;
+let popstateInterception: { current: PopstateInterceptor | null } = { current: null };
+if (typeof window !== "undefined") {
+  const key = Symbol.for("openlib.browser-location.popstate-interceptor");
+  const registry = window as unknown as Record<symbol, typeof popstateInterception | undefined>;
+  const existing = registry[key];
+  if (existing) {
+    popstateInterception = existing;
+  } else {
+    registry[key] = popstateInterception;
+    // Install before location subscribers can unmount a view during traversal.
+    window.addEventListener("popstate", (event) => popstateInterception.current?.(event));
+  }
+}
+
+/** Register the active view's interceptor before browser-location subscribers. */
+export function registerPopstateInterceptor(interceptor: PopstateInterceptor): () => void {
+  popstateInterception.current = interceptor;
+  return () => {
+    if (popstateInterception.current === interceptor) popstateInterception.current = null;
+  };
+}
+
 /**
  * wouter's browser location hooks, safe to run under the Next.js App Router.
  *
@@ -13,10 +36,25 @@ import { navigate } from "wouter/use-browser-location";
  * either case schedules an update inside an insertion effect.
  *
  * Keep the URL/history writes synchronous, but notify location subscribers in
- * a microtask after the current commit. Coalesce events within that turn; hooks
- * read the latest URL, including query-only and back/forward navigation.
+ * a microtask after the current commit. Coalesce events within that turn.
+ * Cache the accepted URL: an earlier router can render during popstate before
+ * the interceptor has rejected traversal, so render must not read location yet.
  */
 const events = ["popstate", "pushState", "replaceState", "hashchange"] as const;
+const locationSnapshot = {
+  pathname: typeof window !== "undefined" ? window.location.pathname : "/",
+  search: typeof window !== "undefined" ? window.location.search : "",
+};
+
+if (typeof window !== "undefined") {
+  // Observe writes even without subscribers. The earlier interceptor can stop
+  // a rejected popstate before it changes this snapshot or notifies any hook.
+  const updateSnapshot = () => {
+    locationSnapshot.pathname = location.pathname;
+    locationSnapshot.search = location.search;
+  };
+  for (const event of events) window.addEventListener(event, updateSnapshot);
+}
 
 const subscribeToLocationUpdates = (callback: () => void) => {
   let active = true;
@@ -36,8 +74,8 @@ const subscribeToLocationUpdates = (callback: () => void) => {
   };
 };
 
-const currentPathname = () => location.pathname;
-const currentSearch = () => location.search;
+const currentPathname = () => locationSnapshot.pathname;
+const currentSearch = () => locationSnapshot.search;
 
 /** Drop-in for `useSearch` from `wouter/use-browser-location`; pass it as `<Router searchHook>`. */
 export const useNextSafeSearch = ({ ssrSearch }: { ssrSearch?: string } = {}) =>
