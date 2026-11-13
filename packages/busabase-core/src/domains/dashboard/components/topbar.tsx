@@ -37,9 +37,11 @@ export function BusabaseTopbar({
   children?: ReactNode;
 }) {
   const messages = useCoreI18n();
+  // 12px sides on a phone: an HTML node being edited (Cancel + Save) otherwise
+  // pushes the side-panel button 1px past a 390px screen.
   return (
     <div
-      className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-4 py-1.5 backdrop-blur-sm md:h-12"
+      className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-3 py-1.5 backdrop-blur-sm sm:px-4 md:h-12"
       data-dashboard-topbar
     >
       <SidebarTrigger
@@ -234,8 +236,10 @@ function TopbarNodeLocatorButton({
  * page-level tab switcher) — this one is additive, for the per-node action
  * cluster only.
  */
-export function TopbarNodeActionsSlot() {
-  const actions = useTopbarNodeActionsStore((state) => state.actions);
+export function TopbarNodeActionsSlot({ readOnly = false }: { readOnly?: boolean }) {
+  const actions = useTopbarNodeActionsStore((state) =>
+    readOnly ? state.readActions : state.actions,
+  );
   if (!actions) {
     return null;
   }

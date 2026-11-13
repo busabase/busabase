@@ -2828,7 +2828,7 @@ export const assertChangeRequestPermission = async (
 };
 
 /**
- * Approval gate for a whole ChangeRequest — review, merge and close.
+ * Approval gate for a whole ChangeRequest — review and merge.
  *
  * Workspace `manage` (owner/admin) passes without a per-node walk. Everyone
  * else must hold `write` on EVERY node the CR touches. That is what makes
@@ -2866,6 +2866,51 @@ const assertCanApproveChangeRequest = async (changeRequestId: string): Promise<v
 export const canApproveChangeRequest = async (changeRequestId: string): Promise<boolean> => {
   try {
     await assertCanApproveChangeRequest(changeRequestId);
+    return true;
+  } catch (error) {
+    if (error instanceof ORPCError && error.code === "FORBIDDEN") return false;
+    throw error;
+  }
+};
+
+/**
+ * The request author may withdraw their own pending proposal with
+ * `changeRequest` access. This deliberately remains narrower than review:
+ * authors cannot approve, reject, or merge any request through this path.
+ */
+const assertCanCloseChangeRequest = async (changeRequestId: string): Promise<void> => {
+  try {
+    await assertCanApproveChangeRequest(changeRequestId);
+    return;
+  } catch (error) {
+    if (!(error instanceof ORPCError) || error.code !== "FORBIDDEN") throw error;
+  }
+
+  await ensureReady();
+  const db = await getDb();
+  const [changeRequest] = await db
+    .select({ submittedBy: busabaseChangeRequests.submittedBy })
+    .from(busabaseChangeRequests)
+    .where(
+      and(
+        eq(busabaseChangeRequests.id, changeRequestId),
+        eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+      ),
+    )
+    .limit(1);
+  if (!changeRequest) throw changeRequestNotFound(changeRequestId);
+  if (changeRequest.submittedBy !== mineActorId()) {
+    throw new ORPCError("FORBIDDEN", {
+      message: "Only a reviewer or the request author may close this change request",
+    });
+  }
+  await assertChangeRequestPermission(changeRequestId, "changeRequest");
+};
+
+/** Non-throwing close gate for the detail UI. */
+export const canCloseChangeRequest = async (changeRequestId: string): Promise<boolean> => {
+  try {
+    await assertCanCloseChangeRequest(changeRequestId);
     return true;
   } catch (error) {
     if (error instanceof ORPCError && error.code === "FORBIDDEN") return false;
@@ -3494,7 +3539,7 @@ export const recordPendingNodeCreate = async (args: {
 };
 
 export const closeChangeRequest = async (changeRequestId: string, reason?: string) => {
-  await assertCanApproveChangeRequest(changeRequestId);
+  await assertCanCloseChangeRequest(changeRequestId);
   await ensureReady();
   const db = await getDb();
   const [changeRequest] = await db
@@ -3505,6 +3550,7 @@ export const closeChangeRequest = async (changeRequestId: string, reason?: strin
   if (!changeRequest) {
     throw changeRequestNotFound(changeRequestId);
   }
+  const withdrawnBySubmitter = changeRequest.submittedBy === mineActorId();
   // `conflict` is closable too — the author may abandon an unresolvable conflict.
   if (!["in_review", "changes_requested", "approved", "conflict"].includes(changeRequest.status)) {
     throw changeRequestConflict(`ChangeRequest is not closable: ${changeRequest.status}`);
@@ -3514,7 +3560,8 @@ export const closeChangeRequest = async (changeRequestId: string, reason?: strin
     .update(busabaseChangeRequests)
     .set({
       status: "rejected",
-      rejectedReason: reason ?? "Closed by reviewer",
+      rejectedReason:
+        reason ?? (withdrawnBySubmitter ? "Withdrawn by submitter" : "Closed by reviewer"),
       reviewedAt: timestamp,
       updatedAt: timestamp,
     })
@@ -3524,7 +3571,7 @@ export const closeChangeRequest = async (changeRequestId: string, reason?: strin
     actorId: CURRENT_USER_ID,
     baseId: changeRequest.baseId,
     changeRequestId: changeRequest.id,
-    metadata: { verdict: "closed" },
+    metadata: { verdict: withdrawnBySubmitter ? "withdrawn" : "closed" },
   });
   await announceChangeRequestRejected({
     changeRequestId: changeRequest.id,

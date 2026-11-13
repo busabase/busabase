@@ -55,6 +55,7 @@ import type {
   ViewUpdatePayload,
 } from "../helpers/view-types";
 import type { UpdateRecordCell } from "../hooks/use-base-grid-editing";
+import type { FieldFileUploader } from "../hooks/use-field-file-upload";
 import type { RecordFindControl } from "../hooks/use-record-find";
 import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-actions";
 import { useRegisterTopbarNodeInfo } from "../hooks/use-register-topbar-node-info";
@@ -120,6 +121,7 @@ export function BaseDetailView({
   onPatchRecord,
   onReorderView,
   onUpdateRecordCell,
+  onUploadAttachment,
   onUpdateView,
   views,
 }: {
@@ -176,6 +178,8 @@ export function BaseDetailView({
   onReorderView?: (view: ViewVO, position: number) => void;
   /** In-cell editing of one field; see `BusaBaseTable`. */
   onUpdateRecordCell?: UpdateRecordCell;
+  /** Uploads attachment field files before the table submits its cell patch. */
+  onUploadAttachment?: FieldFileUploader;
   onUpdateView: (
     view: ViewVO,
     payload: ViewUpdatePayload,
@@ -255,6 +259,7 @@ export function BaseDetailView({
               onPatchRecord={onPatchRecord}
               onReorderView={onReorderView}
               onUpdateRecordCell={onUpdateRecordCell}
+              onUploadAttachment={onUploadAttachment}
               onUpdateView={onUpdateView}
               records={filteredRecords}
               relationRecords={records}

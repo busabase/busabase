@@ -150,6 +150,7 @@ const isPrintableKey = (event: KeyboardEvent) =>
  */
 export function useBaseGridEditing({
   canMerge,
+  canEditField,
   enabled,
   ensureRowVisible,
   fields,
@@ -163,6 +164,8 @@ export function useBaseGridEditing({
 }: {
   /** The viewer may write this Base, so the main submit action merges at once. */
   canMerge: boolean;
+  /** Some field kinds need a host capability in addition to a record write. */
+  canEditField?: (field: BaseFieldVO) => boolean;
   enabled: boolean;
   ensureRowVisible: (rowIndex: number) => void;
   fields: BaseFieldVO[];
@@ -215,12 +218,12 @@ export function useBaseGridEditing({
   const fieldBySlug = useMemo(() => new Map(fields.map((field) => [field.slug, field])), [fields]);
 
   const isEditableCell = useCallback(
-    (record: RecordVO, field: BaseFieldVO, columnIndex: number) =>
+    (record: RecordVO, field: BaseFieldVO) =>
       enabled &&
-      columnIndex > 0 &&
       record.status === "active" &&
+      (canEditField?.(field) ?? true) &&
       canEditCellValueInline(field, record.headCommit.payload[field.slug]),
-    [enabled],
+    [canEditField, enabled],
   );
 
   const overlayIsCurrent = useCallback((record: RecordVO, overlay: CellOverlay | undefined) => {
@@ -591,8 +594,7 @@ export function useBaseGridEditing({
       const field = fieldBySlug.get(fieldSlug);
       if (!record || !field) return;
       const position = { recordId, fieldSlug };
-      const columnIndex = fields.findIndex((item) => item.slug === fieldSlug);
-      const editable = isEditableCell(record, field, columnIndex);
+      const editable = isEditableCell(record, field);
       const kind = editable ? getInlineCellEditorKind(field) : null;
       const moveBy = (rowDelta: number, columnDelta: number) => {
         const next = neighbour(position, rowDelta, columnDelta);

@@ -29,14 +29,23 @@ import { TABLE_CELL_PREVIEW_MAX_CHARS } from "./table-cell-preview";
 /** The editor a grid cell opens in place — the form's control kind for that field. */
 export type InlineCellEditorKind = Extract<
   FieldInputKind,
-  "text" | "number" | "select" | "checkbox" | "date" | "url" | "email" | "tel" | "relation"
+  | "text"
+  | "number"
+  | "select"
+  | "checkbox"
+  | "date"
+  | "url"
+  | "email"
+  | "tel"
+  | "member"
+  | "relation"
+  | "attachment"
 >;
 
 /**
- * Field types that edit in place. Deliberately a short list: long text, JSON,
- * attachments, people and AI/computed fields need more room or a picker the
- * grid cannot hold, so those cells keep opening the record. Relations use the
- * record form's picker inside a cell-anchored popover.
+ * Field types that edit in place. Long text, JSON and computed fields need the
+ * full record surface; members use a compact roster picker, relations use a
+ * cell popover, and attachments reuse the record form's upload controls.
  */
 const INLINE_FIELD_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "text",
@@ -47,7 +56,9 @@ const INLINE_FIELD_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "url",
   "email",
   "phone",
+  "member",
   "relation",
+  "attachment",
 ]);
 
 export const getInlineCellEditorKind = (field: BaseFieldVO): InlineCellEditorKind | null =>
@@ -72,6 +83,14 @@ export const canEditCellValueInline = (field: BaseFieldVO, value: unknown): bool
   }
   if (kind === "select") {
     return value === null || value === undefined || typeof value === "string";
+  }
+  if (kind === "member") {
+    return (
+      value === null ||
+      value === undefined ||
+      typeof value === "string" ||
+      (Array.isArray(value) && value.every((item) => typeof item === "string"))
+    );
   }
   return true;
 };
@@ -169,7 +188,9 @@ const errorForKind: Record<InlineCellEditorKind, InlineCellDraftError> = {
   url: "url",
   email: "email",
   tel: "phone",
+  member: "invalid",
   relation: "invalid",
+  attachment: "invalid",
 };
 
 /**
@@ -252,6 +273,12 @@ export const isSameInlineCellValue = (
   }
   if (kind === "date") {
     return dateComparisonKey(field, current) === dateComparisonKey(field, next);
+  }
+  if (kind === "member") {
+    return (
+      JSON.stringify(normalizeEditorFieldValue(field, current)) ===
+      JSON.stringify(normalizeEditorFieldValue(field, next))
+    );
   }
   return fieldValueToString(current) === fieldValueToString(next);
 };

@@ -180,7 +180,13 @@ describe("dump domain — full demo-seed backup round trip", () => {
     // Attachment bytes, read straight off storage A before we swap it away.
     for (const att of sourceTables.get("attachments") ?? []) {
       const storageKey = att.storageKey as string;
-      if (!storageKey || !(await storage.objectExists(storageKey))) continue;
+      // Every seeded registration must have its bytes. Never filter missing
+      // objects out of the reference side of a full round-trip assertion.
+      expect(storageKey, `attachment ${att.id} namespace`).toMatch(/^attachments\//);
+      expect(
+        storageKey.split("/").some((segment) => !segment || segment === "." || segment === ".."),
+      ).toBe(false);
+      expect(await storage.objectExists(storageKey), `attachment ${att.id} bytes`).toBe(true);
       const buf = await storage.getObject(storageKey);
       sourceBlobs.set(storageKey, {
         mimeType: (att.mimeType as string) ?? "application/octet-stream",
@@ -334,6 +340,15 @@ describe("dump domain — full demo-seed backup round trip", () => {
 
   it("attachment blob bytes are byte-identical after restore", async () => {
     expect(sourceBlobs.size).toBeGreaterThan(0);
+    // The synthetic PDF, image and bulk fixture producers use the same
+    // restorable attachment namespace as real uploads. Their bytes all stay.
+    expect([...sourceBlobs.keys()]).toEqual(
+      expect.arrayContaining([
+        "attachments/seed/grep-demo-invoice.pdf",
+        "attachments/seed/blog-cover-agents-demo.png",
+        "attachments/seed/bulk-import/bulk-import-reference.txt",
+      ]),
+    );
     for (const [storageKey, blob] of sourceBlobs) {
       expect(await storage.objectExists(storageKey)).toBe(true);
       const restored = await storage.getObject(storageKey);

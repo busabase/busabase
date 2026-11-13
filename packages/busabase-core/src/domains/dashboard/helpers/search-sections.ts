@@ -27,6 +27,11 @@ import type { SearchResultKind } from "busabase-contract/types";
  */
 
 export type SearchSectionKey =
+  /**
+   * Other spaces whose NAME matches — switching, not opening. Fed by the host
+   * (`SearchSpacesSlotProvider`), so it is empty wherever there is only one space.
+   */
+  | "spaces"
   /** Nodes this person has actually opened. Local cache only, instant. */
   | "recent"
   /** Every other node whose NAME matches — `nodes.searchByName`, all types. */
@@ -84,7 +89,16 @@ const EMPTY_QUERY_SECTIONS: Record<SearchFilterKey, SearchSectionKey[]> = {
  * Listing it a second time under its own heading would be the same node twice.
  */
 const QUERY_SECTIONS: Record<SearchFilterKey, SearchSectionKey[]> = {
-  all: ["recent", "workspace", "records", "files", "docContent", "bases", "changeRequests"],
+  all: [
+    "spaces",
+    "recent",
+    "workspace",
+    "records",
+    "files",
+    "docContent",
+    "bases",
+    "changeRequests",
+  ],
   apps: ["apps"],
   skills: ["skills"],
   records: ["records"],
@@ -100,6 +114,9 @@ const QUERY_SECTIONS: Record<SearchFilterKey, SearchSectionKey[]> = {
  */
 export const sectionsFor = (filter: SearchFilterKey, hasQuery: boolean): SearchSectionKey[] =>
   (hasQuery ? QUERY_SECTIONS : EMPTY_QUERY_SECTIONS)[filter] ?? [];
+
+/** Sections the host fills in (other spaces) — neither node names nor `search()`. */
+export const isHostSection = (section: SearchSectionKey): boolean => section === "spaces";
 
 /** Sections backed by the node-name path rather than by `search()`. */
 export const isNodeSection = (section: SearchSectionKey): boolean =>
@@ -137,5 +154,8 @@ export const visibleSectionsFor = (
 ): SearchSectionKey[] => {
   const sections = sectionsFor(filter, hasQuery);
   if (!isAnonymous) return sections;
-  return sections.filter((section) => section !== "apps" && section !== "skills");
+  // A public-link visitor is not a member of any space, so there is nothing to switch to.
+  return sections.filter(
+    (section) => section !== "apps" && section !== "skills" && section !== "spaces",
+  );
 };

@@ -16,6 +16,7 @@ import { storage } from "openlib/storage";
 import { getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
 import { attachments, busabaseAssets, busabaseAssetTexts, busabaseNodes } from "../../../db/schema";
+import { assertReadableAssetTextKey } from "../../assets/logic/asset-text-key";
 import { docBodyKey } from "../../doc/handlers";
 import { resolveFolderReadme } from "../../folder/handlers";
 import { richNodeDocumentKey } from "../../rich-node/handlers";
@@ -229,6 +230,10 @@ export const exportAssetTextBlob = async (
       textStorageKey: busabaseAssetTexts.textStorageKey,
       textContentHash: busabaseAssetTexts.textContentHash,
       byteCount: busabaseAssetTexts.byteCount,
+      spaceId: busabaseAssetTexts.spaceId,
+      status: busabaseAssetTexts.status,
+      writtenBy: busabaseAssetTexts.writtenBy,
+      assetSpaceId: busabaseAssets.spaceId,
       attachmentStorageKey: attachments.storageKey,
     })
     .from(busabaseAssetTexts)
@@ -241,6 +246,8 @@ export const exportAssetTextBlob = async (
   if (!row) {
     throw new ORPCError("NOT_FOUND", { message: `Asset text not found: ${input.assetId}` });
   }
+
+  assertReadableAssetTextKey(row, row.assetSpaceId, row.attachmentStorageKey);
 
   const ownsSeparateObject =
     row.textStorageKey !== "" && row.textStorageKey !== row.attachmentStorageKey;

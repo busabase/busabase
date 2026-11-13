@@ -24,6 +24,12 @@ export const createDocInputSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional().default(""),
   body: z.string().optional().default(""),
+  visibility: z
+    .enum(["private", "workspace", "public"])
+    .optional()
+    .describe(
+      'Who can see the new Doc: "private" hides it from members who have not been granted access, "workspace" shows it to every member, "public" currently behaves as "workspace". Omit to follow the space default and the parent folder (a node is never more open than its strictest parent). On the review-first path the change request carries it and it applies when the request merges.',
+    ),
   // Permission-aware default: omitted merges immediately if the actor has
   // write access on the parent node, otherwise falls back to a pending
   // ChangeRequest (status "in_review"). Pass explicit `autoMerge: false` to

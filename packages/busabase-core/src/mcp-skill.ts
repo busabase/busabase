@@ -1036,6 +1036,10 @@ const DESTRUCTIVE_POST_MCP_TOOLS = new Set<string>([
   "onboarding_complete_bootstrap",
   // Rejecting closes the request for good; approving adds a person to the space.
   "members_review_join_request",
+  // Replaces what a public website serves; anyone with the address sees it.
+  "airapps_site_go_live",
+  // Every address of the website answers not found until it is republished.
+  "airapps_site_unpublish",
 ]);
 
 /**

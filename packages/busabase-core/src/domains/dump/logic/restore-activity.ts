@@ -4,10 +4,17 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ORPCError } from "@orpc/server";
+import { DumpTableSchema } from "busabase-contract/domains/dump/types";
 import { getLocalStoragePath, isLocalStorageProvider, storage } from "openlib/storage";
 import { z } from "zod";
 import type { BusabaseDatabase } from "../../../context";
 import { withStorageKeyLocks } from "../../assets/logic/storage-cleanup-logic";
+import {
+  type CompletedImportControl,
+  completedImportControlKey,
+  readCompletedImportControl,
+  writeCompletedImportControl,
+} from "./import-replay-control";
 
 const ActivitySchema = z.object({
   version: z.literal(1),
@@ -15,8 +22,48 @@ const ActivitySchema = z.object({
   sessionId: z.string().min(1),
   sourceSpaceId: z.string().min(1),
   startedAt: z.string().datetime(),
+  /** Missing on older markers means unknown, never permission to overwrite a root. */
+  rootImported: z.boolean().optional(),
+  sourceArchiveChecksum: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  preserveViewMetadata: z.boolean().optional(),
+  expectedTables: z.record(z.string(), z.number().int().nonnegative()).optional(),
 });
 type Activity = z.infer<typeof ActivitySchema>;
+interface RestoreIdentityInput {
+  spaceId: string;
+  sourceSpaceId: string;
+  resume: boolean;
+  sourceArchiveChecksum?: string;
+  preserveViewMetadata?: boolean;
+  expectedTables?: Record<string, number>;
+}
+
+const assertArchiveIdentity = async (input: RestoreIdentityInput, previous: Activity | null) => {
+  if (previous && !input.resume)
+    throw new ORPCError("CONFLICT", {
+      message: "This space has an unfinished restore; resume the same verified archive.",
+    });
+  if (!input.resume || !input.sourceArchiveChecksum) return;
+  const identity = previous ?? (await readCompletedImportControl(input.spaceId));
+  if (
+    !identity ||
+    identity.sourceSpaceId !== input.sourceSpaceId ||
+    identity.sourceArchiveChecksum !== input.sourceArchiveChecksum ||
+    identity.preserveViewMetadata !== input.preserveViewMetadata ||
+    !identity.expectedTables ||
+    !input.expectedTables ||
+    DumpTableSchema.options.some(
+      (table) => (identity.expectedTables?.[table] ?? 0) !== (input.expectedTables?.[table] ?? 0),
+    )
+  )
+    throw new ORPCError("CONFLICT", {
+      message:
+        "Cannot resume a different or unverified archive. Use the same verified archive or a fresh empty target.",
+    });
+};
 
 /** A host-control object, not user data. The blob GC only handles receipt.json. */
 export const restoreActivityKey = (spaceId: string) =>
@@ -99,25 +146,76 @@ async function cleanupActivityTemporaries(spaceId: string): Promise<void> {
  */
 export const beginRestoreActivity = async (
   db: BusabaseDatabase,
-  input: { spaceId: string; sessionId: string; sourceSpaceId: string; resume: boolean },
+  input: {
+    spaceId: string;
+    sessionId: string;
+    sourceSpaceId: string;
+    resume: boolean;
+    sourceArchiveChecksum?: string;
+    preserveViewMetadata?: boolean;
+    expectedTables?: Record<string, number>;
+  },
+): Promise<{ canInitializeRoot: boolean }> =>
+  withStorageKeyLocks(
+    db,
+    [restoreActivityKey(input.spaceId), completedImportControlKey(input.spaceId)],
+    async () => {
+      const previous = await readActivity(input.spaceId);
+      await assertArchiveIdentity(input, previous);
+      if (previous && previous.sessionId !== input.sessionId) {
+        if (!input.resume || previous.sourceSpaceId !== input.sourceSpaceId)
+          throw new ORPCError("CONFLICT", {
+            message:
+              "This space has an unfinished restore. Resume the same source archive before allowing automation.",
+          });
+      }
+      await writeActivity({
+        version: 1,
+        spaceId: input.spaceId,
+        sessionId: input.sessionId,
+        sourceSpaceId: input.sourceSpaceId,
+        startedAt: new Date().toISOString(),
+        rootImported: previous ? previous.rootImported : input.resume ? undefined : false,
+        sourceArchiveChecksum: input.sourceArchiveChecksum,
+        preserveViewMetadata: input.preserveViewMetadata,
+        expectedTables: input.expectedTables,
+      });
+      await cleanupActivityTemporaries(input.spaceId);
+      return {
+        canInitializeRoot:
+          input.resume &&
+          !!previous &&
+          previous.sourceSpaceId === input.sourceSpaceId &&
+          !!input.sourceArchiveChecksum &&
+          previous.sourceArchiveChecksum === input.sourceArchiveChecksum &&
+          previous.rootImported === false,
+      };
+    },
+  );
+
+/** Check identity before cleanup, table scans, or publishing a replacement activity owner. */
+export const assertRestoreArchiveIdentity = async (
+  db: BusabaseDatabase,
+  input: RestoreIdentityInput,
+): Promise<void> =>
+  withStorageKeyLocks(
+    db,
+    [restoreActivityKey(input.spaceId), completedImportControlKey(input.spaceId)],
+    async () => {
+      await assertArchiveIdentity(input, await readActivity(input.spaceId));
+    },
+  );
+
+/** Publish before the first root replacement; uncertain crash windows fail closed. */
+export const markRestoreRootImported = async (
+  db: BusabaseDatabase,
+  input: { spaceId: string; sessionId: string },
 ): Promise<void> =>
   withStorageKeyLocks(db, [restoreActivityKey(input.spaceId)], async () => {
-    const previous = await readActivity(input.spaceId);
-    if (previous && previous.sessionId !== input.sessionId) {
-      if (!input.resume || previous.sourceSpaceId !== input.sourceSpaceId)
-        throw new ORPCError("CONFLICT", {
-          message:
-            "This space has an unfinished restore. Resume the same source archive before allowing automation.",
-        });
-    }
-    await writeActivity({
-      version: 1,
-      spaceId: input.spaceId,
-      sessionId: input.sessionId,
-      sourceSpaceId: input.sourceSpaceId,
-      startedAt: new Date().toISOString(),
-    });
-    await cleanupActivityTemporaries(input.spaceId);
+    const activity = await readActivity(input.spaceId);
+    if (!activity || activity.sessionId !== input.sessionId)
+      throw new ORPCError("CONFLICT", { message: "A different restore owns this space" });
+    if (activity.rootImported !== true) await writeActivity({ ...activity, rootImported: true });
   });
 
 /** A resumed session fences any older worker before it can import another batch. */
@@ -133,21 +231,46 @@ export const assertRestoreActivity = async (spaceId: string, sessionId: string):
 /** Call only after a complete commit or a complete non-resume rollback. */
 export const endRestoreActivity = async (
   db: BusabaseDatabase,
-  input: { spaceId: string; sessionId: string },
+  input: {
+    spaceId: string;
+    sessionId: string;
+    completed?: Pick<
+      CompletedImportControl,
+      "sourceArchiveChecksum" | "preserveViewMetadata" | "expectedTables"
+    >;
+  },
 ): Promise<void> =>
-  withStorageKeyLocks(db, [restoreActivityKey(input.spaceId)], async () => {
-    const activity = await readActivity(input.spaceId);
-    if (!activity) {
+  withStorageKeyLocks(
+    db,
+    [restoreActivityKey(input.spaceId), completedImportControlKey(input.spaceId)],
+    async () => {
+      const activity = await readActivity(input.spaceId);
+      if (!activity) {
+        await cleanupActivityTemporaries(input.spaceId);
+        return;
+      }
+      if (activity.sessionId !== input.sessionId)
+        throw new ORPCError("CONFLICT", {
+          message: "A different restore owns this space; its automation hold was preserved.",
+        });
+      if (input.completed) {
+        if ((activity.sourceArchiveChecksum ?? null) !== input.completed.sourceArchiveChecksum)
+          throw new ORPCError("CONFLICT", {
+            message: "Completed archive identity differs from the active restore",
+          });
+        // Publish completion durably before releasing the automation barrier.
+        await writeCompletedImportControl({
+          version: 1,
+          spaceId: input.spaceId,
+          sourceSpaceId: activity.sourceSpaceId,
+          completedAt: new Date().toISOString(),
+          ...input.completed,
+        });
+      }
       await cleanupActivityTemporaries(input.spaceId);
-      return;
-    }
-    if (activity.sessionId !== input.sessionId)
-      throw new ORPCError("CONFLICT", {
-        message: "A different restore owns this space; its automation hold was preserved.",
-      });
-    await cleanupActivityTemporaries(input.spaceId);
-    await storage.deleteObject(restoreActivityKey(input.spaceId));
-  });
+      await storage.deleteObject(restoreActivityKey(input.spaceId));
+    },
+  );
 
 /** No process cache: every worker/replica sees the durable hold. Errors block work. */
 export const isRestoreAutomationBlocked = async (spaceId: string): Promise<boolean> => {

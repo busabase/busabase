@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createExactDumpReplayFixture } from "./helpers/exact-dump-replay";
 
 const require = createRequire(import.meta.url);
 const partBytes = 6 * 1024 * 1024;
@@ -119,9 +120,18 @@ describe("multipart receipts survive a real HTTP server crash", () => {
     const b = "crash_parts_b";
     const bytes = Buffer.alloc(partBytes + 29, 99);
     const key = "attachments/crash-resume.bin";
+    const otherKey = "attachments/foreign-pending.bin";
+    const archiveA = createExactDumpReplayFixture({
+      sourceSpaceId: "source",
+      blobs: [{ key, bytes }],
+    });
+    const archiveB = createExactDumpReplayFixture({
+      sourceSpaceId: "source",
+      blobs: [{ key: otherKey, bytes }],
+    });
     const first = await start();
-    const oldA = await first.call(a, "begin", { sourceSpaceId: "source" });
-    const oldB = await first.call(b, "begin", { sourceSpaceId: "source" });
+    const oldA = await first.call(a, "begin", archiveA.beginInput());
+    const oldB = await first.call(b, "begin", archiveB.beginInput());
     await first.call(a, "tables", {
       sessionId: oldA.sessionId,
       table: "attachmentBlobs",
@@ -130,24 +140,46 @@ describe("multipart receipts survive a real HTTP server crash", () => {
     await first.call(b, "tables", {
       sessionId: oldB.sessionId,
       table: "attachmentBlobs",
-      rows: [part("attachments/foreign-pending.bin", bytes, 0)],
+      rows: [part(otherKey, bytes, 0)],
     });
     expect((await files(prefix(a))).filter((key) => key.endsWith("receipt.json"))).toHaveLength(1);
     expect((await files(prefix(b))).filter((key) => key.endsWith("receipt.json"))).toHaveLength(1);
     expect(await readdir(path.join(storageDir, ".tmp/multipart"))).toHaveLength(2);
+    const markerBeforeCrash = JSON.parse(
+      await readFile(path.join(storageDir, prefix(a), "activity.json"), "utf8"),
+    );
+    expect(markerBeforeCrash.rootImported).toBe(false);
+    expect(markerBeforeCrash.sourceArchiveChecksum).toBe(archiveA.sourceArchiveChecksum);
+    expect(markerBeforeCrash.expectedTables).toEqual(archiveA.expectedTables);
     await first.stop();
 
     const restarted = await start();
-    const resumed = await restarted.call(a, "begin", { sourceSpaceId: "source", resume: true });
+    expect(
+      JSON.parse(await readFile(path.join(storageDir, prefix(a), "activity.json"), "utf8"))
+        .rootImported,
+    ).toBe(false);
+    await expect(restarted.call(a, "begin", archiveB.beginInput({ resume: true }))).rejects.toThrow(
+      /archive|checksum|different/i,
+    );
+    const resumed = await restarted.call(a, "begin", archiveA.beginInput({ resume: true }));
     expect((await files(prefix(a))).filter((key) => key.endsWith("receipt.json"))).toEqual([]);
     expect((await files(prefix(b))).filter((key) => key.endsWith("receipt.json"))).toHaveLength(1);
     expect(await readdir(path.join(storageDir, ".tmp/multipart"))).toHaveLength(1);
+    await archiveA.preflightWith((input) => restarted.call(a, "tables", input), resumed.sessionId);
+    expect(
+      JSON.parse(await readFile(path.join(storageDir, prefix(a), "activity.json"), "utf8"))
+        .rootImported,
+    ).toBe(false);
     await restarted.call(a, "tables", {
       sessionId: resumed.sessionId,
       table: "attachmentBlobs",
       rows: [part(key, bytes, 0)],
     });
-    const concurrent = await restarted.call(a, "begin", { sourceSpaceId: "source", resume: true });
+    const concurrent = await restarted.call(a, "begin", archiveA.beginInput({ resume: true }));
+    await archiveA.preflightWith(
+      (input) => restarted.call(a, "tables", input),
+      concurrent.sessionId,
+    );
     // Explicit resume replaces the same-space owner and cleans its abandoned
     // multipart. An old owner must not continue writing after that handoff.
     expect((await files(prefix(a))).filter((key) => key.endsWith("receipt.json"))).toHaveLength(0);
@@ -171,27 +203,40 @@ describe("multipart receipts survive a real HTTP server crash", () => {
     expect((await restarted.call(a, "tables", last)).inserted).toBe(1);
     expect((await restarted.call(a, "tables", last)).inserted).toBe(1);
     expect(digest(await readFile(path.join(storageDir, key)))).toBe(digest(bytes));
-    const complete = async (spaceId: string, sessionId: string) => {
+    const complete = async (spaceId: string, sessionId: string, archive: typeof archiveA) => {
       await restarted.call(spaceId, "tables", {
         sessionId,
         table: "nodes",
-        rows: [
-          {
-            id: "nod_root_source",
-            spaceId: "source",
-            parentId: null,
-            type: "folder",
-            slug: "root",
-            name: "Recovered empty workspace",
-          },
-        ],
+        rows: archive.rows.nodes,
       });
       await restarted.call(spaceId, "commit", { sessionId });
     };
-    await complete(a, concurrent.sessionId);
-    const cleanB = await restarted.call(b, "begin", { sourceSpaceId: "source", resume: true });
-    await complete(b, cleanB.sessionId);
-    expect(await files("busabase/dump-staging-v1")).toEqual([]);
+    await complete(a, concurrent.sessionId, archiveA);
+    const cleanB = await restarted.call(b, "begin", archiveB.beginInput({ resume: true }));
+    await archiveB.preflightWith((input) => restarted.call(b, "tables", input), cleanB.sessionId);
+    for (const index of [0, 1])
+      await restarted.call(b, "tables", {
+        sessionId: cleanB.sessionId,
+        table: "attachmentBlobs",
+        rows: [part(otherKey, bytes, index)],
+      });
+    expect(digest(await readFile(path.join(storageDir, otherKey)))).toBe(digest(bytes));
+    await complete(b, cleanB.sessionId, archiveB);
+    // Only the deliberate completed-archive identities persist. No activity,
+    // multipart receipt or staged bytes may survive a successful completion.
+    expect((await files("busabase/dump-staging-v1")).sort()).toEqual(
+      [prefix(a) + "completed.json", prefix(b) + "completed.json"].sort(),
+    );
+    for (const [spaceId, archive] of [
+      [a, archiveA],
+      [b, archiveB],
+    ] as const) {
+      const completed = JSON.parse(
+        await readFile(path.join(storageDir, prefix(spaceId), "completed.json"), "utf8"),
+      );
+      expect(completed.sourceArchiveChecksum).toBe(archive.sourceArchiveChecksum);
+      expect(completed.expectedTables).toEqual(archive.expectedTables);
+    }
     expect(await readdir(path.join(storageDir, ".tmp/multipart"))).toEqual([]);
     await restarted.stop();
   }, 90_000);

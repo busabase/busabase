@@ -781,6 +781,7 @@ interface InboxQueueNavigation {
 
 export function FinishReviewComposer({
   changeRequest,
+  currentUserId = null,
   pendingAction,
   onApprove,
   onClose,
@@ -788,6 +789,7 @@ export function FinishReviewComposer({
   onReject,
 }: {
   changeRequest: ChangeRequestVO;
+  currentUserId?: string | null;
   pendingAction: ReviewAction | null;
   onApprove: (changeRequestId: string, reason?: string) => void;
   onClose: (changeRequestId: string, reason?: string) => void;
@@ -813,7 +815,31 @@ export function FinishReviewComposer({
   const isActionable = ["in_review", "changes_requested", "approved", "conflict"].includes(
     changeRequest.status,
   );
+  const isSubmitter =
+    currentUserId !== null &&
+    (changeRequest.submittedBy === currentUserId ||
+      changeRequest.submittedByUser?.id === currentUserId);
+  // Detail reads return viewerCanClose, but a list-seeded route can render once
+  // before that response arrives. Fall back to the submission identity only
+  // while the permission is unknown; an explicit server denial wins.
+  const canWithdraw =
+    changeRequest.viewerCanClose === true ||
+    (changeRequest.viewerCanClose === undefined && isSubmitter);
   if (isActionable && changeRequest.viewerCanApprove === false) {
+    if (canWithdraw) {
+      return (
+        <button
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2.5 font-semibold text-sm transition-colors hover:bg-muted disabled:opacity-60"
+          data-testid="withdraw-change-request"
+          disabled={isPending}
+          onClick={() => onClose(changeRequest.id)}
+          type="button"
+        >
+          <X size={16} />
+          {messages.review.closeChangeRequest}
+        </button>
+      );
+    }
     return (
       <div className="text-muted-foreground text-sm leading-6" data-testid="review-not-permitted">
         {messages.review.cannotApproveHint}
@@ -974,6 +1000,7 @@ export function ChangeRequestDetailPage({
   auditEvents,
   changeRequest,
   client,
+  currentUserId = null,
   focusOperationId,
   pendingAction,
   onApprove,
@@ -987,6 +1014,7 @@ export function ChangeRequestDetailPage({
   auditEvents: AuditEventVO[];
   changeRequest: ChangeRequestVO | null;
   client: BusabaseDashboardApiClient;
+  currentUserId?: string | null;
   focusOperationId: string | null;
   pendingAction: ReviewAction | null;
   onApprove: (changeRequestId: string, reason?: string) => void;
@@ -1044,6 +1072,7 @@ export function ChangeRequestDetailPage({
           auditEvents={auditEvents}
           changeRequest={changeRequest}
           client={client}
+          currentUserId={currentUserId}
           focusOperationId={focusOperationId}
           pendingAction={pendingAction}
           onApprove={onApprove}
@@ -1063,6 +1092,7 @@ export function ChangeRequestReviewLayout({
   auditEvents,
   changeRequest,
   client,
+  currentUserId = null,
   focusOperationId,
   pendingAction,
   onApprove,
@@ -1076,6 +1106,7 @@ export function ChangeRequestReviewLayout({
   auditEvents: AuditEventVO[];
   changeRequest: ChangeRequestVO;
   client: BusabaseDashboardApiClient;
+  currentUserId?: string | null;
   focusOperationId: string | null;
   pendingAction: ReviewAction | null;
   onApprove: (changeRequestId: string, reason?: string) => void;
@@ -1268,6 +1299,7 @@ export function ChangeRequestReviewLayout({
             <SidebarPanel title={messages.review.finishReview}>
               <FinishReviewComposer
                 changeRequest={changeRequest}
+                currentUserId={currentUserId}
                 pendingAction={pendingAction}
                 onApprove={onApprove}
                 onClose={onClose}

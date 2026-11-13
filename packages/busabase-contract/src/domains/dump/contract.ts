@@ -1,11 +1,15 @@
-import { oc } from "@orpc/contract";
+import { eventIterator, oc } from "@orpc/contract";
 import {
+  ExportAssetAttachmentInputSchema,
+  ExportAssetAttachmentVOSchema,
   ExportAssetTextInputSchema,
   ExportAssetTextVOSchema,
   ExportAttachmentInputSchema,
   ExportAttachmentVOSchema,
   ExportDocBodiesInputSchema,
   ExportDocBodiesVOSchema,
+  ExportSnapshotEventVOSchema,
+  ExportSnapshotInputSchema,
   ExportTablesInputSchema,
   ExportTablesVOSchema,
   ImportAbortVOSchema,
@@ -28,6 +32,28 @@ import {
  * stays host-agnostic and applies no auth).
  */
 export const dumpContract = {
+  exportSnapshot: oc
+    .route({
+      method: "POST",
+      path: "/dump/export/snapshot",
+      tags: ["Dump"],
+      summary: "Stream all workspace SQL rows from one consistent read-only snapshot",
+      successDescription:
+        "SSE start/rows/tableEnd/attachmentDependency/complete events. All 35 scoped SQL tables and readable-Asset dependency anchors share one READ ONLY REPEATABLE READ transaction. Only complete marks success. No source writes are blocked on PostgreSQL; object storage bytes and mutable documents are not an atomic storage snapshot. Dependency URLs request 24 hours and missing or changed bytes must fail the backup.",
+    })
+    .input(ExportSnapshotInputSchema)
+    .output(eventIterator(ExportSnapshotEventVOSchema)),
+  exportAssetAttachment: oc
+    .route({
+      method: "POST",
+      path: "/dump/export/asset-attachment",
+      tags: ["Dump"],
+      summary: "Capture a readable Asset's content-only backup dependency",
+      successDescription:
+        "Manager-only and subject to ordinary Asset read permission. Returns an explicitly materialized own-Asset content projection and a signed origin URL, never the foreign attachment's private ownership, timestamps or metadata. Raw foreign attachment reads remain forbidden. Snapshot exports anchor these dependencies in their own SQL transaction.",
+    })
+    .input(ExportAssetAttachmentInputSchema)
+    .output(ExportAssetAttachmentVOSchema),
   exportTables: oc
     .route({
       method: "POST",

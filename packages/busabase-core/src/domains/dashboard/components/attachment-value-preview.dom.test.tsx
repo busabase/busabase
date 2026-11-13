@@ -24,6 +24,28 @@ function show(value: unknown, compact = true) {
 afterEach(cleanup);
 
 describe("attachment field previews", () => {
+  it("keeps compact grid thumbnails labelled without rendering their file text", () => {
+    const bounds = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(220);
+    try {
+      const result = render(
+        <CoreI18nProvider locale="en">
+          <AttachmentValuePreview
+            presentation="grid"
+            rowHeight={144}
+            thumbnailOnly
+            value={[file("contract", "application/pdf")]}
+          />
+        </CoreI18nProvider>,
+      );
+      const grid = result.container.querySelector("[data-attachment-preview]") as HTMLElement;
+      expect(within(grid).getByRole("link", { name: "contract.pdf" })).toBeTruthy();
+      expect(within(grid).queryByText("contract.pdf")).toBeNull();
+      expect(grid.querySelector("[data-attachment-extension]")).toBeNull();
+    } finally {
+      bounds.mockRestore();
+    }
+  });
+
   it("recomputes a single-line grid prefix and recovers focus if resize removes the opener", async () => {
     let width = 138;
     let resize = () => {};

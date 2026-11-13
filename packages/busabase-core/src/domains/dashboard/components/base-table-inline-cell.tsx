@@ -10,6 +10,8 @@ import {
   Clock3,
   ExternalLink,
   LoaderCircle,
+  Paperclip,
+  Search,
   X,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
@@ -28,10 +30,15 @@ import {
   type InlineCellEditMessages,
   inlineCellEditMessages,
 } from "../../../i18n/inline-cell-edit";
-import { fieldLinkPrefix } from "../../base/field-types";
+import { fieldLinkPrefix, getMemberIds } from "../../base/field-types";
 import { getDateFieldOptions, parseDateFieldValue } from "../../base/utils/date-value";
-import { getEditorFieldValue, getFieldChipEntries, getFieldPreviewText } from "../helpers/field";
-import { fieldValueToString } from "../helpers/format";
+import {
+  getAttachmentRefs,
+  getEditorFieldValue,
+  getFieldChipEntries,
+  getFieldPreviewText,
+} from "../helpers/field";
+import { fieldValueToString, formatUserRefLabel } from "../helpers/format";
 import { buildGridCellText } from "../helpers/grid-cell-layout";
 import {
   getInlineCellEditorKind,
@@ -49,10 +56,13 @@ import {
   type GridNotice,
   gridCellKey,
 } from "../hooks/use-base-grid-editing";
+import { type FieldFileUploader, useFieldFileUpload } from "../hooks/use-field-file-upload";
 import { ChoiceOptionsPanel, choicePopoverClassName } from "./choice-field";
 import { DateFieldInput, DateFieldValue } from "./date-field";
 import { FieldBadge } from "./field-preview";
 import { GridCellText } from "./grid-cell-presentation";
+import { UserAvatar } from "./identity";
+import { MemberChips, memberUserMap, useSpaceMemberRoster } from "./member-field";
 import { RelationFieldEditor } from "./relation-field";
 import { SplitSubmitButton } from "./split-submit-button";
 
@@ -259,6 +269,20 @@ export function InlineEditableCellValue({
   );
 }
 
+/** Resolves an optimistic member id through the roster the picker already loaded. */
+export function InlineMemberCellValue({
+  client,
+  users,
+  value,
+}: {
+  client: BusabaseDashboardApiClient;
+  users?: RecordVO["fieldUsers"];
+  value: unknown;
+}) {
+  const rosterQuery = useSpaceMemberRoster(client, { enabled: false });
+  return <MemberChips users={memberUserMap(users, rosterQuery.data)} value={value} />;
+}
+
 /** Saving / waiting-for-review / failed, at the end of the cell. */
 export function InlineCellStatusBadge({
   field,
@@ -413,17 +437,21 @@ export function InlineCellEditor({
   client,
   field,
   grid,
+  onUploadAttachment,
   relationRecords,
   record,
 }: {
   client: BusabaseDashboardApiClient;
   field: BaseFieldVO;
   grid: BaseGridEditing;
+  onUploadAttachment?: FieldFileUploader;
   relationRecords: RecordVO[];
   record: RecordVO;
 }) {
   const kind = getInlineCellEditorKind(field);
   if (!kind || kind === "checkbox") return null;
+  if (kind === "member")
+    return <InlineMemberCellEditor client={client} field={field} grid={grid} record={record} />;
   if (kind === "relation")
     return (
       <InlineRelationCellEditor
@@ -437,7 +465,322 @@ export function InlineCellEditor({
   if (kind === "select")
     return <InlineSelectCellEditor field={field} grid={grid} record={record} />;
   if (kind === "date") return <InlineDateCellEditor field={field} grid={grid} record={record} />;
+  if (kind === "attachment")
+    return (
+      <InlineAttachmentCellEditor
+        field={field}
+        grid={grid}
+        onUploadAttachment={onUploadAttachment}
+        record={record}
+      />
+    );
   return <InlineTextCellEditor field={field} grid={grid} kind={kind} record={record} />;
+}
+
+/** Upload into a table cell, then save the resulting asset refs through the normal cell write path. */
+function InlineAttachmentCellEditor({
+  field,
+  grid,
+  onUploadAttachment,
+  record,
+}: {
+  field: BaseFieldVO;
+  grid: BaseGridEditing;
+  onUploadAttachment?: FieldFileUploader;
+  record: RecordVO;
+}) {
+  const resolveIString = useIString();
+  const inputId = `${gridCellKey(record.id, field.slug)}-inline-attachment`;
+  const upload = useFieldFileUpload(field, onUploadAttachment);
+
+  const handleFiles = (files: readonly File[]) =>
+    upload.upload(files, (uploaded) => {
+      const existing = getAttachmentRefs(grid.getDisplayValue(record, field));
+      const next = upload.merge(existing, uploaded, (current, added) => [...current, ...added]);
+      grid.commit(record, field, next, "stay");
+    });
+
+  return (
+    <div
+      className="relative flex min-w-0 flex-1 items-center gap-1"
+      data-inline-cell-editor={field.slug}
+    >
+      <label
+        aria-label={upload.label}
+        className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-ring has-disabled:cursor-not-allowed has-disabled:opacity-50"
+        title={upload.label}
+      >
+        {upload.isUploading ? (
+          <LoaderCircle aria-hidden className="size-3.5 animate-spin" />
+        ) : (
+          <Paperclip aria-hidden className="size-3.5" />
+        )}
+        <input
+          accept={upload.accept}
+          aria-label={resolveIString(field.name)}
+          className="sr-only"
+          disabled={upload.isUploading || !upload.canUpload}
+          id={inputId}
+          multiple={upload.multiple}
+          onChange={(event) => {
+            // Resetting a file input clears its live FileList, so retain the
+            // selection before making the control ready for another upload.
+            const files = Array.from(event.currentTarget.files ?? []);
+            event.currentTarget.value = "";
+            void handleFiles(files);
+          }}
+          type="file"
+        />
+      </label>
+      {upload.uploadError ? (
+        <span
+          className="absolute top-full left-0 z-30 mt-1 max-w-64 rounded border border-destructive/30 bg-background px-2 py-1 text-destructive text-xs shadow-sm"
+          role="alert"
+        >
+          {upload.uploadError}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** Airtable-style roster picker anchored directly below the active grid cell. */
+function InlineMemberCellEditor({
+  client,
+  field,
+  grid,
+  record,
+}: {
+  client: BusabaseDashboardApiClient;
+  field: BaseFieldVO;
+  grid: BaseGridEditing;
+  record: RecordVO;
+}) {
+  const messages = useCoreI18n();
+  const copy = useInlineCellEditMessages();
+  const resolveIString = useIString();
+  const fieldName = resolveIString(field.name);
+  const key = gridCellKey(record.id, field.slug);
+  const inputId = `${key}-inline-member`;
+  const errorId = `${key}-inline-error`;
+  const input = useRef<HTMLInputElement>(null);
+  const settled = useRef(false);
+  const [query, setQuery] = useState("");
+  const [draft, setDraft] = useState(() => grid.getDisplayValue(record, field));
+  const rosterQuery = useSpaceMemberRoster(client);
+  const isMulti = field.options.multiple !== false;
+  const selectedIds = getMemberIds(draft);
+  const error = grid.editError ? describeInlineCellError(copy, grid.editError, fieldName) : null;
+  const rosterError = rosterQuery.error as { code?: string; status?: number } | null;
+  const rosterAccessDenied =
+    rosterError?.code === "FORBIDDEN" ||
+    rosterError?.code === "UNAUTHORIZED" ||
+    rosterError?.status === 403 ||
+    rosterError?.status === 401;
+  // Do not offer the last successful roster after a failed refresh: its
+  // membership may no longer reflect what this viewer is allowed to assign.
+  const roster = rosterQuery.isError ? [] : (rosterQuery.data ?? []);
+  const people = memberUserMap(record.fieldUsers, roster);
+  const search = query.trim().toLocaleLowerCase();
+  const candidates = roster.filter(
+    (person) =>
+      !search || `${person.name ?? ""} ${person.email ?? ""}`.toLocaleLowerCase().includes(search),
+  );
+  const settle = (save: boolean) => {
+    if (settled.current) return;
+    if (save) {
+      // Validation keeps the editor open, so it must also keep its session
+      // active for a later cancel or a corrected save.
+      settled.current = grid.commit(record, field, draft, "stay");
+    } else {
+      settled.current = true;
+      grid.cancelEditing("stay");
+    }
+  };
+  const choose = (id: string | null) => {
+    const next = isMulti
+      ? id
+        ? selectedIds.includes(id)
+          ? selectedIds.filter((selected) => selected !== id)
+          : [...selectedIds, id]
+        : []
+      : (id ?? "");
+    setDraft(next);
+    if (!isMulti) {
+      settled.current = grid.commit(record, field, next, "stay");
+    }
+  };
+
+  return (
+    <div
+      className="relative flex h-full min-w-0 flex-1 flex-col justify-center gap-0.5 py-1"
+      data-inline-cell-editor={field.slug}
+    >
+      <div className="relative flex min-h-0 min-w-0 flex-1 items-center gap-1">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+          {selectedIds.length ? (
+            selectedIds.slice(0, 2).map((id) => {
+              const person = people[id];
+              const label = formatUserRefLabel(person, id, messages);
+              return (
+                <span
+                  className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-primary/10 py-0.5 pr-2 pl-0.5 text-foreground text-xs"
+                  key={id}
+                  title={label}
+                >
+                  <UserAvatar className="size-4" fallbackId={id} user={person} />
+                  <span className="truncate">{label}</span>
+                  {isMulti ? (
+                    <button
+                      aria-label={fmt(messages.base.removeMember, { name: label })}
+                      className="grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-primary"
+                      onClick={() => setDraft(selectedIds.filter((selected) => selected !== id))}
+                      type="button"
+                    >
+                      <X aria-hidden className="size-3" />
+                    </button>
+                  ) : null}
+                </span>
+              );
+            })
+          ) : (
+            <span className="text-muted-foreground">-</span>
+          )}
+          {selectedIds.length > 2 ? (
+            <span className="shrink-0 text-muted-foreground text-xs">
+              +{selectedIds.length - 2}
+            </span>
+          ) : null}
+        </div>
+        <ChevronDown aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        <Popover
+          onOpenChange={(open) => {
+            if (!open) settle(true);
+          }}
+          open
+        >
+          <PopoverTrigger asChild>
+            <span aria-hidden className="pointer-events-none absolute inset-0" />
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            aria-label={fieldName}
+            className="w-[var(--radix-popover-trigger-width)] min-w-72 overflow-hidden p-0"
+            collisionPadding={8}
+            data-inline-cell-editor={field.slug}
+            onCloseAutoFocus={(event) => event.preventDefault()}
+            onEscapeKeyDown={(event) => {
+              event.preventDefault();
+              settle(false);
+            }}
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              input.current?.focus();
+            }}
+            side="bottom"
+            sideOffset={2}
+          >
+            <div className="flex items-center gap-2 border-border/70 border-b px-3">
+              <Search aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+              <input
+                aria-describedby={error ? errorId : undefined}
+                aria-invalid={error ? true : undefined}
+                aria-label={`${messages.base.searchMembers} - ${fieldName}`}
+                className="h-12 min-w-0 flex-1 bg-transparent text-sm outline-none"
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (isComposing(event)) return;
+                  if (event.key === "Enter" && candidates[0]) {
+                    event.preventDefault();
+                    choose(candidates[0].id);
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    settle(false);
+                  }
+                }}
+                placeholder={messages.base.searchMembers}
+                ref={input}
+                type="search"
+                value={query}
+              />
+            </div>
+            <div
+              aria-busy={rosterQuery.isPending}
+              aria-label={fieldName}
+              aria-multiselectable={isMulti}
+              className="max-h-72 overflow-y-auto p-1"
+              id={`${inputId}-listbox`}
+              role="listbox"
+            >
+              {!isMulti && !rosterQuery.isError && !rosterQuery.isPending ? (
+                <button
+                  aria-selected={selectedIds.length === 0}
+                  className="flex min-h-10 w-full items-center rounded px-2.5 text-left text-muted-foreground text-sm hover:bg-accent"
+                  onClick={() => choose(null)}
+                  role="option"
+                  type="button"
+                >
+                  {messages.base.unassignedMember}
+                </button>
+              ) : null}
+              {rosterQuery.isError ? (
+                <div className="px-2.5 py-3 text-muted-foreground text-sm" role="alert">
+                  {rosterAccessDenied
+                    ? messages.base.membersAccessDenied
+                    : messages.base.membersLoadFailed}
+                  {!rosterAccessDenied ? (
+                    <button
+                      className="ml-2 rounded px-1 underline focus-visible:outline-primary"
+                      onClick={() => void rosterQuery.refetch()}
+                      type="button"
+                    >
+                      {messages.base.paginationRetry}
+                    </button>
+                  ) : null}
+                </div>
+              ) : rosterQuery.isPending ? (
+                <div className="px-2.5 py-3 text-muted-foreground text-sm" role="status">
+                  {messages.common.loading}
+                </div>
+              ) : candidates.length ? (
+                candidates.map((person) => {
+                  const label = formatUserRefLabel(person, person.id, messages);
+                  const selected = selectedIds.includes(person.id);
+                  return (
+                    <button
+                      aria-selected={selected}
+                      className={`flex min-h-12 w-full items-center gap-2.5 rounded px-2.5 py-2 text-left text-sm ${selected ? "bg-accent" : "hover:bg-accent/60"}`}
+                      key={person.id}
+                      onClick={() => choose(person.id)}
+                      role="option"
+                      type="button"
+                    >
+                      <UserAvatar className="size-7" fallbackId={person.id} user={person} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{label}</span>
+                        {person.email && person.email !== label ? (
+                          <span className="block truncate text-muted-foreground text-xs">
+                            {person.email}
+                          </span>
+                        ) : null}
+                      </span>
+                      {selected ? <Check aria-hidden className="size-4 text-primary" /> : null}
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="px-2.5 py-3 text-muted-foreground text-sm" role="status">
+                  {messages.search.noMatchesTitle}
+                </div>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+      <InlineCellEditorError id={errorId} message={error} />
+    </div>
+  );
 }
 
 const INPUT_MODE: Partial<Record<InlineCellEditorKind, "decimal" | "url" | "email" | "tel">> = {

@@ -153,6 +153,10 @@ export const createBaseInputSchema = z.object({
   // Mirrors the contract too: `false` skips the default Grid view (see
   // domains/base/logic/default-view.ts).
   defaultView: z.boolean().optional(),
+  // Mirrors the contract for the same reason as `autoMerge` below: this internal
+  // re-parse strips unknown keys, so leaving it out would drop a caller's
+  // `visibility: "private"` here and the Base would come out space-visible.
+  visibility: z.enum(["private", "workspace", "public"]).optional(),
   // Must mirror busabase-contract's createBaseInputSchema (same drift risk as
   // fieldOptionsSchema above) — without this, `autoMerge` from the oRPC layer's
   // contract-validated input is silently stripped by this internal re-parse.

@@ -1037,7 +1037,7 @@ const seedFileNodesIfMissing = async (createdAt: Date, files: SeedFileDef[]) => 
 const GREP_DEMO_NODE_ID = "nod_grep_demo_invoice";
 const GREP_DEMO_ATTACHMENT_ID = "att_grep_demo_invoice_pdf";
 const GREP_DEMO_ASSET_ID = "ast_grep_demo_invoice";
-const GREP_DEMO_STORAGE_KEY = "files/seed/grep-demo-invoice.pdf";
+const GREP_DEMO_STORAGE_KEY = "attachments/seed/grep-demo-invoice.pdf";
 
 /**
  * Drive Grep Retrieval demo fixture: a small binary (PDF) File node whose text
@@ -1179,7 +1179,7 @@ const seedImageAssetFixture = async (createdAt: Date) => {
     "../demo/image-fixture"
   );
   const pngBuffer = buildMinimalPngBuffer();
-  const storageKey = "files/seed/blog-cover-agents-demo.png";
+  const storageKey = "attachments/seed/blog-cover-agents-demo.png";
   await storage.uploadFileToKey(pngBuffer, storageKey, "image/png");
 
   await db
@@ -1285,7 +1285,7 @@ const seedBulkAttachmentFixtures = async (createdAt: Date) => {
     "Bulk-imported reference file.\nUsed only to exercise the dump export's cursor pagination.\n",
     "utf8",
   );
-  const sharedStorageKey = "files/seed/bulk-import/bulk-import-reference.txt";
+  const sharedStorageKey = "attachments/seed/bulk-import/bulk-import-reference.txt";
   await storage.uploadFileToKey(sharedBody, sharedStorageKey, "text/plain");
   const sharedContentHash = hashBuffer(sharedBody);
 

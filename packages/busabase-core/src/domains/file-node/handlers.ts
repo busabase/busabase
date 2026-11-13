@@ -18,6 +18,7 @@ import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
 import {
   buildNodeVisibilityCondition,
+  createTimeVisibilityMetadata,
   hasNodePermission,
   initializeNodeAcl,
   shouldAutoMerge,
@@ -202,8 +203,9 @@ export const createFileNode = async (
       // This one IS `assetId` in metadata, and correctly so: it is the
       // node_create OPERATION PAYLOAD, not the node row. `materializeFileNode`
       // reads it at merge time to know which Asset to mount, then drops it —
-      // the merged node row carries no `assetId`, only a usage row.
-      metadata: { assetId: asset.id },
+      // the merged node row carries no `assetId`, only a usage row. The rest
+      // (`visibility`) it copies onto the row for `initializeNodeAcl`.
+      metadata: { ...createTimeVisibilityMetadata(parsed.visibility), assetId: asset.id },
       message: `Create file ${parsed.name}`,
       submittedBy: resolveActorId(CURRENT_USER_ID),
     });
@@ -243,7 +245,8 @@ export const createFileNode = async (
           description: parsed.description,
           // The backing Asset is recorded by the usage row below. Keeping it out
           // of metadata avoids maintaining two sources of truth for one relation.
-          metadata: {},
+          // `visibility` is promoted out of it by `initializeNodeAcl` below.
+          metadata: createTimeVisibilityMetadata(parsed.visibility),
           position: 0,
           createdAt: timestamp,
           updatedAt: timestamp,

@@ -825,6 +825,21 @@ export const dashboardPt: CoreI18nMessages = {
           "Os domínios personalizados não estão configurados nesta instalação. Consulte um administrador.",
         empty:
           "Adicione um domínio que você possui e conclua a configuração no seu provedor de DNS.",
+        guideToggle: "Como configurar o DNS",
+        guideStepAdd:
+          "Digite abaixo o domínio que você quer usar e clique em “{add}”. O mais simples é um subdomínio como shop.company.com.",
+        guideStepDns:
+          "No provedor de DNS do seu domínio (Cloudflare, Registro.br, GoDaddy, Hostinger…), adicione um registro CNAME:",
+        guideType: "Tipo",
+        guideNameHint:
+          "Use a parte antes do seu domínio raiz, por exemplo shop para shop.company.com. Alguns provedores pedem o nome completo.",
+        guideStepCheck:
+          "Volte aqui e clique em “{check}”. A propagação do DNS pode levar de alguns minutos a algumas horas; depois disso, o HTTPS é configurado automaticamente. Se também for necessário um registro TXT de verificação, ele aparecerá aqui depois que você adicionar o domínio.",
+        guideRootDomain:
+          "Quer usar um domínio raiz como company.com? Isso só funciona se o seu provedor de DNS aceitar CNAME na raiz (CNAME flattening, ALIAS ou ANAME; a Cloudflare aceita). Caso contrário, use um subdomínio como www ou shop.",
+        guideLink: "Ver o guia de configuração",
+        recordNameHint:
+          "“Nome” mostra o domínio completo. Muitos provedores de DNS pedem só a parte antes do domínio raiz, por exemplo shop para shop.company.com.",
         hostnameLabel: "Nome do domínio",
         hostnameHint: "Digite um nome de host, sem https:// ou caminho.",
         invalidHostname:
@@ -843,6 +858,14 @@ export const dashboardPt: CoreI18nMessages = {
         activeHint: "DNS e HTTPS estão prontos.",
         error: "Requer atenção",
         errorHint: "Revise os detalhes abaixo e verifique novamente.",
+        // Keyed by `AirAppSiteDomainIssue`: this deployment's own findings about one domain.
+        issues: {
+          "target-missing":
+            "Os domínios personalizados não estão configurados nesta instalação. Consulte um administrador.",
+          "route-unverified":
+            "Este domínio ainda não leva a este site. As alterações de DNS podem levar de alguns minutos a algumas horas.",
+          "check-failed": "Não foi possível verificar este domínio agora. Verifique novamente.",
+        },
         offlineHint:
           "O site está fora do ar. Todos os endereços do site mostram uma página não encontrada.",
         dnsInstructions:
@@ -1597,6 +1620,8 @@ export const dashboardPt: CoreI18nMessages = {
   search: {
     all: "Conteúdo",
     recent: "Recentes",
+    sectionSpaces: "Espaços",
+    switchToSpace: "Mudar para este espaço",
     sectionRecent: "Visitados recentemente",
     sectionElsewhere: "Em outros lugares deste espaço de trabalho",
     sectionDocContent: "Dentro de documentos",
@@ -2746,6 +2771,8 @@ export const dashboardPt: CoreI18nMessages = {
     failed: "Não foi possível mover o item. Tente novamente.",
   },
   richNodes: {
+    discardChanges: "Descartar alterações não salvas?",
+    returnToReading: "Voltar à leitura",
     defaultOutcome: "Padrão",
     controlPanel: "Painel de controle",
     zoomIn: "Aumentar zoom",

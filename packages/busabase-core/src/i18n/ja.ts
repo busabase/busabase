@@ -816,6 +816,21 @@ export const dashboardJa: CoreI18nMessages = {
         unavailable:
           "この環境ではカスタムドメインが設定されていません。管理者にお問い合わせください。",
         empty: "所有するドメインを追加し、DNS プロバイダーで設定を完了してください。",
+        guideToggle: "DNS の設定方法",
+        guideStepAdd:
+          "下に使いたいドメインを入力し、「{add}」をクリックします。shop.company.com のようなサブドメインが最も簡単です。",
+        guideStepDns:
+          "ドメインの DNS プロバイダー（Cloudflare、お名前.com、さくらインターネット、GoDaddy など）で CNAME レコードを追加します：",
+        guideType: "タイプ",
+        guideNameHint:
+          "ルートドメインより前の部分を入力します（shop.company.com なら shop）。完全なドメイン名を求めるプロバイダーもあります。",
+        guideStepCheck:
+          "ここに戻って「{check}」をクリックします。DNS の反映には数分から数時間かかることがあり、反映後に HTTPS が自動で設定されます。TXT 認証レコードも必要な場合は、ドメインを追加した後にここに表示されます。",
+        guideRootDomain:
+          "company.com のようなルートドメインを使うには、DNS プロバイダーがルートでの CNAME（CNAME フラット化、ALIAS、ANAME。Cloudflare は対応）に対応している必要があります。対応していない場合は www や shop などのサブドメインを使ってください。",
+        guideLink: "設定ガイドを見る",
+        recordNameHint:
+          "「名前」には完全なドメイン名が表示されます。多くの DNS プロバイダーでは、ルートドメインより前の部分だけを入力します（shop.company.com なら shop）。",
         hostnameLabel: "ドメイン名",
         hostnameHint: "https:// やパスを含めず、ホスト名を入力してください。",
         invalidHostname:
@@ -834,6 +849,14 @@ export const dashboardJa: CoreI18nMessages = {
         activeHint: "DNS と HTTPS の準備ができました。",
         error: "対応が必要",
         errorHint: "以下の詳細を確認し、再確認してください。",
+        // Keyed by `AirAppSiteDomainIssue`: this deployment's own findings about one domain.
+        issues: {
+          "target-missing":
+            "この環境ではカスタムドメインが設定されていません。管理者にお問い合わせください。",
+          "route-unverified":
+            "このドメインはまだこのサイトにつながっていません。DNS の変更が反映されるまで数分から数時間かかる場合があります。",
+          "check-failed": "現在このドメインを確認できません。再確認してください。",
+        },
         offlineHint:
           "サイトは非公開です。すべてのサイトアドレスに「見つかりません」と表示されます。",
         dnsInstructions:
@@ -1583,6 +1606,8 @@ export const dashboardJa: CoreI18nMessages = {
   search: {
     all: "コンテンツ",
     recent: "最近",
+    sectionSpaces: "スペース",
+    switchToSpace: "このスペースに切り替える",
     sectionRecent: "最近アクセス",
     sectionElsewhere: "ワークスペース内のその他",
     sectionDocContent: "ドキュメント本文",
@@ -2711,6 +2736,8 @@ export const dashboardJa: CoreI18nMessages = {
     failed: "移動できませんでした。もう一度お試しください。",
   },
   richNodes: {
+    discardChanges: "未保存の変更を破棄しますか？",
+    returnToReading: "閲覧に戻る",
     defaultOutcome: "既定",
     controlPanel: "コントロールパネル",
     zoomIn: "拡大",

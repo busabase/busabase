@@ -204,7 +204,14 @@ export function useNodeContentSave(
     [messages, locale, kind, mutation, node, orpc, queryClient, session],
   );
 
-  return { error, markDirty, reviewRequestId, save, status };
+  // End a local editing session without changing or withdrawing a submitted request.
+  const reset = useCallback(() => {
+    if (session.pending || sessionRef.current !== session) return;
+    session.revision += 1;
+    setState({ session, status: "saved", error: null, reviewRequestId: null });
+  }, [session]);
+
+  return { error, markDirty, reset, reviewRequestId, save, status };
 }
 
 export function RichNodeReviewLink({ requestId }: { requestId: string }) {

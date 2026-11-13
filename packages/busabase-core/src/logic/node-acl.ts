@@ -789,6 +789,21 @@ export async function grantCreatorManage(
 }
 
 /**
+ * The node metadata that carries a caller's create-time `visibility` to
+ * `initializeNodeAcl` below — `{}` when none was asked for.
+ *
+ * Every create endpoint with a review-first path needs it TWICE: on the row it
+ * inserts directly, and in the pending change request's `metadata`, which the
+ * per-type materializer copies onto the row at merge time before
+ * `mergeNodeCreate` calls `initializeNodeAcl`. Missing either one is silent:
+ * the call succeeds and the node the caller asked to be private comes out
+ * visible to the whole space.
+ */
+export const createTimeVisibilityMetadata = (
+  visibility: NodeVisibility | undefined,
+): { visibility?: NodeVisibility } => (visibility ? { visibility } : {});
+
+/**
  * One-shot ACL init for a freshly-inserted node — the O(parent-grants)
  * create-path fast lane (a full `recomputeSpaceNodeAcl` is only needed for
  * shape changes like move/visibility edits):

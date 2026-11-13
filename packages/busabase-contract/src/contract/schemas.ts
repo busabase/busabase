@@ -679,7 +679,13 @@ const changeRequestSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      "Whether the caller may approve, request changes on, merge or close this change request. Returned by `changeRequests.get` only; omitted elsewhere.",
+      "Whether the caller may approve, request changes on, or merge this change request. Returned by `changeRequests.get` only; omitted elsewhere.",
+    ),
+  viewerCanClose: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether the caller may close this request. This includes a submitter withdrawing their own pending request. Returned by `changeRequests.get` only; omitted elsewhere.",
     ),
 });
 

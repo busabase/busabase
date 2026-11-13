@@ -55,14 +55,29 @@ const readChunk = (value: unknown): BlobChunk => {
     chunk.totalParts > 10_000 ||
     chunk.partNumber > chunk.totalParts ||
     !Number.isSafeInteger(chunk.sizeBytes) ||
-    chunk.sizeBytes < 1 ||
+    chunk.sizeBytes < 0 ||
     chunk.sizeBytes > MAX_RESTORE_BLOB_BYTES ||
-    chunk.totalParts !== Math.ceil(chunk.sizeBytes / RESTORE_BLOB_PART_BYTES) ||
+    chunk.totalParts !== Math.max(1, Math.ceil(chunk.sizeBytes / RESTORE_BLOB_PART_BYTES)) ||
     typeof chunk.sha256 !== "string" ||
     !/^[a-f0-9]{64}$/.test(chunk.sha256)
   )
     return badRequest("Invalid restore blob chunk metadata");
   return chunk;
+};
+
+const decodePart = (base64: unknown): Buffer => {
+  if (
+    typeof base64 !== "string" ||
+    base64.length > 8 * 1024 * 1024 ||
+    base64.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)
+  ) {
+    return badRequest("Restore blob part must contain at most six MiB of canonical base64 bytes");
+  }
+  const bytes = Buffer.from(base64, "base64");
+  if (bytes.toString("base64") !== base64)
+    return badRequest("Restore blob part is not canonical base64");
+  return bytes;
 };
 
 export const assertRestoreBlobKey = (
@@ -88,13 +103,15 @@ interface RestoreBlobPartInput {
   mimeType: string;
   base64: unknown;
   chunk: unknown;
-  validate: (sizeBytes: number) => Promise<void>;
-  promote: (stagingKey: string) => Promise<void>;
+  /** true means an already-present object was fully verified; replay must not write it. */
+  validate: (sizeBytes: number, sha256: string) => Promise<unknown>;
+  promote: (stagingKey: string, sizeBytes: number, sha256: string) => Promise<void>;
 }
 
 export class RestoreBlobParts {
   private readonly queues = new Map<string, Promise<boolean>>();
   private readonly blobs = new Map<string, PendingBlob>();
+  private readonly reused = new Map<string, { chunk: BlobChunk; mimeType: string }>();
 
   constructor(
     private readonly sessionId: string,
@@ -116,6 +133,7 @@ export class RestoreBlobParts {
       }
     }
     this.blobs.clear();
+    this.reused.clear();
   }
 
   hasIncomplete(): boolean {
@@ -133,19 +151,38 @@ export class RestoreBlobParts {
     }
   }
 
+  /** Older inline callers receive the same staging, verification and promotion guards. */
+  async acceptInline(input: Omit<RestoreBlobPartInput, "chunk">): Promise<boolean> {
+    if (typeof input.base64 !== "string" || input.base64.length % 4 !== 0)
+      return badRequest("Restore blob is not canonical base64");
+    const encoded = input.base64;
+    const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+    const sizeBytes = (encoded.length / 4) * 3 - padding;
+    if (sizeBytes < 0 || sizeBytes > MAX_RESTORE_BLOB_BYTES)
+      return badRequest("Restore blob size is outside the supported range");
+    const encodedPartBytes = (RESTORE_BLOB_PART_BYTES / 3) * 4;
+    const hash = createHash("sha256");
+    // Validate all input before creating any provider upload. Decoding one
+    // six-MiB slice at a time avoids duplicating an entire legacy object.
+    for (let offset = 0; offset < encoded.length; offset += encodedPartBytes) {
+      hash.update(decodePart(encoded.slice(offset, offset + encodedPartBytes)));
+    }
+    const sha256 = hash.digest("hex");
+    const totalParts = Math.max(1, Math.ceil(sizeBytes / RESTORE_BLOB_PART_BYTES));
+    let complete = false;
+    for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
+      complete = await this.accept({
+        ...input,
+        base64: encoded.slice((partNumber - 1) * encodedPartBytes, partNumber * encodedPartBytes),
+        chunk: { partNumber, totalParts, sizeBytes, sha256 },
+      });
+    }
+    return complete;
+  }
+
   private async acceptPart(input: RestoreBlobPartInput): Promise<boolean> {
     const chunk = readChunk(input.chunk);
-    if (
-      typeof input.base64 !== "string" ||
-      input.base64.length > 8 * 1024 * 1024 ||
-      input.base64.length % 4 !== 0 ||
-      !/^[A-Za-z0-9+/]*={0,2}$/.test(input.base64)
-    ) {
-      return badRequest("Restore blob part must contain at most six MiB of canonical base64 bytes");
-    }
-    const bytes = Buffer.from(input.base64, "base64");
-    if (bytes.toString("base64") !== input.base64)
-      return badRequest("Restore blob part is not canonical base64");
+    const bytes = decodePart(input.base64);
     const expectedBytes =
       chunk.partNumber === chunk.totalParts
         ? chunk.sizeBytes - (chunk.totalParts - 1) * RESTORE_BLOB_PART_BYTES
@@ -154,9 +191,36 @@ export class RestoreBlobParts {
       return badRequest("Restore blob part size does not match its declared position");
     const partHash = createHash("sha256").update(bytes).digest("hex");
     let blob = this.blobs.get(input.key);
+    let reused = this.reused.get(input.key);
+    if (!blob && !reused) {
+      if (chunk.partNumber !== 1) return badRequest("Restore blob must start with part one");
+      if ((await input.validate(chunk.sizeBytes, chunk.sha256)) === true) {
+        reused = { chunk, mimeType: input.mimeType };
+        this.reused.set(input.key, reused);
+      }
+    }
+    if (reused) {
+      if (
+        reused.chunk.sha256 !== chunk.sha256 ||
+        reused.chunk.sizeBytes !== chunk.sizeBytes ||
+        reused.chunk.totalParts !== chunk.totalParts ||
+        reused.mimeType !== input.mimeType
+      )
+        return badRequest("Restore blob metadata changed during verified object replay");
+      if (chunk.sizeBytes === 0) {
+        const metadata = await storage.getObjectMetadata(input.key);
+        if (!metadata || metadata.size !== 0)
+          return badRequest("Verified empty restore object changed");
+      } else {
+        const start = (chunk.partNumber - 1) * RESTORE_BLOB_PART_BYTES;
+        const stored = await storage.getObjectRange(input.key, start, start + expectedBytes - 1);
+        if (!stored.equals(bytes))
+          return badRequest("Replayed restore part differs from the verified existing object");
+      }
+      return chunk.partNumber === chunk.totalParts;
+    }
     if (!blob) {
       if (chunk.partNumber !== 1) return badRequest("Restore blob must start with part one");
-      await input.validate(chunk.sizeBytes);
       const directory = `${restoreReceiptPrefix(this.spaceId)}${this.sessionId}/${randomBytes(16).toString("hex")}/`;
       const stagingKey = `${directory}object`;
       const uploadId = await storage.createMultipartUpload(stagingKey, input.mimeType);
@@ -188,6 +252,12 @@ export class RestoreBlobParts {
       // v1 archives can repeat a physical key once per Asset. A complete replay
       // is safe only when every offered part still matches the stored object;
       // never recreate staging state or overwrite already-verified bytes.
+      if (chunk.sizeBytes === 0) {
+        const metadata = await storage.getObjectMetadata(blob.key);
+        if (!metadata || metadata.size !== 0)
+          return badRequest("Replayed empty restore object no longer matches the completed object");
+        return true;
+      }
       const start = (chunk.partNumber - 1) * RESTORE_BLOB_PART_BYTES;
       const stored = await storage.getObjectRange(blob.key, start, start + expectedBytes - 1);
       if (!stored.equals(bytes))
@@ -256,9 +326,9 @@ export class RestoreBlobParts {
       }
       if (storedHash.digest("hex") !== chunk.sha256)
         return badRequest("Stored restore object content hash does not match the archive");
-      await input.validate(chunk.sizeBytes);
+      await input.validate(chunk.sizeBytes, chunk.sha256);
       await assertRestoreBlobReceipt(blob.receiptKey, blob.receipt);
-      await input.promote(blob.stagingKey);
+      await input.promote(blob.stagingKey, chunk.sizeBytes, chunk.sha256);
       await storage.deleteObject(blob.stagingKey);
       await storage.deleteObject(blob.receiptKey);
       blob.complete = true;

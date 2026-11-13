@@ -21,6 +21,7 @@ import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel
 import { type MaterializeArgs, registerMaterializer } from "../../logic/materialize";
 import {
   buildNodeVisibilityCondition,
+  createTimeVisibilityMetadata,
   hasNodePermission,
   initializeNodeAcl,
   shouldAutoMerge,
@@ -35,6 +36,7 @@ import {
   NODE_SLUG_CONFLICT_REASON,
   nodeSlugConflict,
 } from "../../logic/node-slug";
+import { assertNodeStorageId } from "../../logic/node-storage-key";
 import { ensureReady } from "../../logic/seed";
 import {
   loadNodesByIds,
@@ -55,7 +57,10 @@ interface DocVO {
   body: string;
 }
 
-const docStoragePrefix = (nodeId: string) => `busabase/nodes/${nodeId}/doc/`;
+const docStoragePrefix = (nodeId: string) => {
+  assertNodeStorageId(nodeId);
+  return `busabase/nodes/${nodeId}/doc/`;
+};
 // Exported so `logic/grep.ts`'s Docs adapter (Unified Grep P2a) can address
 // the exact same storage object `readDocBody` reads, without depending on
 // this module's swallow-to-empty error handling below (see `readDocBody`'s
@@ -347,6 +352,9 @@ export const createDoc = async (
       description: parsed.description,
       parentNodeId: parentNode.id,
       body: parsed.body,
+      // Rides the proposal: `materializeDocNode` copies `fields.metadata` onto
+      // the row at merge time, where `initializeNodeAcl` promotes it.
+      metadata: createTimeVisibilityMetadata(parsed.visibility),
       message: `Create doc ${parsed.name}`,
       submittedBy: resolveActorId(CURRENT_USER_ID),
     });
@@ -369,6 +377,9 @@ export const createDoc = async (
         slug: parsed.slug,
         name: parsed.name,
         description: parsed.description,
+        // `initializeNodeAcl` below promotes `metadata.visibility` into the
+        // `explicit_visibility` column (and strips it from the bag).
+        metadata: createTimeVisibilityMetadata(parsed.visibility),
         position: 0,
         createdAt,
         updatedAt: createdAt,

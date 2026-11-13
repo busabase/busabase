@@ -37,9 +37,11 @@ import {
   GanttChart,
   LayoutGrid,
   LoaderCircle,
+  Maximize2,
   MoreHorizontal,
   MoveLeft,
   MoveRight,
+  Paperclip,
   PenLine,
   PlaySquare,
   Plus,
@@ -82,7 +84,12 @@ import { resolveEmbedPreview } from "../../base/utils/embed";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import { getRecordTitle } from "../helpers/change-request";
-import { getFieldChipEntries, getFieldPreviewText, getRelationRecordIds } from "../helpers/field";
+import {
+  getAttachmentRefs,
+  getFieldChipEntries,
+  getFieldPreviewText,
+  getRelationRecordIds,
+} from "../helpers/field";
 import { fieldDesignHref } from "../helpers/field-visibility-navigation";
 import { fieldValueToString, formatMemberChipLabel, shortIdentifier } from "../helpers/format";
 import { buildGridCellText, GRID_FIELD_PRESENTATION } from "../helpers/grid-cell-layout";
@@ -118,6 +125,7 @@ import {
   type UpdateRecordCell,
   useBaseGridEditing,
 } from "../hooks/use-base-grid-editing";
+import { type FieldFileUploader, useFieldFileUpload } from "../hooks/use-field-file-upload";
 import type { RecordFindControl } from "../hooks/use-record-find";
 import { getOmittedWhiteboardPreview, isListPayloadOmitted } from "../utils/list-payload-preview";
 import { toSlugInput } from "../utils/slug-input";
@@ -133,6 +141,7 @@ import {
   InlineCellStatusBadge,
   InlineEditableCellValue,
   InlineEditNotice,
+  InlineMemberCellValue,
   useHasFinePointer,
   useInlineCellEditMessages,
 } from "./base-table-inline-cell";
@@ -177,15 +186,8 @@ const getRecordTableColumnWidth = (field: BaseFieldVO, index: number) => {
   return fieldColumnWidth(field.type);
 };
 
-// `left-0` here assumes nothing else sits to this column's left. When the
-// base-level bulk-select checkbox column is enabled, that 36px-wide column
-// renders *before* this one but was never itself sticky — so on scroll it
-// slid out of view while this column snapped to `left: 0`, a ~36px jump the
-// instant scrolling started. Both the checkbox column and this one need to be
-// sticky together, at `left-0` and `left-9` (36px) respectively, so the pair
-// moves as one frozen group with no discontinuity — see
-// `baseTableSelectionStickyCellClassName`/`baseTableSelectionStickyHeaderClassName`
-// below, and every call site's `hasSelectionColumn` handling.
+// Keep the optional selection column and frozen primary field continuous while
+// horizontally scrolling.
 const baseTableStickyClassName =
   "sticky z-10 border-border/70 border-r bg-background shadow-sm transition-colors group-hover:bg-muted";
 
@@ -196,6 +198,10 @@ const baseTableSelectionStickyCellClassName =
   "sticky left-0 z-10 border-border/40 border-r bg-background transition-colors group-hover:bg-muted";
 /** Sticky class for the leading bulk-select "select all" checkbox header. Pairs with `baseTableHeaderStickyClassName` above. */
 const baseTableSelectionStickyHeaderClassName = "sticky left-0 z-20 border-border/50 bg-muted";
+
+function leadingColumnsOffset(hasSelectionColumn: boolean) {
+  return hasSelectionColumn ? "left-9" : "left-0";
+}
 
 // The right-hand sticky "record status" column is disabled for live rows: every
 // record rendered there is `status: "active"` (archived ones render in their own
@@ -367,7 +373,7 @@ function FieldColumnHeader({
       }
       className={`group/header relative flex h-full min-w-0 items-center gap-1 border-border/40 border-r px-1.5 font-medium ${
         sticky
-          ? `${baseTableHeaderStickyClassName} ${hasSelectionColumn ? "left-9" : "left-0"}`
+          ? `${baseTableHeaderStickyClassName} ${leadingColumnsOffset(hasSelectionColumn)}`
           : ""
       } ${dragOver || highlighted ? "ring-2 ring-inset ring-primary/60" : ""} ${dragging ? "opacity-55" : ""}`}
       data-field-slug={field.slug}
@@ -674,6 +680,7 @@ function BusaBaseRecordRow({
   selected,
   onToggleSelected,
   onOpenRecord,
+  onUploadAttachment,
 }: {
   client: BusabaseDashboardApiClient;
   record: RecordVO;
@@ -690,6 +697,7 @@ function BusaBaseRecordRow({
   selected?: boolean;
   onToggleSelected?: (record: RecordVO) => void;
   onOpenRecord?: (record: RecordVO) => void;
+  onUploadAttachment?: FieldFileUploader;
 }) {
   const messages = useCoreI18n();
   const currentRecordHref = useHrefWithCurrentSearch(
@@ -730,6 +738,7 @@ function BusaBaseRecordRow({
           index={index}
           key={field.id}
           onOpenRecord={onOpenRecord}
+          onUploadAttachment={onUploadAttachment}
           record={record}
           records={relationRecords}
           rowHeight={rowHeight}
@@ -773,7 +782,7 @@ function BusaBaseTableRowsSkeleton({
   hasSelectionColumn: boolean;
   rowHeight: number;
 }) {
-  const stickyFieldColumnIndex = hasSelectionColumn ? 1 : 0;
+  const stickyFieldColumnIndex = Number(hasSelectionColumn);
   return (
     <div aria-hidden>
       {SKELETON_ROWS.map((rowId, rowIndex) => (
@@ -788,7 +797,7 @@ function BusaBaseTableRowsSkeleton({
                 hasSelectionColumn && columnIndex === 0
                   ? baseTableSelectionStickyCellClassName
                   : columnIndex === stickyFieldColumnIndex
-                    ? `${baseTableStickyClassName} ${hasSelectionColumn ? "left-9" : "left-0"}`
+                    ? `${baseTableStickyClassName} ${leadingColumnsOffset(hasSelectionColumn)}`
                     : "flex h-full items-center border-border/40 border-r"
               }
               // biome-ignore lint/suspicious/noArrayIndexKey: fixed-order grid cells, no stable id
@@ -831,6 +840,7 @@ export function BusaBaseTable({
   onPatchRecord,
   onReorderView,
   onUpdateRecordCell,
+  onUploadAttachment,
   onUpdateView,
   records,
   relationRecords = records,
@@ -900,6 +910,8 @@ export function BusaBaseTable({
    * read-only, exactly as before.
    */
   onUpdateRecordCell?: UpdateRecordCell;
+  /** Uploads attachment field files before their refs are committed to the record. */
+  onUploadAttachment?: FieldFileUploader;
   onUpdateView: (
     view: ViewVO,
     payload: ViewUpdatePayload,
@@ -1264,6 +1276,7 @@ export function BusaBaseTable({
   );
   const gridEditing = useBaseGridEditing({
     canMerge: hasApiKeyLevel(basePermissionLevel, "write"),
+    canEditField: (field) => field.type !== "attachment" || Boolean(onUploadAttachment),
     enabled: canEditCells,
     ensureRowVisible,
     fields,
@@ -1786,7 +1799,7 @@ export function BusaBaseTable({
           ) : null}
           <div
             aria-busy={recordsPending}
-            aria-colcount={fields.length + (selectionEnabled ? 1 : 0)}
+            aria-colcount={fields.length + Number(selectionEnabled)}
             aria-describedby={canEditCells ? gridHelpId : undefined}
             aria-rowcount={1 + records.length + (showArchivedRecords ? archivedRecords.length : 0)}
             className="w-max min-w-full border-border/50 border-l border-t"
@@ -1975,11 +1988,11 @@ export function BusaBaseTable({
                   tabIndex={-1}
                 >
                   <div
-                    aria-colspan={fields.length + (selectionEnabled ? 1 : 0)}
+                    aria-colspan={fields.length + Number(selectionEnabled)}
                     className="flex items-center px-2 text-muted-foreground text-sm"
                     role="gridcell"
                     style={{
-                      gridColumn: `span ${fields.length + (selectionEnabled ? 1 : 0)}`,
+                      gridColumn: `span ${fields.length + Number(selectionEnabled)}`,
                     }}
                     tabIndex={-1}
                   >
@@ -2021,6 +2034,7 @@ export function BusaBaseTable({
                       grid={gridEditingContext}
                       key={record.id}
                       onOpenRecord={onOpenRecord}
+                      onUploadAttachment={onUploadAttachment}
                       onToggleSelected={toggleRecordSelected}
                       record={record}
                       relationRecords={relationRecords}
@@ -2049,6 +2063,7 @@ export function BusaBaseTable({
                   grid={gridEditingContext}
                   key={record.id}
                   onOpenRecord={onOpenRecord}
+                  onUploadAttachment={onUploadAttachment}
                   onToggleSelected={toggleRecordSelected}
                   record={record}
                   relationRecords={relationRecords}
@@ -2646,6 +2661,7 @@ interface RecordTableCellProps {
   field: BaseFieldVO;
   hasSelectionColumn: boolean;
   index: number;
+  onUploadAttachment?: FieldFileUploader;
   record: RecordVO;
   records: RecordVO[];
   rowHeight: number;
@@ -2656,7 +2672,7 @@ function RecordTableCell(props: RecordTableCellProps) {
   const messages = useCoreI18n();
   const stickyClassName =
     index === 0
-      ? `${baseTableStickyClassName} ${props.hasSelectionColumn ? "left-9" : "left-0"}`
+      ? `${baseTableStickyClassName} ${leadingColumnsOffset(props.hasSelectionColumn)}`
       : "";
   // Read-only grid (no editing, or an archived row): exactly the cell it always was.
   if (!grid) {
@@ -2668,12 +2684,16 @@ function RecordTableCell(props: RecordTableCellProps) {
         role="gridcell"
         tabIndex={-1}
       >
+        {index === 0 && props.onOpenRecord ? (
+          <RecordExpandButton onOpenRecord={props.onOpenRecord} record={record} />
+        ) : null}
         <RecordTableCellContent {...props} />
       </div>
     );
   }
   const key = gridCellKey(record.id, field.slug);
-  const editable = grid.isEditableCell(record, field, index);
+  const editorKind = getInlineCellEditorKind(field);
+  const editable = grid.isEditableCell(record, field);
   const active = grid.active?.recordId === record.id && grid.active.fieldSlug === field.slug;
   const editing =
     editable && grid.editing?.recordId === record.id && grid.editing.fieldSlug === field.slug;
@@ -2681,7 +2701,7 @@ function RecordTableCell(props: RecordTableCellProps) {
   const value = grid.getDisplayValue(record, field);
   return (
     <div
-      aria-colindex={index + 1 + (props.hasSelectionColumn ? 1 : 0)}
+      aria-colindex={index + 1 + Number(props.hasSelectionColumn)}
       aria-readonly={!editable}
       className={`flex min-w-0 items-center gap-1 border-border/40 border-r px-2 outline-none ${editing ? "z-20 overflow-visible" : "overflow-hidden"} ${stickyClassName} ${
         active
@@ -2694,8 +2714,22 @@ function RecordTableCell(props: RecordTableCellProps) {
       data-cell-record={record.id}
       data-grid-cell={key}
       data-inline-editable={editable ? "true" : undefined}
+      onClick={
+        editable && (editorKind === "member" || editorKind === "attachment")
+          ? (event) => {
+              if ((event.target as HTMLElement).closest("[data-inline-cell-editor]")) return;
+              if (
+                editorKind === "attachment" &&
+                (event.target as HTMLElement).closest("a[href], button, input")
+              )
+                return;
+              if (editorKind === "member") grid.startEditing(record, field);
+              else grid.activate({ recordId: record.id, fieldSlug: field.slug });
+            }
+          : undefined
+      }
       onDoubleClick={
-        editable && field.type !== "relation" && getInlineCellEditorKind(field) !== "checkbox"
+        editable && editorKind !== "checkbox" && editorKind !== "relation"
           ? (event) => {
               if ((event.target as HTMLElement).closest("a[href], [data-inline-cell-editor]")) {
                 return;
@@ -2710,11 +2744,15 @@ function RecordTableCell(props: RecordTableCellProps) {
       role="gridcell"
       tabIndex={grid.tabStopKey === key ? 0 : -1}
     >
+      {index === 0 && props.onOpenRecord ? (
+        <RecordExpandButton onOpenRecord={props.onOpenRecord} record={record} />
+      ) : null}
       {editing ? (
         <InlineCellEditor
           client={props.client}
           field={field}
           grid={grid}
+          onUploadAttachment={props.onUploadAttachment}
           relationRecords={props.records}
           record={record}
         />
@@ -2740,22 +2778,145 @@ function RecordTableCell(props: RecordTableCellProps) {
             />
           ) : null}
         </>
+      ) : editable && field.type === "attachment" ? (
+        <>
+          {active ? (
+            <InlineAttachmentUploadButton
+              field={field}
+              grid={grid}
+              onUploadAttachment={props.onUploadAttachment}
+              record={record}
+            />
+          ) : null}
+          {getAttachmentRefs(value).length > 0 ? (
+            <AttachmentValuePreview
+              presentation="grid"
+              rowHeight={props.rowHeight}
+              thumbnailOnly
+              value={value}
+            />
+          ) : null}
+        </>
       ) : editable ? (
-        <InlineEditableCellValue
-          active={active}
-          field={field}
-          index={index}
-          onToggle={() => grid.toggleCheckbox(record, field)}
-          value={value}
-          rowHeight={props.rowHeight}
-          recordHref={props.currentRecordHref}
-          onOpenRecord={props.onOpenRecord ? () => props.onOpenRecord?.(record) : undefined}
-        />
+        editorKind === "member" ? (
+          <InlineMemberCellValue client={props.client} users={record.fieldUsers} value={value} />
+        ) : (
+          <InlineEditableCellValue
+            active={active}
+            field={field}
+            index={index}
+            onToggle={() => grid.toggleCheckbox(record, field)}
+            value={value}
+            rowHeight={props.rowHeight}
+            recordHref={props.currentRecordHref}
+            onOpenRecord={props.onOpenRecord ? () => props.onOpenRecord?.(record) : undefined}
+          />
+        )
       ) : (
         <RecordTableCellContent {...props} />
       )}
       {editing ? null : <InlineCellStatusBadge field={field} status={status} />}
     </div>
+  );
+}
+
+function InlineAttachmentUploadButton({
+  field,
+  grid,
+  onUploadAttachment,
+  record,
+}: {
+  field: BaseFieldVO;
+  grid: BaseGridEditingContextValue;
+  onUploadAttachment?: FieldFileUploader;
+  record: RecordVO;
+}) {
+  const resolveIString = useIString();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const upload = useFieldFileUpload(field, onUploadAttachment);
+
+  const handleFiles = (files: readonly File[]) => {
+    void upload.upload(files, (uploaded) => {
+      const existing = getAttachmentRefs(grid.getDisplayValue(record, field));
+      const next = upload.merge(existing, uploaded, (current, added) => [...current, ...added]);
+      grid.commit(record, field, next, "stay");
+    });
+  };
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        aria-label={upload.label}
+        className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        data-inline-attachment-upload
+        disabled={upload.isUploading || !upload.canUpload}
+        onClick={(event) => {
+          event.stopPropagation();
+          inputRef.current?.click();
+        }}
+        title={upload.label}
+        type="button"
+      >
+        {upload.isUploading ? (
+          <LoaderCircle aria-hidden className="size-3.5 animate-spin" />
+        ) : (
+          <Paperclip aria-hidden className="size-3.5" />
+        )}
+      </button>
+      <input
+        accept={upload.accept}
+        aria-label={resolveIString(field.name)}
+        className="sr-only"
+        disabled={upload.isUploading || !upload.canUpload}
+        multiple={upload.multiple}
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          event.currentTarget.value = "";
+          handleFiles(files);
+        }}
+        ref={inputRef}
+        type="file"
+      />
+      {upload.uploadError ? (
+        <span
+          className="absolute top-full left-0 z-30 mt-1 max-w-64 rounded border border-destructive/30 bg-background px-2 py-1 text-destructive text-xs shadow-sm"
+          role="alert"
+        >
+          {upload.uploadError}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The detail dialog shares the primary field cell, with the action preceding
+ * the value so the row reads as one coherent cell.
+ */
+function RecordExpandButton({
+  onOpenRecord,
+  record,
+}: {
+  onOpenRecord: (record: RecordVO) => void;
+  record: RecordVO;
+}) {
+  const messages = useCoreI18n();
+  const label = `${messages.common.open}: ${getRecordTitle(record, messages)}`;
+  return (
+    <button
+      aria-label={label}
+      className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+      data-expand-record={record.id}
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpenRecord(record);
+      }}
+      onDoubleClick={(event) => event.stopPropagation()}
+      title={label}
+      type="button"
+    >
+      <Maximize2 aria-hidden size={14} />
+    </button>
   );
 }
 

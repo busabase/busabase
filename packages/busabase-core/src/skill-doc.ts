@@ -262,6 +262,7 @@ Quick reference — every path is relative to the base URL above; worked example
 | Agent work queue | \`GET /api/v1/agent/tasks\` | CRs awaiting your revision |
 | Revise an operation | \`POST /api/v1/operations/:operationId/revisions\` | answer requested changes |
 | Space welcome page | \`GET\` / \`PUT /api/v1/space-welcome\` | which Doc/HTML node Home shows first; write the node, then \`PUT { nodeId, expectedVersion }\` (managers) — CLI \`${BUSABASE_CLI} space-welcome set --node <id>\` |
+| AirApp website | \`GET /api/v1/airapps/:nodeId/site\`, \`POST …/site/preview\`, \`POST …/site/go-live\` | after a site's files change: deploy the members-only preview, then go live with that same version (only when the user asks; \`preview-stale\` = deploy the preview again). Also \`…/site/unpublish\`, \`…/site/republish\`, \`…/site/domains\` — CLI \`${BUSABASE_CLI} airapps site-go-live --node-id <id>\` |
 
 List Bases:
 

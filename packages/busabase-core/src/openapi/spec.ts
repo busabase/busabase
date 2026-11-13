@@ -4,6 +4,7 @@ import { busabaseContract } from "busabase-contract/contract/busabase";
 import {
   busabaseOpenApiCommonSchemas,
   busabaseOpenApiErrorResponseBodySchema,
+  nameBusabaseOpenApiEventSchemas,
 } from "busabase-contract/contract/openapi-components";
 import { isRpcOnly } from "openlib/openapi";
 
@@ -98,5 +99,5 @@ export async function getBusabaseOpenApiSpec(): Promise<OpenAPI.Document> {
   // oRPC emits OpenAPI 3.1 (JSON Schema 2020-12: `type: "null"`, `const`,
   // numeric `exclusiveMinimum`). This used to be relabelled "3.0.0", which made
   // the document invalid as 3.0 and misled 3.0-mode SDK generators/validators.
-  return spec;
+  return nameBusabaseOpenApiEventSchemas(spec);
 }

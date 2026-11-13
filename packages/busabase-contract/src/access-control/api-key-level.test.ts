@@ -202,6 +202,33 @@ describe("resolveRequiredLevel", () => {
 });
 
 describe("procedure permission policy", () => {
+  it.each([
+    ["exportSnapshot", "/dump/export/snapshot"],
+    ["exportAssetAttachment", "/dump/export/asset-attachment"],
+  ] as const)("requires explicit workspace manage for dump.%s", (procedure, routePath) => {
+    const route = busabaseContractRoutes.dump[procedure]["~orpc"].route;
+    expect(route).toMatchObject({ method: "POST", path: routePath });
+    expect(PROCEDURE_PERMISSION_POLICY[`dump.${procedure}`]).toEqual({
+      level: "manage",
+      scope: "workspace",
+    });
+
+    for (const path of [
+      ["dump", procedure],
+      ["workbench", "dump", procedure],
+    ]) {
+      const policy = resolveProcedurePermissionPolicy(path);
+      expect(policy).toEqual({ level: "manage", scope: "workspace" });
+      for (const method of [route.method, "GET", undefined]) {
+        expect(resolveRequiredLevel(path, method)).toBe("manage");
+      }
+      for (const level of ["read", "changeRequest", "write"] as const) {
+        expect(hasApiKeyLevel(level, policy.level)).toBe(false);
+      }
+      expect(hasApiKeyLevel("manage", policy.level)).toBe(true);
+    }
+  });
+
   it.each(
     ["respondToInput", "snapshot", "resolveResource"].flatMap((procedure) => [
       `agents.sessions.${procedure}`,

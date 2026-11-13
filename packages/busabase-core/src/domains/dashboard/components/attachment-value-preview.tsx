@@ -121,6 +121,7 @@ export function AttachmentValuePreview({
   renderTrigger,
   resolveUrl = getSafeAttachmentUrl,
   minimalChrome = false,
+  thumbnailOnly = false,
   presentation = "flow",
   rowHeight = 48,
   maxVisible,
@@ -132,6 +133,8 @@ export function AttachmentValuePreview({
   rowHeight?: number;
   /** Limit collapsed grid thumbnails while retaining every file in expansion. */
   maxVisible?: number;
+  /** Hide file text in compact grid cells while retaining accessible names. */
+  thumbnailOnly?: boolean;
   className?: string;
   /** Reuse this preview with a host-owned chip instead of the default thumbnail/link. */
   renderTrigger?: (
@@ -268,7 +271,7 @@ export function AttachmentValuePreview({
                       : 20
                   }
                 />
-                {grid && thumbnailSize >= 28 ? (
+                {grid && !thumbnailOnly && thumbnailSize >= 28 ? (
                   <span
                     aria-hidden
                     className={`max-w-full truncate font-medium text-muted-foreground ${thumbnailSize >= 64 ? "text-[10px] leading-3" : "text-[8px] leading-none"}`}
@@ -277,7 +280,7 @@ export function AttachmentValuePreview({
                     {attachmentFileType(item.fileName, item.mimeType).label}
                   </span>
                 ) : null}
-                {grid && thumbnailSize >= 64 ? (
+                {grid && !thumbnailOnly && thumbnailSize >= 64 ? (
                   <span
                     aria-hidden
                     className="max-w-full truncate text-center text-[10px] leading-3"

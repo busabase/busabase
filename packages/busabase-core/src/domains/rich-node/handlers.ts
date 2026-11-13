@@ -37,6 +37,7 @@ import { id, now } from "../../logic/kernel";
 import { assertNodePermission } from "../../logic/node-acl";
 import { resolveVisibleNodeOfTypes } from "../../logic/node-resolve";
 import { registerNodeRuntime } from "../../logic/node-runtime";
+import { assertNodeStorageId } from "../../logic/node-storage-key";
 import { ensureReady } from "../../logic/seed";
 import {
   finalizeChangeRequest,
@@ -72,8 +73,10 @@ const RICH_NODE_TYPES = ["whiteboard", "workflow", "html"] as const;
 export type RichNodeType = (typeof RICH_NODE_TYPES)[number];
 type RichNodeDocument = WhiteboardDocument | WorkflowDocument | HtmlDocument;
 
-const richNodeStoragePrefix = (nodeId: string, type: RichNodeType) =>
-  `busabase/nodes/${nodeId}/${type}/`;
+const richNodeStoragePrefix = (nodeId: string, type: RichNodeType) => {
+  assertNodeStorageId(nodeId);
+  return `busabase/nodes/${nodeId}/${type}/`;
+};
 
 // html stores just the raw `source` string (not a JSON-wrapped document) so
 // grep matches real HTML rather than JSON-escaped HTML — the same reasoning

@@ -116,6 +116,10 @@ import { type AgentEntryContextState, nextAgentEntryContext } from "./helpers/ag
 import { getNodeDetailBreadcrumbItems } from "./helpers/breadcrumbs";
 import { shouldQueryGlobalChangeRequests } from "./helpers/change-request-data-source";
 import { createChangeRequestQueryKeys } from "./helpers/change-request-query-keys";
+import {
+  formatDashboardDocumentTitle,
+  resolveDashboardDocumentTitle,
+} from "./helpers/document-title";
 import { getLinkedRecordIds } from "./helpers/field";
 import { homePendingListInput } from "./helpers/home";
 import {
@@ -174,7 +178,7 @@ import { type DashboardVisitorKind, DashboardVisitorProvider } from "./visitor-c
 import { WorkbenchLinkProvider } from "./workbench-link-context";
 
 export type { AirAppEnginePlanGate } from "../airapp/utils/engine-plan-gate";
-export { BusabaseTopbar } from "./components/topbar";
+export { BusabaseTopbar, TopbarNodeActionsSlot } from "./components/topbar";
 export type { BusabaseBreadcrumbItem } from "./helpers/view-types";
 export {
   resolveWorkbenchLinkUnderBase,
@@ -1470,6 +1474,31 @@ function BusabaseDashboardContent({
     nodeRouteState,
     routeNodeRef,
   ]);
+
+  const isBaseRoute = locationPath.startsWith("/base/");
+  const currentPageTitle = resolveDashboardDocumentTitle({
+    baseName: activeBase?.name,
+    fallbackTitle: titlebar.title,
+    isBaseRoute,
+    nodeActivityName: activeActivityNode?.name,
+    nodeName: activeDetailNode?.name,
+  });
+  const initialDocumentTitle = useRef<string | null>(null);
+  const isUnresolvedNodeRoute =
+    (Boolean(nodeDetailRoute) && !activeDetailNode) ||
+    (Boolean(nodeActivityRoute) && !activeActivityNode);
+  const isCurrentRouteTitleLoading =
+    (isBaseRoute && !activeBase) ||
+    (isUnresolvedNodeRoute &&
+      nodeRouteState?.status !== "archived" &&
+      nodeRouteState?.status !== "unavailable");
+  useEffect(() => {
+    // Keep the host's product suffix (for example, " | busabase") while the
+    // client-side router changes the current node.
+    if (isCurrentRouteTitleLoading || typeof document === "undefined") return;
+    initialDocumentTitle.current ??= document.title;
+    document.title = formatDashboardDocumentTitle(currentPageTitle, initialDocumentTitle.current);
+  }, [currentPageTitle, isCurrentRouteTitleLoading]);
 
   const breadcrumbItems = useMemo<BusabaseBreadcrumbItem[]>(() => {
     if (
@@ -3240,6 +3269,7 @@ function BusabaseDashboardContent({
           auditEvents={auditEvents}
           changeRequest={selectedChangeRequest}
           client={client}
+          currentUserId={currentUserId}
           focusOperationId={isOperationRoute ? (operationParams?.operationId ?? null) : null}
           pendingAction={pendingReviewAction}
           onApprove={approveChangeRequest}
@@ -3562,6 +3592,7 @@ function BusabaseDashboardContent({
           onPatchRecord={submitPatchRecord}
           onReorderView={submitReorderView}
           onUpdateRecordCell={submitCellEdit}
+          onUploadAttachment={uploadAttachment}
           onUpdateView={submitUpdateView}
           views={views}
         />

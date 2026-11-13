@@ -11,23 +11,91 @@ import { Button } from "kui/button";
 import { Input } from "kui/input";
 import { Label } from "kui/label";
 import { Skeleton } from "kui/skeleton";
-import { Check, CheckCircle2, Clock3, Copy, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
-import { useEffect, useId, useState } from "react";
-import { fmt, useCoreI18n } from "../../../i18n";
+import {
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  Clock3,
+  Copy,
+  ExternalLink,
+  Loader2,
+  RefreshCw,
+  TriangleAlert,
+} from "lucide-react";
+import { type ReactNode, useEffect, useId, useState } from "react";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 
 type DomainCopy = ReturnType<typeof useCoreI18n>["airapp"]["site"]["domains"];
+
+/** Locales with a published `/docs/airapp-websites` guide; every other UI language links the English one. */
+const DOMAIN_GUIDE_LOCALES: readonly string[] = ["zh-CN", "ja"];
+
+export const airAppSiteDomainGuideUrl = (locale: string): string =>
+  `${
+    DOMAIN_GUIDE_LOCALES.includes(locale)
+      ? `https://busabase.com/${locale}/docs/airapp-websites`
+      : "https://busabase.com/docs/airapp-websites"
+  }#custom-domains`;
+
+/** An example name only: the real prefix is whatever the person's own subdomain is. */
+const GUIDE_EXAMPLE_NAME = "shop";
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 const statusHint = (binding: AirAppSiteDomainBindingVO, copy: DomainCopy): string | null => {
   if (binding.status === "active") return null;
-  if (binding.status === "error") return binding.errors.length === 0 ? copy.errorHint : null;
+  if (binding.status === "error") {
+    return binding.errors.length === 0 && binding.issues.length === 0 ? copy.errorHint : null;
+  }
   if (binding.hostnameStatus === "active" && binding.sslStatus !== "active") {
     return copy.pendingHttpsHint;
   }
   return binding.dnsRecords.length === 0 ? copy.pendingDnsHint : null;
 };
+
+/**
+ * One closed line until asked for, so an empty panel stays as quiet as before.
+ * Its state lives here, so it is closed again whenever the guide comes back:
+ * when the panel opens, and after the last domain is removed.
+ */
+function DomainSetupGuide({
+  id,
+  label,
+  children,
+}: {
+  id: string;
+  label: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="min-w-0 space-y-2">
+      <button
+        aria-controls={id}
+        aria-expanded={open}
+        className="flex w-fit items-center gap-1 rounded-sm text-muted-foreground text-xs hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-airapp-site-domain-guide-toggle=""
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <ChevronRight
+          aria-hidden="true"
+          className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+        />
+        {label}
+      </button>
+      <div
+        className="min-w-0 space-y-2 rounded-md border border-border bg-muted/40 p-3"
+        data-airapp-site-domain-guide=""
+        hidden={!open}
+        id={id}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
 
 /** Domain setup shares the site's controls, but a failed check never hides its default address. */
 export function AirAppSiteDomains({
@@ -40,6 +108,7 @@ export function AirAppSiteDomains({
   state: AirAppSiteStateVO;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const copy = messages.airapp.site.domains;
   const id = useId();
   const queryClient = useQueryClient();
@@ -109,10 +178,71 @@ export function AirAppSiteDomains({
     </Button>
   );
 
+  const guideLink = (
+    <a
+      className="inline-flex w-fit items-center gap-1 rounded-sm text-primary text-xs underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      data-airapp-site-domain-guide-link=""
+      href={airAppSiteDomainGuideUrl(locale)}
+      rel="noreferrer"
+      target="_blank"
+    >
+      {copy.guideLink}
+      <ExternalLink aria-hidden="true" className="size-3" />
+    </a>
+  );
+
+  // Before anything is added there is no record to copy yet, but the target is
+  // already known, so the whole setup can be taught (and DNS prepared) up front.
+  const setupGuide = (cnameTarget: string) => (
+    <DomainSetupGuide id={`${id}-guide`} label={copy.guideToggle}>
+      <ol className="list-decimal space-y-2 ps-4 text-muted-foreground text-xs">
+        <li>{fmt(copy.guideStepAdd, { add: copy.add })}</li>
+        <li className="space-y-2">
+          <p>{copy.guideStepDns}</p>
+          <dl
+            className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1.5 rounded-md border border-border bg-background p-2"
+            data-airapp-site-domain-guide-record=""
+          >
+            <dt>{copy.guideType}</dt>
+            <dd className="font-mono text-foreground" dir="ltr">
+              CNAME
+            </dd>
+            <dt>{copy.dnsName}</dt>
+            <dd className="min-w-0 space-y-0.5">
+              <p className="font-mono text-foreground" dir="ltr">
+                {GUIDE_EXAMPLE_NAME}
+              </p>
+              <p>{copy.guideNameHint}</p>
+            </dd>
+            <dt className="pt-1">{copy.dnsValue}</dt>
+            <dd className="flex min-w-0 items-start gap-1">
+              <p
+                className="min-w-0 flex-1 select-all break-all pt-1 font-mono text-foreground"
+                data-airapp-site-domain-guide-target=""
+                dir="ltr"
+              >
+                {cnameTarget}
+              </p>
+              {copyButton("guide-cname-target", cnameTarget, copy.copyValue)}
+            </dd>
+          </dl>
+        </li>
+        <li>{fmt(copy.guideStepCheck, { check: copy.check })}</li>
+      </ol>
+      <p className="text-muted-foreground text-xs">{copy.guideRootDomain}</p>
+      {guideLink}
+    </DomainSetupGuide>
+  );
+
   const setupRecords = (binding: AirAppSiteDomainBindingVO) => (
     <div className="@container min-w-0 space-y-2">
       {binding.dnsRecords.some((record) => record.type !== "HTTP") ? (
-        <p className="text-muted-foreground text-xs">{copy.dnsInstructions}</p>
+        <>
+          <p className="text-muted-foreground text-xs">{copy.dnsInstructions}</p>
+          <p className="text-muted-foreground text-xs" data-airapp-site-domain-name-hint="">
+            {copy.recordNameHint}
+          </p>
+        </>
       ) : null}
       {binding.dnsRecords.some((record) => record.type === "HTTP") ? (
         <p className="text-muted-foreground text-xs">{copy.httpInstructions}</p>
@@ -162,6 +292,7 @@ export function AirAppSiteDomains({
           );
         })}
       </dl>
+      {guideLink}
     </div>
   );
 
@@ -294,12 +425,18 @@ export function AirAppSiteDomains({
                         </Button>
                       ) : null}
                     </div>
-                    {binding.errors.length > 0 ? (
+                    {binding.issues.length > 0 || binding.errors.length > 0 ? (
                       <ul
                         className={`space-y-1 break-words text-xs ${
                           binding.status === "error" ? "text-destructive" : "text-muted-foreground"
                         }`}
                       >
+                        {/* This deployment's findings in the viewer's language, then the provider's own words. */}
+                        {binding.issues.map((issue) => (
+                          <li data-airapp-site-domain-issue={issue} key={issue}>
+                            {copy.issues[issue]}
+                          </li>
+                        ))}
                         {binding.errors.map((message) => (
                           <li key={message}>{message}</li>
                         ))}
@@ -362,6 +499,8 @@ export function AirAppSiteDomains({
                 );
               })}
             </ul>
+          ) : domains.data.cnameTarget && state.engine === "available" ? (
+            setupGuide(domains.data.cnameTarget)
           ) : (
             <p className="text-muted-foreground text-xs">{copy.empty}</p>
           )}

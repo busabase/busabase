@@ -347,8 +347,10 @@ export interface ChangeRequestVO {
   primaryOperation: OperationVO | null;
   operationCount: number;
   reviews: ReviewVO[];
-  /** Whether the caller may approve/merge/close. Set by `changeRequests.get` only. */
+  /** Whether the caller may approve or merge. Set by `changeRequests.get` only. */
   viewerCanApprove?: boolean;
+  /** Whether the caller may close this request, including their own pending submission. */
+  viewerCanClose?: boolean;
 }
 
 export interface ChangeRequestBatchFailureVO {

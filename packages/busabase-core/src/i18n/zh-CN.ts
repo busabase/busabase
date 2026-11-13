@@ -780,6 +780,20 @@ export const dashboardZhCN: CoreI18nMessages = {
         lastKnown: "下方显示的是上次成功检查时的信息。",
         unavailable: "当前部署尚未配置自定义域名，请联系管理员。",
         empty: "添加你拥有的域名，再前往 DNS 服务商完成配置。",
+        guideToggle: "怎么配置 DNS？",
+        guideStepAdd: "在下方输入要用的域名，点「{add}」。用子域名最简单，例如 shop.company.com。",
+        guideStepDns:
+          "到域名的 DNS 服务商（Cloudflare、阿里云、腾讯云 DNSPod、GoDaddy 等）添加一条 CNAME 记录：",
+        guideType: "类型",
+        guideNameHint:
+          "有的服务商叫「主机记录」。填根域名前面的部分，例如 shop.company.com 填 shop；有的服务商要填完整域名。",
+        guideStepCheck:
+          "回到这里点「{check}」。DNS 生效可能要几分钟到几小时，生效后会自动配置 HTTPS。如果还需要 TXT 验证记录，添加域名后会显示在这里。",
+        guideRootDomain:
+          "想用 company.com 这样的根域名？只有 DNS 服务商支持在根域名上加 CNAME（又叫 CNAME 展平、ALIAS 或 ANAME，Cloudflare 支持）时才行；否则请用 www 或 shop 这样的子域名。",
+        guideLink: "查看配置说明",
+        recordNameHint:
+          "「名称」显示的是完整域名。多数 DNS 服务商只需填根域名前面的部分，例如 shop.company.com 填 shop。",
         hostnameLabel: "域名",
         hostnameHint: "输入域名，不要包含 https:// 或路径。",
         invalidHostname:
@@ -796,6 +810,13 @@ export const dashboardZhCN: CoreI18nMessages = {
         activeHint: "DNS 和 HTTPS 已就绪。",
         error: "需要处理",
         errorHint: "请查看下方详情，处理后重新检查。",
+        // Keyed by `AirAppSiteDomainIssue`: this deployment's own findings about one domain.
+        issues: {
+          "target-missing": "当前部署尚未配置自定义域名，请联系管理员。",
+          "route-unverified":
+            "还没检测到这个域名指向本网站。DNS 变更可能需要几分钟到几小时才能生效。",
+          "check-failed": "暂时无法检查这个域名，请重新检查。",
+        },
         offlineHint: "网站已下线，所有网站地址均显示找不到页面。",
         dnsInstructions:
           "在 DNS 服务商处添加这些记录，并保留域名所需的其他记录。确认域名连接到此网站后，也支持开启 Cloudflare 代理。",
@@ -1523,6 +1544,8 @@ export const dashboardZhCN: CoreI18nMessages = {
   search: {
     all: "内容",
     recent: "最近",
+    sectionSpaces: "空间",
+    switchToSpace: "切换到这个空间",
     sectionRecent: "最近访问",
     sectionElsewhere: "工作区其他节点",
     sectionDocContent: "文档内容",
@@ -2594,6 +2617,8 @@ export const dashboardZhCN: CoreI18nMessages = {
     failed: "移动失败，请重试。",
   },
   richNodes: {
+    discardChanges: "放弃未保存的修改？",
+    returnToReading: "返回阅读",
     defaultOutcome: "默认",
     controlPanel: "控制面板",
     zoomIn: "放大",

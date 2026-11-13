@@ -19,6 +19,7 @@ import {
   writeRestoreBlobReceipt,
 } from "../src/domains/dump/logic/restore-blob-receipts";
 import { busabaseRouter } from "../src/router";
+import { createExactDumpReplayFixture } from "./helpers/exact-dump-replay";
 
 const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 const split = (key: string, bytes: Buffer, hash = sha(bytes)) =>
@@ -299,21 +300,22 @@ describe("large dump blobs — real local multipart storage and PGLite", () => {
   it("cleans expired multipart state and resumes by starting fresh parts in a new session", async () => {
     const spaceId = "dump_parts_expiry";
     const key = "attachments/parts-expired.bin";
-    const rows = split(key, Buffer.alloc(RESTORE_BLOB_PART_BYTES + 1, 5));
-    const { sessionId } = await inSpace(spaceId, () =>
-      client.dump.importBegin({ sourceSpaceId: "original" }),
-    );
+    const bytes = Buffer.alloc(RESTORE_BLOB_PART_BYTES + 1, 5);
+    const rows = split(key, bytes);
+    const archive = createExactDumpReplayFixture({
+      sourceSpaceId: "original",
+      blobs: [{ key, bytes }],
+    });
+    const { sessionId } = await inSpace(spaceId, () => archive.begin(client));
+    await inSpace(spaceId, () => archive.offerRoot(client, sessionId));
     await inSpace(spaceId, () =>
       client.dump.importTables({ sessionId, table: "attachmentBlobs", rows: [rows[0]] }),
     );
     const date = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61 * 60 * 1000);
     let resumed = "";
     try {
-      resumed = (
-        await inSpace(spaceId, () =>
-          client.dump.importBegin({ sourceSpaceId: "original", resume: true }),
-        )
-      ).sessionId;
+      resumed = (await inSpace(spaceId, () => archive.begin(client, { resume: true }))).sessionId;
+      await inSpace(spaceId, () => archive.preflight(client, resumed));
       expect((await readdir(path.join(storageDir, ".tmp/multipart"))).length).toBe(0);
       await expect(
         inSpace(spaceId, () =>

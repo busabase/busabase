@@ -16,6 +16,7 @@ import { folderReadmeHtmlKey, folderReadmeKey } from "../src/domains/folder/hand
 import { richNodeDocumentKey } from "../src/domains/rich-node/handlers";
 import { rootNodeIdForSpace } from "../src/logic/kernel";
 import { busabaseRouter } from "../src/router";
+import { createExactDumpReplayFixture } from "./helpers/exact-dump-replay";
 
 describe("queryInChunks", () => {
   it("batches a large id list instead of passing it to one query — the actual bug reproduced live: committing a real production restore with 1,080,685 fieldValues rows blew the SQL query builder's call stack building one inArray(...) with all of them", async () => {
@@ -1060,6 +1061,7 @@ describe("dump domain logic — oRPC integration", () => {
     // forward.
     const targetSpace = "space_dump_resume";
     const rootId = rootNodeIdForSpace(targetSpace);
+    const archiveTimestamp = new Date().toISOString();
     const nodeRow = (i: number) => ({
       id: `nod_resume_${i}`,
       spaceId: targetSpace,
@@ -1072,38 +1074,41 @@ describe("dump domain logic — oRPC integration", () => {
       position: i,
       archivedAt: null,
       deletedAt: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: archiveTimestamp,
+      updatedAt: archiveTimestamp,
+    });
+    const archivedNodes = [nodeRow(0), nodeRow(1), nodeRow(2)];
+    const archive = createExactDumpReplayFixture({
+      sourceSpaceId: targetSpace,
+      rows: { nodes: archivedNodes },
     });
 
     // First attempt lands two nodes, then its process "dies" — no commit, no
     // abort, session simply abandoned.
-    const first = await inSpace(targetSpace, () =>
-      client.dump.importBegin({ sourceSpaceId: targetSpace }),
-    );
+    const first = await inSpace(targetSpace, () => archive.begin(client));
+    await inSpace(targetSpace, () => archive.offerRoot(client, first.sessionId));
     await inSpace(targetSpace, () =>
       client.dump.importTables({
         sessionId: first.sessionId,
         table: "nodes",
-        rows: [nodeRow(0), nodeRow(1)],
+        rows: archivedNodes.slice(0, 2),
       }),
     );
 
     // Without --resume the space is now un-restorable, and the error says what to do.
-    await expect(
-      inSpace(targetSpace, () => client.dump.importBegin({ sourceSpaceId: targetSpace })),
-    ).rejects.toThrow(/--resume/);
+    await expect(inSpace(targetSpace, () => archive.begin(client))).rejects.toThrow(
+      /unfinished restore.*resume the same verified archive/i,
+    );
 
     // With it, the same archive replays: the two existing rows are skipped
     // rather than colliding, and the third lands.
-    const second = await inSpace(targetSpace, () =>
-      client.dump.importBegin({ sourceSpaceId: targetSpace, resume: true }),
-    );
+    const second = await inSpace(targetSpace, () => archive.begin(client, { resume: true }));
+    await inSpace(targetSpace, () => archive.preflight(client, second.sessionId));
     await inSpace(targetSpace, () =>
       client.dump.importTables({
         sessionId: second.sessionId,
         table: "nodes",
-        rows: [nodeRow(0), nodeRow(1), nodeRow(2)],
+        rows: archivedNodes,
       }),
     );
 
@@ -1146,33 +1151,31 @@ describe("dump domain logic — oRPC integration", () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    const archivedRow = row(liveSpace);
+    const archive = createExactDumpReplayFixture({
+      sourceSpaceId: liveSpace,
+      rows: { nodes: [archivedRow] },
+    });
 
     // The id lands in `liveSpace` first — as if that space were still live.
-    const first = await inSpace(liveSpace, () =>
-      client.dump.importBegin({ sourceSpaceId: liveSpace }),
-    );
+    const first = await inSpace(liveSpace, () => archive.begin(client));
+    await inSpace(liveSpace, () => archive.offerRoot(client, first.sessionId));
     await inSpace(liveSpace, () =>
       client.dump.importTables({
         sessionId: first.sessionId,
         table: "nodes",
-        rows: [row(liveSpace)],
+        rows: [archivedRow],
       }),
     );
     await inSpace(liveSpace, () => client.dump.importCommit({ sessionId: first.sessionId }));
 
     // Now resume the same archive into a different space. The row "exists", but
     // it belongs to somebody else — that must be reported, never skipped.
-    const second = await inSpace(otherSpace, () =>
-      client.dump.importBegin({ sourceSpaceId: liveSpace, resume: true }),
-    );
+    const interrupted = await inSpace(otherSpace, () => archive.begin(client));
+    await inSpace(otherSpace, () => archive.offerRoot(client, interrupted.sessionId));
+    const second = await inSpace(otherSpace, () => archive.begin(client, { resume: true }));
     await expect(
-      inSpace(otherSpace, () =>
-        client.dump.importTables({
-          sessionId: second.sessionId,
-          table: "nodes",
-          rows: [row(liveSpace)],
-        }),
-      ),
+      inSpace(otherSpace, () => archive.preflight(client, second.sessionId)),
     ).rejects.toThrow(/already exist in a DIFFERENT space/);
   });
 

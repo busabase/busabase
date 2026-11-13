@@ -20,11 +20,17 @@ import type { BusabaseTaskClient, TaskDefinition } from "./types";
  * a caller only has to know what they want to build.
  *
  * Dispatch table (each row is a capability the generic endpoint cannot express):
- *   skill | drive | airapp -> {skills,drives,airapps}.create  (files, mergeMode, visibility, version)
+ *   skill | drive | airapp -> {skills,drives,airapps}.create  (files, mergeMode, version)
  *   doc                    -> docs.create                     (body)
  *   base                   -> bases.create                    (fields)
  *   file                   -> files.create                    (assetId)
  *   folder | form | whiteboard | workflow | html -> nodes.createChangeRequest
+ *
+ * `visibility` applies to every row: the four dedicated endpoints take it as a
+ * field, the generic one as the create operation's `metadata.visibility`. Both
+ * end up in the same place server-side (`initializeNodeAcl` promotes it into
+ * the node's `explicit_visibility`), on the direct path and when a proposal
+ * merges.
  *
  * `form` stays on the generic endpoint on purpose: `forms.create` configures an
  * *existing* node (it takes `nodeId` + `targetBaseId`), so it is a second step,
@@ -59,7 +65,9 @@ export interface NodeCreateInput {
   /** Seed files — Skill/Drive/AirApp only. */
   files?: unknown;
   mergeMode?: string;
+  /** Every type. Who can see the node; omitted follows the space default + parent. */
   visibility?: string;
+  /** Skill/Drive/AirApp only. */
   version?: string;
   autoMerge?: boolean;
   requireReview?: boolean;
@@ -84,6 +92,9 @@ const rejectMismatchedPayload = (input: NodeCreateInput): void => {
   if ((input.files !== undefined || input.mergeMode !== undefined) && !FILE_TREE_TYPES.has(type)) {
     wrong.push(input.files !== undefined ? "files" : "mergeMode");
   }
+  // Only the file-tree endpoint has a version to set; every other branch
+  // dropped it without a word, which is the failure this function exists for.
+  if (input.version !== undefined && !FILE_TREE_TYPES.has(type)) wrong.push("version");
   if (wrong.length > 0) {
     throw new Error(
       `${wrong.join(", ")} ${wrong.length > 1 ? "are" : "is"} not valid for --type ${type}.`,
@@ -185,6 +196,122 @@ const writeAgentPrompts = async (
   };
 };
 
+const VISIBILITIES = ["private", "workspace", "public"] as const;
+type NodeVisibility = (typeof VISIBILITIES)[number];
+
+/**
+ * The caller's `visibility`, narrowed. Both surfaces validate the enum before
+ * `execute` runs, so an unknown value only arrives through a direct call — and
+ * is refused before anything is created rather than forwarded to a server that
+ * may strip it.
+ */
+const requestedVisibility = (input: NodeCreateInput): NodeVisibility | undefined => {
+  if (!input.visibility) return undefined;
+  const match = VISIBILITIES.find((value) => value === input.visibility);
+  if (!match) throw new Error(`visibility must be one of: ${VISIBILITIES.join(", ")}.`);
+  return match;
+};
+
+/**
+ * The visibility a node record DECLARES (its own, not one inherited from a
+ * folder). Current servers return it as `explicitVisibility`. A server from
+ * before that column kept it in `metadata.visibility` and sends no
+ * `explicitVisibility` key at all — the only case the metadata key is read.
+ */
+const declaredVisibilityOf = (node: unknown): string | null => {
+  if (!isRecord(node)) return null;
+  if (typeof node.explicitVisibility === "string") return node.explicitVisibility;
+  if (node.explicitVisibility !== undefined) return null;
+  return isRecord(node.metadata) && typeof node.metadata.visibility === "string"
+    ? node.metadata.visibility
+    : null;
+};
+
+/** What a pending node_create proposal will apply on merge: its `metadata.visibility`. */
+const proposedVisibilityOf = (result: unknown): string | null => {
+  const operations = isRecord(result) && Array.isArray(result.operations) ? result.operations : [];
+  for (const operation of operations) {
+    const payload =
+      isRecord(operation) && isRecord(operation.headCommit)
+        ? operation.headCommit.payload
+        : undefined;
+    const metadata = isRecord(payload) ? payload.metadata : undefined;
+    if (isRecord(metadata) && typeof metadata.visibility === "string") return metadata.visibility;
+  }
+  return null;
+};
+
+interface VisibilityWriteReport {
+  applied: false;
+  requested: NodeVisibility;
+  nodeId?: string;
+  actual?: string | null;
+  reason: string;
+  nextStep: string;
+}
+
+const updateVisibilityCommand = (nodeId: string, visibility: NodeVisibility) =>
+  `busabase-cli nodes update-visibility --node-id ${nodeId} --visibility ${visibility}`;
+
+/**
+ * Confirm the server actually applied the requested `visibility`; return a
+ * report when it did not, `undefined` when it did.
+ *
+ * The CLI ships separately from the server. Against a server that predates
+ * create-time visibility for this node type, the endpoint's schema strips the
+ * unknown key and the create still succeeds — so without this check the one
+ * outcome that matters (the node is NOT private) would read as plain success.
+ *
+ * - Materialized: the node's own declared visibility must equal the request.
+ *   Doc/File/Skill/Drive/AirApp return their node; a Base and a merged change
+ *   request do not, so those cost exactly one read-back.
+ * - Pending review: there is no node yet, but the proposal is what will merge,
+ *   so it must carry the value — read straight off the response, no extra call.
+ */
+const checkVisibility = async (
+  client: BusabaseTaskClient,
+  type: CreatableNodeType,
+  result: unknown,
+  requested: NodeVisibility,
+): Promise<VisibilityWriteReport | undefined> => {
+  const nodeId = materializedNodeId(type, result);
+  if (!nodeId) {
+    if (proposedVisibilityOf(result) === requested) return undefined;
+    return {
+      applied: false,
+      requested,
+      reason: `Proposed for review, but the change request does not carry visibility "${requested}", so the node will get the default visibility when it merges. The server is older than this client and ignores visibility for ${type} creates.`,
+      nextStep: `Once the change request merges: ${updateVisibilityCommand("<nodeId>", requested)}`,
+    };
+  }
+  let actual: string | null;
+  try {
+    const returned = isRecord(result) && isRecord(result.node) ? result.node : undefined;
+    const node = returned?.id === nodeId ? returned : (await client.nodes.get({ nodeId })).node;
+    actual = declaredVisibilityOf(node);
+  } catch (error) {
+    // The node exists either way; failing the task here would read as "not
+    // created". Report it unconfirmed — for a privacy request, unconfirmed has
+    // to be treated as not applied.
+    return {
+      applied: false,
+      requested,
+      nodeId,
+      reason: `Created, but reading the node back to confirm visibility "${requested}" failed: ${error instanceof Error ? error.message : String(error)}`,
+      nextStep: updateVisibilityCommand(nodeId, requested),
+    };
+  }
+  if (actual === requested) return undefined;
+  return {
+    applied: false,
+    requested,
+    nodeId,
+    actual,
+    reason: `Created, but the node's own visibility is ${actual === null ? "unset (it follows the space default and parent folder)" : `"${actual}"`}, not "${requested}". Either the server is older than this client and ignores visibility for ${type} creates, or a node with this slug already existed and was returned as-is.`,
+    nextStep: updateVisibilityCommand(nodeId, requested),
+  };
+};
+
 /** `autoMerge` is tri-state: unset (permission-aware default), forced on, forced off. */
 const mergeIntent = (input: NodeCreateInput): { autoMerge?: boolean } => {
   if (input.requireReview) return { autoMerge: false };
@@ -206,13 +333,19 @@ const asFieldArray = (value: unknown): BaseCreateInput["fields"] | undefined =>
  * Dispatch to the endpoint that can actually build this node type. Split out
  * of `execute` so the prompt write that follows reads as its own step.
  */
-const createNode = async (client: BusabaseTaskClient, input: NodeCreateInput): Promise<unknown> => {
+const createNode = async (
+  client: BusabaseTaskClient,
+  input: NodeCreateInput,
+  visibility: NodeVisibility | undefined,
+): Promise<unknown> => {
   const type = input.type;
   const common = {
     slug: input.slug,
     name: input.name,
     description: input.description,
     parentNodeId: input.parentNodeId,
+    // All four dedicated create endpoints take it as a top-level field.
+    ...(visibility ? { visibility } : {}),
     ...mergeIntent(input),
   };
 
@@ -225,9 +358,6 @@ const createNode = async (client: BusabaseTaskClient, input: NodeCreateInput): P
       ...(Array.isArray(input.files) ? { files: input.files as FileTreeCreateInput["files"] } : {}),
       ...(input.mergeMode
         ? { mergeMode: input.mergeMode as FileTreeCreateInput["mergeMode"] }
-        : {}),
-      ...(input.visibility
-        ? { visibility: input.visibility as FileTreeCreateInput["visibility"] }
         : {}),
       ...(input.version ? { version: input.version } : {}),
     };
@@ -257,7 +387,9 @@ const createNode = async (client: BusabaseTaskClient, input: NodeCreateInput): P
   }
 
   // folder | form | whiteboard | workflow | html — no type-specific payload,
-  // so the generic tree endpoint loses nothing here.
+  // so the generic tree endpoint loses nothing here. `visibility` has no field
+  // of its own on this operation; `metadata.visibility` is the create-time
+  // spelling every materializer carries through to `initializeNodeAcl`.
   return client.nodes.createChangeRequest({
     message: input.message ?? `Create ${type} ${input.name}`,
     submittedBy: input.submittedBy,
@@ -270,6 +402,7 @@ const createNode = async (client: BusabaseTaskClient, input: NodeCreateInput): P
         name: input.name,
         description: input.description,
         parentNodeId: input.parentNodeId,
+        ...(visibility ? { metadata: { visibility } } : {}),
       },
     ],
   });
@@ -296,6 +429,7 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
   guidance:
     "If this job may already have a playbook, call playbooks search first. " +
     "One call creates any of the 11 node types with its type-specific payload: `fields` for a Base, `body` for a Doc, `files` for a Skill/Drive/AirApp, `assetId` for a File. " +
+    "`visibility` works for every type: pass private when the person asked for something only they (and people they grant) should see. " +
     "Review is permission-aware, decided server-side: this merges immediately when you already have write access on the parent node, and proposes a ChangeRequest for a human otherwise. " +
     "Pass requireReview to always propose instead of merging. " +
     "Before you finish: if the person will come back to this node to do the same job again, pass agentPrompts so the node opens with THEIR job on it instead of the node type's generic list.",
@@ -384,11 +518,13 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
     },
     {
       name: "visibility",
-      appliesWhen: { param: "type", values: ["skill", "drive", "airapp"] },
       kind: "enum",
-      choices: ["private", "workspace", "public"],
+      choices: VISIBILITIES,
       description:
-        "Skill/Drive/AirApp only. Omit to follow the space default and parent folder, like any other node.",
+        'Who can see the node, for every type. "private" hides it from members who have not been granted access; "workspace" shows it to every member; "public" currently behaves as "workspace". ' +
+        "Omit to follow the space default and parent folder (a node is never more open than its strictest parent). " +
+        "Also applies when this call proposes a ChangeRequest instead: it takes effect when the request merges. " +
+        "If the server could not apply it, the result says so in `visibilityWrite` with the command that fixes it.",
     },
     {
       name: "version",
@@ -429,6 +565,7 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
     'busabase-cli nodes create --type folder --slug cms --name "内容管理 CMS"',
     'busabase-cli nodes create --type base --slug blog --name "Blog Posts" --field title:Title:text --field body:Body:markdown',
     'busabase-cli nodes create --type doc --slug readme --name "README" --body "# Hello"',
+    'busabase-cli nodes create --type doc --slug salaries --name "Salaries" --body "..." --visibility private',
     'busabase-cli nodes create --type skill --slug my-skill --name "My Skill" --files-json @files.json',
     'busabase-cli nodes create --type folder --slug cms --name "CMS" --require-review',
     'busabase-cli nodes create --type base --slug visits --name "Visits" --field title:Title:text --agent-prompts-json @prompts.json',
@@ -437,9 +574,18 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
     rejectMismatchedPayload(input);
     // Validated before anything is created — see `parseAgentPrompts`.
     const agentPrompts = parseAgentPrompts(input);
-    const created = await createNode(client, input);
+    const visibility = requestedVisibility(input);
+    const created = await createNode(client, input, visibility);
+    const visibilityWrite =
+      visibility === undefined
+        ? undefined
+        : await checkVisibility(client, input.type, created, visibility);
+    const result =
+      visibilityWrite === undefined
+        ? created
+        : { ...(isRecord(created) ? created : { result: created }), visibilityWrite };
     return agentPrompts === undefined
-      ? created
-      : writeAgentPrompts(client, input.type, created, agentPrompts);
+      ? result
+      : writeAgentPrompts(client, input.type, result, agentPrompts);
   },
 };

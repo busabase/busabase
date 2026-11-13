@@ -282,6 +282,65 @@ describe("rich-node manual saves", () => {
       expect(result.current.status).toBe("dirty");
     },
   );
+
+  it("resets a failed local editing session without sending another write", async () => {
+    const mutate = vi.fn().mockRejectedValue(new Error("save failed"));
+    const { orpc, wrapper } = setup(mutate);
+    const { result } = renderHook(() => useNodeContentSave(orpc, node("html-a"), "html"), {
+      wrapper,
+    });
+    await act(async () => {
+      result.current.markDirty();
+      await result.current.save({ version: 1, source: "draft" });
+    });
+    expect(result.current.status).toBe("error");
+    act(() => result.current.reset());
+    expect(result.current.status).toBe("saved");
+    expect(result.current.error).toBeNull();
+    expect(mutate).toHaveBeenCalledTimes(1);
+    act(() => result.current.markDirty());
+    expect(result.current.status).toBe("dirty");
+  });
+
+  it("ends local review tracking without withdrawing the submitted proposal", async () => {
+    const mutate = vi.fn().mockResolvedValue({ id: "pending-html", status: "in_review" });
+    const { client, orpc, wrapper } = setup(mutate);
+    const { result } = renderHook(() => useNodeContentSave(orpc, node("html-a"), "html"), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.save({ version: 1, source: "proposed" });
+    });
+    expect(result.current.status).toBe("in_review");
+    act(() => result.current.reset());
+    expect(result.current.reviewRequestId).toBeNull();
+    expect(
+      client.getQueryData(["changeRequests", "get", { changeRequestId: "pending-html" }]),
+    ).toMatchObject({ status: "in_review" });
+    expect(mutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reset away an in-flight save", async () => {
+    const request = deferred();
+    const { orpc, wrapper } = setup(async () => {
+      await request.promise;
+    });
+    const { result } = renderHook(() => useNodeContentSave(orpc, node("html-a"), "html"), {
+      wrapper,
+    });
+    let saving!: Promise<boolean>;
+    act(() => {
+      result.current.markDirty();
+      saving = result.current.save({ version: 1, source: "draft" });
+    });
+    act(() => result.current.reset());
+    expect(result.current.status).toBe("saving");
+    await act(async () => {
+      request.resolve();
+      await saving;
+    });
+    expect(result.current.status).toBe("saved");
+  });
 });
 
 describe("rich-node server document sync", () => {

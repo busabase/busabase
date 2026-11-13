@@ -175,6 +175,10 @@ export const AGENT_EXCLUDED_MCP_TOOLS: readonly string[] = [
   // driven by the CLI's backup/restore. An agent has no reason to move raw table
   // rows around, and a half-driven session leaves an import open.
   "dump_export_tables",
+  // Snapshot is an SSE stream, and the attachment projection is anchored to
+  // the CLI's verified backup. Neither is an ordinary JSON MCP tool call.
+  "dump_export_snapshot",
+  "dump_export_asset_attachment",
   "dump_export_asset_text",
   "dump_export_doc_bodies",
   "dump_import_begin",

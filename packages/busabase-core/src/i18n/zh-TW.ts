@@ -780,6 +780,21 @@ export const dashboardZhTW: CoreI18nMessages = {
         lastKnown: "下方顯示的是上次成功檢查時的資訊。",
         unavailable: "目前部署尚未設定自訂網域，請聯絡管理員。",
         empty: "新增你擁有的網域，再前往 DNS 服務商完成設定。",
+        guideToggle: "如何設定 DNS？",
+        guideStepAdd:
+          "在下方輸入要使用的網域，點「{add}」。使用子網域最簡單，例如 shop.company.com。",
+        guideStepDns:
+          "到網域的 DNS 服務商（Cloudflare、GoDaddy、Namecheap、Gandi 等）新增一筆 CNAME 記錄：",
+        guideType: "類型",
+        guideNameHint:
+          "有的服務商稱為「主機名稱」。填根網域前面的部分，例如 shop.company.com 填 shop；有的服務商要填完整網域。",
+        guideStepCheck:
+          "回到這裡點「{check}」。DNS 生效可能需要幾分鐘到幾小時，生效後會自動設定 HTTPS。如果還需要 TXT 驗證記錄，新增網域後會顯示在這裡。",
+        guideRootDomain:
+          "想使用 company.com 這樣的根網域？只有 DNS 服務商支援在根網域上設定 CNAME（又稱 CNAME 扁平化、ALIAS 或 ANAME，Cloudflare 支援）時才可以；否則請使用 www 或 shop 這樣的子網域。",
+        guideLink: "查看設定說明",
+        recordNameHint:
+          "「名稱」顯示的是完整網域。多數 DNS 服務商只需填根網域前面的部分，例如 shop.company.com 填 shop。",
         hostnameLabel: "網域名稱",
         hostnameHint: "輸入網域，不要包含 https:// 或路徑。",
         invalidHostname:
@@ -796,6 +811,13 @@ export const dashboardZhTW: CoreI18nMessages = {
         activeHint: "DNS 和 HTTPS 已就緒。",
         error: "需要處理",
         errorHint: "請檢視下方詳情，處理後重新檢查。",
+        // Keyed by `AirAppSiteDomainIssue`: this deployment's own findings about one domain.
+        issues: {
+          "target-missing": "目前部署尚未設定自訂網域，請聯絡管理員。",
+          "route-unverified":
+            "還沒偵測到這個網域指向本網站。DNS 變更可能需要幾分鐘到幾小時才會生效。",
+          "check-failed": "暫時無法檢查這個網域，請重新檢查。",
+        },
         offlineHint: "網站已下線，所有網站位址均顯示找不到頁面。",
         dnsInstructions:
           "在 DNS 服務商處新增這些記錄，並保留網域所需的其他記錄。確認網域連接到此網站後，也支援開啟 Cloudflare 代理。",
@@ -1524,6 +1546,8 @@ export const dashboardZhTW: CoreI18nMessages = {
   search: {
     all: "內容",
     recent: "最近",
+    sectionSpaces: "空間",
+    switchToSpace: "切換到這個空間",
     sectionRecent: "最近存取",
     sectionElsewhere: "工作區其他節點",
     sectionDocContent: "文件內容",
@@ -2600,6 +2624,8 @@ export const dashboardZhTW: CoreI18nMessages = {
     failed: "移動失敗，請重試。",
   },
   richNodes: {
+    discardChanges: "放棄未儲存的修改？",
+    returnToReading: "返回閱讀",
     defaultOutcome: "預設",
     controlPanel: "控制面板",
     zoomIn: "放大",
