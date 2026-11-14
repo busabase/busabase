@@ -44,6 +44,8 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   /** See `SpaceSelectorProps.maxVisibleSpaces` — applies only with `onViewAllSpaces`. */
   spaceSelectorMaxVisibleSpaces?: number;
   onViewAllSpaces?: () => void;
+  /** See `SpaceSelectorProps.totalSpaces`. */
+  spaceSelectorTotalSpaces?: number;
   isLoadingSpaces?: boolean;
   /**
    * App branding configuration displayed when no spaces are available
@@ -165,6 +167,7 @@ export function AppSidebar({
   spaceSelectorExtraMenuItems,
   spaceSelectorMaxVisibleSpaces,
   onViewAllSpaces,
+  spaceSelectorTotalSpaces,
   isLoadingSpaces,
   branding,
   appLogo,
@@ -243,6 +246,7 @@ export function AppSidebar({
             extraMenuItems={spaceSelectorExtraMenuItems}
             maxVisibleSpaces={spaceSelectorMaxVisibleSpaces}
             onViewAllSpaces={onViewAllSpaces}
+            totalSpaces={spaceSelectorTotalSpaces}
           />
         ) : null}
       </SidebarHeader>

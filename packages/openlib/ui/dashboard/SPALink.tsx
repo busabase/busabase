@@ -5,6 +5,14 @@ import { useSearch, Link as WouterLink } from "wouter";
 import { useAddDemoParam } from "./demo-client";
 
 /**
+ * Query params that name an overlay open on the current page rather than
+ * app-wide context — Busabase's record dialog writes `?record=rec_…` so the
+ * address can be copied and reopened. They describe this page only, so
+ * following a link never carries them somewhere they would mean something else.
+ */
+export const PAGE_LOCAL_SEARCH_PARAMS: readonly string[] = ["record"];
+
+/**
  * Merge the current page's query string into a same-app navigation `href`, so
  * any state carried only in the URL (a host app's active-workspace selector,
  * a filter, `?demo`/`?lang`, ...) survives an in-app click instead of being
@@ -12,12 +20,13 @@ import { useAddDemoParam } from "./demo-client";
  * is effectively a same-page transition, not a real navigation away from
  * whatever context the URL was carrying. `href`'s own explicit query params
  * (if any) win over the current page's for the same key; everything else
- * from the current page is preserved as-is.
+ * from the current page except `PAGE_LOCAL_SEARCH_PARAMS` is preserved as-is.
  */
 export function mergeSearchIntoHref(href: string, currentSearch: string): string {
   if (!currentSearch) return href;
   const [path, hrefQuery] = href.split("?");
   const merged = new URLSearchParams(currentSearch);
+  for (const key of PAGE_LOCAL_SEARCH_PARAMS) merged.delete(key);
   if (hrefQuery) {
     for (const [key, value] of new URLSearchParams(hrefQuery)) {
       merged.set(key, value);
