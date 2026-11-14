@@ -14,6 +14,11 @@ import {
   writeDotEnvFile,
 } from "./config-file.js";
 import type { OutputFormat } from "./format.js";
+import {
+  DEFAULT_SPACE_INDEX_PREF,
+  SPACE_INDEX_PREFS,
+  SPACE_INDEX_SETTING_KEY,
+} from "./space-index.js";
 
 /**
  * `busabase-cli auth …` — account (profile) management.
@@ -363,8 +368,9 @@ export function runAuthRemove(name: string): Record<string, string> {
   return { status: "removed", profile: name };
 }
 
-const SETTING_KEYS = new Set(["output"]);
+const SETTING_KEYS = new Set(["output", SPACE_INDEX_SETTING_KEY]);
 const OUTPUT_VALUES = new Set<string>(["text", "table", "json"]);
+const SPACE_INDEX_VALUES = new Set<string>(SPACE_INDEX_PREFS);
 
 /**
  * `auth config set <key> <value>` — user preferences that survive an account
@@ -380,6 +386,13 @@ export function runAuthConfigSet(key: string, value: string): Record<string, str
       `Invalid output "${value}". Expected one of: ${[...OUTPUT_VALUES].join(", ")}.`,
     );
   }
+  // `space-index` is consent to write a file into the user's skills directories,
+  // so it is a preference of the person, not of the account they are signed in as.
+  if (key === SPACE_INDEX_SETTING_KEY && !SPACE_INDEX_VALUES.has(value)) {
+    throw new Error(
+      `Invalid ${SPACE_INDEX_SETTING_KEY} "${value}". Expected one of: ${[...SPACE_INDEX_VALUES].join(", ")}.`,
+    );
+  }
   // Preferences must not drag an untouched install into multi-account mode.
   writeConfigFile({ [key]: value });
   return { status: "saved", [key]: value };
@@ -387,8 +400,16 @@ export function runAuthConfigSet(key: string, value: string): Record<string, str
 
 export function runAuthConfigList(): Record<string, string> {
   const config = loadConfigFile();
+  const spaceIndex = config[SPACE_INDEX_SETTING_KEY];
   return {
     output: config.output ?? "text (default)",
+    [SPACE_INDEX_SETTING_KEY]:
+      spaceIndex === undefined || spaceIndex === null
+        ? `${DEFAULT_SPACE_INDEX_PREF} (default)`
+        : SPACE_INDEX_VALUES.has(spaceIndex)
+          ? spaceIndex
+          : // Same reading as parseSpaceIndexPref: set but unrecognised is `ask`, never `auto`.
+            `ask (unrecognised value ${JSON.stringify(spaceIndex)})`,
     currentProfile: config.currentProfile ?? `${DEFAULT_PROFILE} (implicit — single account)`,
   };
 }

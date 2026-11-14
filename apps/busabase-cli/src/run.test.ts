@@ -17,6 +17,14 @@ beforeAll(async () => {
   suiteOriginalHome = process.env.HOME;
   suiteHome = await mkdtemp(join(tmpdir(), "busabase-suite-home-"));
   process.env.HOME = suiteHome;
+  // The space-index check after `nodes create` / `install` adds its own requests
+  // (default preference: ask). It has its own suite (space-index-command.test.ts);
+  // here it is switched off so every request list below stays exact.
+  await mkdir(join(suiteHome, ".busabase"), { recursive: true });
+  await writeFile(
+    join(suiteHome, ".busabase", "config.json"),
+    JSON.stringify({ "space-index": "off" }),
+  );
 });
 
 afterAll(async () => {
@@ -1800,7 +1808,10 @@ describe("busabase-cli commands", () => {
       ]);
 
       expect(exitCode).toBe(0);
-      expect(calls).toEqual(["GET http://localhost:15419/api/v1/auth"]);
+      // Login itself is one verify; anything after it is the space-index check that
+      // follows a sign-in (default `auto`), which reads the space and never the login.
+      expect(calls[0]).toBe("GET http://localhost:15419/api/v1/auth");
+      expect(calls.slice(1).every((call) => /\/api\/v1\/(auth|nodes)\b/.test(call))).toBe(true);
       const env = await readFile(join(home, ".busabase", ".env"), "utf8");
       expect(env).toContain("BUSABASE_API_KEY=sk_test");
       expect(env).toContain("BUSABASE_SPACE_ID=spc_1");
@@ -1835,8 +1846,10 @@ describe("busabase-cli commands", () => {
       ]);
 
       expect(exitCode).toBe(0);
-      // Only the probe fires — no /api/oauth/* calls.
-      expect(calls).toEqual(["GET http://localhost:15419/api/v1/bases"]);
+      // Only the probe fires — no /api/oauth/* calls. (After it, the space-index check
+      // that follows a sign-in may read the space; it never touches OAuth either.)
+      expect(calls[0]).toBe("GET http://localhost:15419/api/v1/bases");
+      expect(calls.some((call) => call.includes("/api/oauth/"))).toBe(false);
       const env = await readFile(join(home, ".busabase", ".env"), "utf8");
       expect(env).toContain("BUSABASE_BASE_URL=http://localhost:15419");
       expect(env).not.toContain("BUSABASE_API_KEY=");

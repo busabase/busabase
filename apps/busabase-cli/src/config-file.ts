@@ -139,6 +139,8 @@ export interface CliConfigFile {
   currentProfile?: string;
   /** Default `--output` format, so `--output json` need not be typed every time. */
   output?: string;
+  /** `auto` | `ask` | `off` — whether the per-space index skill is kept in sync. See space-index.ts. */
+  "space-index"?: string;
 }
 
 /** Read `~/.busabase/config.json`; `{}` when absent or malformed. */
