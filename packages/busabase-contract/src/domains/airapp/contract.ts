@@ -153,6 +153,11 @@ export const airAppSiteDomainInputSchema = airAppSiteInputSchema.extend({
   hostname: airAppSiteHostnameSchema,
 });
 
+/** `hostname: null` clears the primary, so every custom domain serves the site directly. */
+export const airAppSitePrimaryDomainInputSchema = airAppSiteInputSchema.extend({
+  hostname: airAppSiteHostnameSchema.nullable(),
+});
+
 /**
  * What this deployment itself found wrong with a domain, as codes the client
  * words in the viewer's language. Provider messages stay in `errors`.
@@ -177,6 +182,10 @@ export const airAppSiteDomainSchema = z.object({
   /** The hosting provider's own messages, verbatim (not translated). */
   errors: z.array(z.string()),
   issues: z.array(airAppSiteDomainIssueSchema).default([]),
+  /** This domain serves the site; every other custom domain redirects here. */
+  isPrimary: z.boolean().default(false),
+  /** The primary hostname this domain answers 308 to, keeping path and query; null for the primary or when there is none. */
+  redirectsTo: z.string().nullable().default(null),
 });
 export type AirAppSiteDomainVO = z.infer<typeof airAppSiteDomainSchema>;
 export type AirAppSiteDomainBindingVO = AirAppSiteDomainVO;
@@ -185,6 +194,10 @@ export const airAppSiteDomainsSchema = z.object({
   available: z.boolean(),
   cnameTarget: z.string().nullable(),
   bindings: z.array(airAppSiteDomainSchema),
+  /** The custom domain the others redirect to; null means every domain serves the site directly. */
+  primaryHostname: z.string().nullable().default(null),
+  /** False when this deployment's website host cannot redirect to a primary domain yet. */
+  primarySupported: z.boolean().default(false),
 });
 export type AirAppSiteDomainsVO = z.infer<typeof airAppSiteDomainsSchema>;
 
@@ -292,5 +305,16 @@ export const airappRuntimeContract = {
         "The hostname stops serving this website; its generated address keeps working. Possible after a plan lapses.",
     })
     .input(airAppSiteDomainInputSchema)
+    .output(airAppSiteDomainsSchema),
+  siteSetPrimaryDomain: oc
+    .route({
+      method: "POST",
+      path: "/airapps/{nodeId}/site/domains/primary",
+      tags: SITE_TAGS,
+      summary: "Choose a website's primary custom domain",
+      successDescription:
+        "Makes one bound hostname the primary: every other custom domain of the website answers a permanent redirect (308) to it, keeping the path and query. `hostname: null` clears the primary so every domain serves the site directly. The generated address never redirects. The first domain bound becomes primary automatically.",
+    })
+    .input(airAppSitePrimaryDomainInputSchema)
     .output(airAppSiteDomainsSchema),
 };

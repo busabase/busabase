@@ -153,7 +153,7 @@ describe("search execution with real PGLite", () => {
           await new Promise((resolve) => setTimeout(resolve, 20));
           execution.checkpoint();
         }),
-      ).rejects.toMatchObject({ code: "TIMEOUT" });
+      ).rejects.toMatchObject({ code: "TIMEOUT", status: 422 });
       expect((await client.query("select 1 as alive")).rows).toEqual([{ alive: 1 }]);
     } finally {
       await client.close();
@@ -413,7 +413,7 @@ describe.skipIf(!pgUrl)("search execution with real PostgreSQL", () => {
             await tx.execute(sql`select pg_sleep(2)`);
           }),
         ),
-      ).rejects.toMatchObject({ code: "TIMEOUT" });
+      ).rejects.toMatchObject({ code: "TIMEOUT", status: 422 });
       expect((await client`show statement_timeout`)[0]).toEqual({ statement_timeout: "0" });
       await client`select pg_sleep(0.12)`;
       expect((await client`select 1 as alive`)[0]?.alive).toBe(1);

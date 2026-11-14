@@ -74,6 +74,23 @@ describe("record list guards (real PGLite)", () => {
     expect(page).not.toHaveProperty("pagesCapped");
   });
 
+  it("counts only as far as a caller asks, which is all a Kanban column needs", async () => {
+    // Five records, two per page: page 1 asks whether there is a page 2.
+    const first = await client.records.listPage({ baseId, page: 1, pageSize: 2, totalLimit: 3 });
+    expect(first).toMatchObject({ total: 3, totalCapped: true, totalPages: 2, page: 1 });
+    expect(first.records).toHaveLength(2);
+    const second = await client.records.listPage({ baseId, page: 2, pageSize: 2, totalLimit: 5 });
+    expect(second).toMatchObject({ total: 5, totalPages: 3, page: 2 });
+    expect(second).not.toHaveProperty("totalCapped");
+    // A limit at or past the real count changes nothing.
+    expect(
+      await client.records.listPage({ baseId, page: 1, pageSize: 2, totalLimit: 100 }),
+    ).toMatchObject({ total: 5, totalPages: 3 });
+    await expect(
+      client.records.listPage({ baseId, page: 1, pageSize: 2, totalLimit: 0 }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
   it("scopes the timeout to its transaction and runs getDb() on it", async () => {
     const db = await getDb();
     const inside = await withStatementBudget(db, async () => {

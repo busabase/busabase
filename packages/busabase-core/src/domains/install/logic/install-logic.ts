@@ -194,8 +194,11 @@ export const planInstallFromGithub = async (
 const assertPlanFitsTheSpace = async (plan: InstallPlan, autoMerge: boolean) => {
   if (!autoMerge) return;
   const { folders, docs, bases, skills, airapps, drives, records } = plan.counts;
+  // The package tree excludes its installation container. Apply creates that
+  // folder too unless this install reuses one that already exists.
+  const targetFolders = plan.existingTargetFolderNodeId ? 0 : 1;
   await assertContextCreationAllowed({
-    nodes: folders + docs + bases + skills + airapps + drives,
+    nodes: targetFolders + folders + docs + bases + skills + airapps + drives,
     records,
   });
 };

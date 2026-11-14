@@ -748,11 +748,16 @@ export const busabaseDemoRouter: EnhancedRouter<
       available: false,
       cnameTarget: null,
       bindings: [],
+      primaryHostname: null,
+      primarySupported: false,
     })),
     siteBindDomain: os.airapps.siteBindDomain.handler(() => {
       throw demoUnsupported("Custom website domains");
     }),
     siteUnbindDomain: os.airapps.siteUnbindDomain.handler(() => {
+      throw demoUnsupported("Custom website domains");
+    }),
+    siteSetPrimaryDomain: os.airapps.siteSetPrimaryDomain.handler(() => {
       throw demoUnsupported("Custom website domains");
     }),
     siteDeployPreview: os.airapps.siteDeployPreview.handler(() => {

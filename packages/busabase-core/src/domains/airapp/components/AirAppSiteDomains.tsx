@@ -12,6 +12,7 @@ import { Input } from "kui/input";
 import { Label } from "kui/label";
 import { Skeleton } from "kui/skeleton";
 import {
+  ArrowRight,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -24,6 +25,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useId, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { suggestCounterpartHostname } from "../utils/domain-counterpart";
 
 type DomainCopy = ReturnType<typeof useCoreI18n>["airapp"]["site"]["domains"];
 
@@ -129,9 +131,12 @@ export function AirAppSiteDomains({
   const bind = useMutation({
     mutationFn: (nextHostname: string) =>
       orpc.airapps.siteBindDomain.call({ nodeId, hostname: nextHostname }),
-    onSuccess: (next) => {
+    onSuccess: (next, added) => {
       queryClient.setQueryData(queryOptions.queryKey, next);
-      setHostname("");
+      // A suggested counterpart is bound without touching what is being typed.
+      setHostname((current) =>
+        airAppSiteHostnameSchema.safeParse(current).data === added ? "" : current,
+      );
       setValidationError(null);
     },
   });
@@ -141,6 +146,13 @@ export function AirAppSiteDomains({
     onSuccess: (next) => {
       queryClient.setQueryData(queryOptions.queryKey, next);
       setRemoveConfirmation(null);
+    },
+  });
+  const makePrimary = useMutation({
+    mutationFn: (nextHostname: string) =>
+      orpc.airapps.siteSetPrimaryDomain.call({ nodeId, hostname: nextHostname }),
+    onSuccess: (next) => {
+      queryClient.setQueryData(queryOptions.queryKey, next);
     },
   });
 
@@ -155,10 +167,23 @@ export function AirAppSiteDomains({
     }
   };
 
-  const mutationPending = bind.isPending || unbind.isPending;
+  const mutationPending = bind.isPending || unbind.isPending || makePrimary.isPending;
   const hasCnameTarget = Boolean(domains.data?.cnameTarget);
   const canBind = hasCnameTarget && state.engine === "available" && state.liveVersion !== null;
   const inputError = validationError ?? (bind.isError ? errorMessage(bind.error) : null);
+  // An older website host cannot redirect, so it shows no primary controls at all.
+  const primarySupported = domains.data?.primarySupported === true;
+  const boundHostnames = domains.data?.bindings.map((binding) => binding.hostname) ?? [];
+  // Shown once, under the list, so it never interrupts a domain's own setup steps.
+  const counterparts = canBind
+    ? [
+        ...new Set(
+          boundHostnames.flatMap(
+            (bound) => suggestCounterpartHostname(bound, boundHostnames) ?? [],
+          ),
+        ),
+      ]
+    : [];
 
   const copyButton = (field: string, value: string, label: string) => (
     <Button
@@ -363,6 +388,8 @@ export function AirAppSiteDomains({
                       ? copy.error
                       : copy.pending;
                 const isRemoving = unbind.isPending && unbind.variables === binding.hostname;
+                const isMakingPrimary =
+                  makePrimary.isPending && makePrimary.variables === binding.hostname;
                 const hint = statusHint(binding, copy);
                 return (
                   <li
@@ -386,6 +413,27 @@ export function AirAppSiteDomains({
                             {binding.hostname}
                           </p>
                         )}
+                        {/* With one domain nothing redirects, so "primary" would say nothing. */}
+                        {primarySupported &&
+                        binding.isPrimary &&
+                        domains.data.bindings.length > 1 ? (
+                          <span
+                            className="inline-flex w-fit items-center rounded-sm border border-border bg-muted px-1.5 py-0.5 font-medium text-foreground text-xs"
+                            data-airapp-site-domain-primary=""
+                            title={copy.primaryHint}
+                          >
+                            {copy.primary}
+                          </span>
+                        ) : null}
+                        {primarySupported && binding.redirectsTo ? (
+                          <p
+                            className="flex items-center gap-1 break-all text-muted-foreground text-xs"
+                            data-airapp-site-domain-redirect={binding.redirectsTo}
+                          >
+                            <ArrowRight aria-hidden="true" className="size-3 shrink-0" />
+                            {fmt(copy.redirectsTo, { hostname: binding.redirectsTo })}
+                          </p>
+                        ) : null}
                         <p
                           aria-atomic="true"
                           aria-live="polite"
@@ -409,22 +457,47 @@ export function AirAppSiteDomains({
                         </p>
                       </div>
                       {removeConfirmation !== binding.hostname ? (
-                        <Button
-                          aria-label={fmt(copy.removeLabel, { hostname: binding.hostname })}
-                          className="text-muted-foreground"
-                          disabled={mutationPending}
-                          onClick={() => {
-                            unbind.reset();
-                            setRemoveConfirmation(binding.hostname);
-                          }}
-                          size="sm"
-                          type="button"
-                          variant="ghost"
-                        >
-                          {copy.remove}
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-1">
+                          {primarySupported && !binding.isPrimary ? (
+                            <Button
+                              aria-label={fmt(copy.makePrimaryLabel, {
+                                hostname: binding.hostname,
+                              })}
+                              className="text-muted-foreground"
+                              disabled={mutationPending || state.engine !== "available"}
+                              onClick={() => makePrimary.mutate(binding.hostname)}
+                              size="sm"
+                              type="button"
+                              variant="ghost"
+                            >
+                              {isMakingPrimary ? (
+                                <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+                              ) : null}
+                              {isMakingPrimary ? copy.makingPrimary : copy.makePrimary}
+                            </Button>
+                          ) : null}
+                          <Button
+                            aria-label={fmt(copy.removeLabel, { hostname: binding.hostname })}
+                            className="text-muted-foreground"
+                            disabled={mutationPending}
+                            onClick={() => {
+                              unbind.reset();
+                              setRemoveConfirmation(binding.hostname);
+                            }}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            {copy.remove}
+                          </Button>
+                        </div>
                       ) : null}
                     </div>
+                    {makePrimary.isError && makePrimary.variables === binding.hostname ? (
+                      <p className="break-words text-destructive text-xs" role="alert">
+                        {errorMessage(makePrimary.error)}
+                      </p>
+                    ) : null}
                     {binding.issues.length > 0 || binding.errors.length > 0 ? (
                       <ul
                         className={`space-y-1 break-words text-xs ${
@@ -504,6 +577,26 @@ export function AirAppSiteDomains({
           ) : (
             <p className="text-muted-foreground text-xs">{copy.empty}</p>
           )}
+          {counterparts.map((counterpart) => (
+            <p
+              className="flex flex-wrap items-center gap-x-1 text-muted-foreground text-xs"
+              data-airapp-site-domain-suggestion={counterpart}
+              key={counterpart}
+            >
+              <span>{fmt(copy.counterpartSuggestion, { hostname: counterpart })}</span>
+              <button
+                className="rounded-sm text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                disabled={mutationPending}
+                onClick={() => {
+                  setValidationError(null);
+                  bind.mutate(counterpart);
+                }}
+                type="button"
+              >
+                {fmt(copy.addCounterpart, { hostname: counterpart })}
+              </button>
+            </p>
+          ))}
           <form
             className={
               domains.data.bindings.length > 0

@@ -221,6 +221,23 @@ export const busabaseRecords = pgTable(
     index("busabase_records_base_created_idx").on(base.baseId, base.createdAt),
     index("busabase_records_status_created_idx").on(base.status, base.createdAt),
     index("busabase_records_head_commit_idx").on(base.headCommitId),
+    // A view with filters and no sort lists records in the view comparator's
+    // order: updatedAt to the millisecond, then id in code point order (see
+    // view-sql-plan.ts). Indexed on exactly those expressions, a Kanban
+    // column's first page reads its 20 rows instead of sorting the column —
+    // 0.97 s → 0.01 s for a 750k-record column of a 3M-record Base.
+    index("busabase_records_base_view_order_idx").on(
+      base.baseId,
+      sql`date_trunc('milliseconds', ${base.updatedAt}) desc`,
+      sql`(${base.id} collate "C") desc`,
+    ),
+    // Before ordering by id, view-sql-plan asks whether a Base has any id
+    // outside [0-9a-z] (an imported one). Indexing only those rows answers
+    // from an index that is normally empty instead of scanning the Base:
+    // 1.45 s → 1 ms at 3M records.
+    index("busabase_records_base_odd_id_idx")
+      .on(base.baseId)
+      .where(sql`${base.id} !~ '^[0-9a-z]+$'`),
   ],
 );
 
@@ -290,6 +307,12 @@ export const busabaseFieldValues = pgTable(
       base.fieldSlug,
       base.valueDate,
     ),
+    // The chronological window query intersects date ranges using record ids.
+    // Keeping ids beside active, non-null dates makes both sides index-only;
+    // otherwise the first page reads millions of projection heap rows.
+    index("busabase_field_values_active_date_record_idx")
+      .on(base.baseId, base.fieldSlug, base.valueDate, base.recordId)
+      .where(sql`${base.deletedAt} is null and ${base.valueDate} is not null`),
     index("busabase_field_values_record_idx").on(base.recordId),
     index("busabase_field_values_change_request_idx").on(base.changeRequestId),
     index("busabase_field_values_operation_idx").on(base.operationId),

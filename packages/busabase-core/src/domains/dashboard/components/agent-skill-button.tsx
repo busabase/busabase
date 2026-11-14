@@ -40,6 +40,8 @@ interface BusabaseAgentSkillButtonProps {
    * matches (open-source defaults to 15419, cloud to 3060).
    */
   defaultOrigin?: string;
+  /** Stable prompt host; undefined preserves the browser host, null disables skill prompts. */
+  promptOrigin?: string | null;
   /** Selects Cloud OAuth guidance or Desktop's local no-auth guidance. */
   edition?: McpGuideEdition;
   /** Current UI language — localizes the pasted prompt. Unknown values fall back to English. */
@@ -107,6 +109,7 @@ export function AgentIntegrationPluginCards({
 
 export interface AgentIntegrationContentProps {
   defaultOrigin?: string;
+  promptOrigin?: string | null;
   /**
    * Which edition to record as the onboarding preference. Both editions are explicit in the URL;
    * an unconfirmed discovery link still asks the user to choose inside the agent conversation.
@@ -166,6 +169,7 @@ export function createSetupSkillUrl(
 /** Shared Agent Integration UI without modal chrome, for dialogs and inline surfaces. */
 export function AgentIntegrationContent({
   defaultOrigin = "http://localhost:15419",
+  promptOrigin,
   edition = "desktop",
   editionConfirmed = false,
   lang,
@@ -204,8 +208,11 @@ export function AgentIntegrationContent({
   }, []);
 
   const skillUrl = useMemo(
-    () => createSetupSkillUrl(origin, edition, editionConfirmed, targetSpaceId),
-    [edition, editionConfirmed, origin, targetSpaceId],
+    () =>
+      promptOrigin === null
+        ? ""
+        : createSetupSkillUrl(promptOrigin ?? origin, edition, editionConfirmed, targetSpaceId),
+    [edition, editionConfirmed, origin, promptOrigin, targetSpaceId],
   );
   const webChatReachable = isWebChatReachable(edition);
   const mcpBaseUrl = mcpBaseUrls[mcpMode];
@@ -329,7 +336,11 @@ export function AgentIntegrationContent({
               </a>
             ))}
           </div>
-          {skillAudience === "shell" ? (
+          {skillAudience === "shell" && promptOrigin === null ? (
+            <p role="alert" className="text-sm text-muted-foreground">
+              {messages.install.installUnavailable}
+            </p>
+          ) : skillAudience === "shell" ? (
             <>
               <p className="text-sm text-muted-foreground">{messages.integration.skillIntro}</p>
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -666,6 +677,7 @@ export function AgentIntegrationDialog({
  */
 export function BusabaseAgentSkillButton({
   defaultOrigin = "http://localhost:15419",
+  promptOrigin,
   edition = "desktop",
   lang,
   targetSpaceId,
@@ -714,6 +726,7 @@ export function BusabaseAgentSkillButton({
         open={open}
         onOpenChange={setOpen}
         defaultOrigin={defaultOrigin}
+        promptOrigin={promptOrigin}
         edition={edition}
         editionConfirmed
         lang={lang}

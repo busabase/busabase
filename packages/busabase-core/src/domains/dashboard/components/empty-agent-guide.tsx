@@ -35,6 +35,7 @@ export interface EmptyAgentGuideCue {
 interface EmptyAgentGuideProps {
   /** Selects Cloud OAuth guidance or Desktop's local no-auth guidance. */
   edition?: McpGuideEdition;
+  promptOrigin?: string | null;
   /** Current UI language — localizes the pasted prompt in the Agent Integration dialog. */
   lang?: string;
   /**
@@ -83,6 +84,7 @@ interface EmptyAgentGuideProps {
  */
 export function EmptyAgentGuide({
   edition = "desktop",
+  promptOrigin,
   lang,
   onCreateNode,
   agentCue,
@@ -234,6 +236,7 @@ export function EmptyAgentGuide({
         open={open}
         onOpenChange={setOpen}
         defaultOrigin="https://busabase.com"
+        promptOrigin={promptOrigin}
         edition={edition}
         editionConfirmed
         lang={lang}

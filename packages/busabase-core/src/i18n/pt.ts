@@ -890,6 +890,14 @@ export const dashboardPt: CoreI18nMessages = {
         confirmRemove: "Remover domínio",
         removing: "Removendo…",
         cancel: "Cancelar",
+        primary: "Principal",
+        primaryHint: "Os outros domínios personalizados redirecionam para cá.",
+        redirectsTo: "Redireciona para {hostname}",
+        makePrimary: "Tornar principal",
+        makePrimaryLabel: "Tornar {hostname} o domínio principal",
+        makingPrimary: "Alterando…",
+        counterpartSuggestion: "Visitantes também costumam digitar {hostname}.",
+        addCounterpart: "Adicionar {hostname}",
       },
       // Keyed by `SiteBundleBlocker["code"]`.
       blockers: {
@@ -1785,6 +1793,9 @@ export const dashboardPt: CoreI18nMessages = {
     ganttScale: "Escala",
     ganttWeek: "Semana",
     ganttMonth: "Mês",
+    ganttEarlier: "Antes",
+    ganttLater: "Depois",
+    ganttEmptyPeriod: "Nada está agendado neste período.",
     ganttNoDates:
       "Adicione um campo de data de início e um de término para montar a linha do tempo.",
     newRecord: "Novo registro",
@@ -1961,7 +1972,7 @@ export const dashboardPt: CoreI18nMessages = {
     cannotHideLastField: "Pelo menos um campo deve permanecer visível.",
     editField: "Editar campo",
     failedQuickViewUpdate: "Falha ao atualizar a visualização",
-    emptyRecords: "Os Change Requests aprovados aparecem aqui após a mesclagem.",
+    emptyRecords: "Os registros aparecem aqui quando são adicionados ou mesclados.",
     baseNotFoundTitle: "Base não encontrada",
     baseNotFoundBody: "A Base solicitada não existe.",
     baseInfo: "Informações da Base",

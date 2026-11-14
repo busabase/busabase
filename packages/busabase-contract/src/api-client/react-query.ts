@@ -55,6 +55,7 @@ const UNBATCHABLE_PROCEDURES = new Set([
   "airapps.siteDomains",
   "airapps.siteBindDomain",
   "airapps.siteUnbindDomain",
+  "airapps.siteSetPrimaryDomain",
   "airapps.siteDeployPreview",
   "airapps.siteGoLive",
   "live.subscribe",

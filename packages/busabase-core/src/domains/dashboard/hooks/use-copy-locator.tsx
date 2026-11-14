@@ -127,8 +127,8 @@ export interface CopyLocatorEnv {
 }
 
 /**
- * The locator prompt for the live browser origin — never a host's SSR
- * placeholder, same rule `AgentPromptsView` follows. No edition → no
+ * The locator prompt uses the explicit prompt host or the live browser origin,
+ * never a host's SSR placeholder, same rule `AgentPromptsView` follows. No edition → no
  * connection check, rather than a guessed setup URL.
  */
 export const renderAgentLocator = (
@@ -139,7 +139,10 @@ export const renderAgentLocator = (
   const edition = integration?.edition;
   // A stray targetSpaceId must never leak into Desktop guidance.
   const targetSpaceId = edition === "cloud" ? integration?.targetSpaceId : undefined;
-  const origin = typeof window === "undefined" ? undefined : window.location.origin;
+  if (integration?.promptOrigin === null) throw new Error("Agent prompt origin is unavailable");
+  const origin =
+    integration?.promptOrigin ??
+    (typeof window === "undefined" ? undefined : window.location.origin);
   return buildLocatorPrompt({
     target: locator.target,
     request,

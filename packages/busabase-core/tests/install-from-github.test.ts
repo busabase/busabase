@@ -1,11 +1,18 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createRouterClient } from "@orpc/server";
+import { createRouterClient, ORPCError } from "@orpc/server";
 import { BlobReader, BlobWriter, ZipWriter } from "@zip.js/zip.js";
 import { PACKAGE_FORMAT } from "busabase-contract/domains/package/types";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { runWithBusabaseContext } from "../src/context";
+import { eq } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  type BusabaseCreationCounts,
+  type BusabaseCreationLimit,
+  runWithBusabaseContext,
+} from "../src/context";
+import { getDb } from "../src/db";
+import { busabaseChangeRequests, busabaseNodes } from "../src/db/schema";
 import { busabaseRouter } from "../src/router";
 
 /**
@@ -222,6 +229,119 @@ describe("install.fromGithub — server-side install (real PGLite + synthetic zi
     const nodes = await inSpace(spaceId, () => client.nodes.list());
     const roots = nodes.length === 1 && nodes[0].children ? nodes[0].children : nodes;
     expect(roots.map((node) => node.slug)).not.toContain("test-kb");
+  });
+
+  describe("the host's allowance includes the installation folder", () => {
+    const inLimitedSpace = <T>(
+      spaceId: string,
+      check: (added: BusabaseCreationCounts) => Promise<void>,
+      fn: () => Promise<T>,
+    ) => {
+      const creationLimit: BusabaseCreationLimit = {
+        check,
+        guard: async (added, write) => {
+          await check(added);
+          return write();
+        },
+      };
+      return runWithBusabaseContext({ spaceId, isSpaceManager: true, creationLimit }, fn);
+    };
+    const nodeRows = async (spaceId: string) =>
+      (await getDb())
+        .select({ id: busabaseNodes.id })
+        .from(busabaseNodes)
+        .where(eq(busabaseNodes.spaceId, spaceId));
+    const prepareSpace = async (spaceId: string, used: number, existingTarget = false) => {
+      await inSpace(spaceId, () =>
+        client.nodes.createChangeRequest({
+          autoMerge: true,
+          operations: Array.from({ length: used - 1 }, (_, index) => ({
+            kind: "create" as const,
+            nodeType: "folder" as const,
+            slug: existingTarget && index === 0 ? "existing-target" : `fixture-${index}`,
+            name: `Fixture ${index}`,
+          })),
+        }),
+      );
+      // The workspace root is itself a node and consumes one slot.
+      expect(await nodeRows(spaceId)).toHaveLength(used);
+    };
+    const quota = (spaceId: string) =>
+      vi.fn(async (added: BusabaseCreationCounts) => {
+        const used = (await nodeRows(spaceId)).length;
+        if (used + (added.nodes ?? 0) > 20) {
+          throw new ORPCError("FORBIDDEN", {
+            data: {
+              code: "USAGE_LIMIT_EXCEEDED",
+              label: "Nodes",
+              used,
+              limit: 20,
+              adding: added.nodes,
+            },
+          });
+        }
+      });
+
+    it.each([
+      ["new independent folder", { newFolder: {} }],
+      ["named folder that does not exist", { intoFolder: "new-target" }],
+    ])(
+      "refuses a %s before creating anything when only its contents would fit",
+      async (name, target) => {
+        const spaceId = `space_install_quota_refused_${name.replaceAll(" ", "_")}`;
+        await prepareSpace(spaceId, 16);
+        const check = quota(spaceId);
+        const db = await getDb();
+        const requestsBefore = await db
+          .select({ id: busabaseChangeRequests.id })
+          .from(busabaseChangeRequests);
+        const nodesBefore = await nodeRows(spaceId);
+        const input = { repoUrl: "https://github.com/acme/test-kb", ...target };
+
+        // Four nodes are inside the package; its new container is a fifth. Before
+        // this fix the preview passed and apply stopped after writing part of it.
+        for (const run of [
+          () => client.install.planFromGithub(input),
+          () => client.install.fromGithub(input),
+        ]) {
+          await expect(inLimitedSpace(spaceId, check, run)).rejects.toMatchObject({
+            data: { code: "USAGE_LIMIT_EXCEEDED", used: 16, limit: 20, adding: 5 },
+          });
+        }
+        expect(check).toHaveBeenCalledTimes(2);
+        expect(await nodeRows(spaceId)).toEqual(nodesBefore);
+        expect(
+          await db.select({ id: busabaseChangeRequests.id }).from(busabaseChangeRequests),
+        ).toEqual(requestsBefore);
+      },
+    );
+
+    it.each([
+      ["new", false, 15, 5],
+      ["existing", true, 16, 4],
+    ])(
+      "allows the whole install to land exactly on the limit with a %s folder",
+      async (name, existingTarget, used, adding) => {
+        const spaceId = `space_install_quota_exact_${name}`;
+        await prepareSpace(spaceId, used, existingTarget);
+        const check = quota(spaceId);
+        const input = {
+          repoUrl: "https://github.com/acme/test-kb",
+          ...(existingTarget ? { intoFolder: "existing-target" } : { newFolder: {} }),
+        };
+
+        await inLimitedSpace(spaceId, check, () => client.install.planFromGithub(input));
+        expect(check).toHaveBeenLastCalledWith({ nodes: adding, records: 2 });
+        expect(await nodeRows(spaceId)).toHaveLength(used);
+
+        const result = await inLimitedSpace(spaceId, check, () => client.install.fromGithub(input));
+        expect(result.created.folders).toBe(existingTarget ? 1 : 2);
+        expect(result.created.docs).toBe(2);
+        expect(result.created.bases).toBe(1);
+        expect(result.created.records).toBe(2);
+        expect(await nodeRows(spaceId)).toHaveLength(20);
+      },
+    );
   });
 
   // ── fromGithubStream: the same install, but it speaks while it works ────────

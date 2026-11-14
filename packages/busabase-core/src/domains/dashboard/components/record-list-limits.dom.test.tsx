@@ -75,7 +75,10 @@ const harness = (children: ReactNode, locale: "en" | "zh-CN" = "en") => (
   </QueryClientProvider>
 );
 const failingClient = () => {
-  const listRecordsPage = vi.fn(async () => {
+  const listRecordsPage = vi.fn(async (input: { filters?: Array<{ operator: string }> }) => {
+    if (input.filters?.[0]?.operator === "is_empty") {
+      return { records: [], total: 0, page: 1, totalPages: 1 };
+    }
     throw new Error(VIEW_TOO_LARGE);
   });
   return {
@@ -144,7 +147,9 @@ describe("a view too large to read", () => {
     );
     expect((await screen.findByRole("alert")).textContent).toBe(VIEW_TOO_LARGE);
     await new Promise((resolve) => setTimeout(resolve, 1_600));
-    expect(listRecordsPage).toHaveBeenCalledTimes(1);
+    expect(
+      listRecordsPage.mock.calls.filter(([input]) => input.filters?.[0]?.operator !== "is_empty"),
+    ).toHaveLength(1);
   });
 
   it("is translated from the server's message", async () => {

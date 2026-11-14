@@ -53,6 +53,8 @@ export interface AirAppSiteHost {
   readDomains?(nodeId: string): Promise<AirAppSiteDomainsVO>;
   bindDomain?(nodeId: string, hostname: string): Promise<AirAppSiteDomainsVO>;
   unbindDomain?(nodeId: string, hostname: string): Promise<AirAppSiteDomainsVO>;
+  /** Makes `hostname` the domain the site's other custom domains redirect to; `null` clears it. */
+  setPrimaryDomain?(nodeId: string, hostname: string | null): Promise<AirAppSiteDomainsVO>;
   /**
    * Takes these nodes' sites off their addresses, and switches their live keys off,
    * keeping both restorable. Ignores nodes with none.

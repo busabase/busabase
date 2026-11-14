@@ -16,6 +16,9 @@ function stopped(reason: SearchStop) {
   return reason === "canceled"
     ? new ORPCError("CLIENT_CLOSED_REQUEST", { message: "Search canceled." })
     : new ORPCError("TIMEOUT", {
+        // HTTP 408 may be replayed by the browser. The search used its budget;
+        // another attempt must come from the user's explicit retry action.
+        status: 422,
         message: "Search took too long. Narrow the search to a Base or folder and try again.",
       });
 }

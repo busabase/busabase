@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 import { CLOUD_MCP_BASE_URL, LOCAL_MCP_BASE_URL, type McpGuideEdition } from "./agent-mcp-guides";
 import { AgentIntegrationContent } from "./agent-skill-button";
@@ -87,5 +87,60 @@ describe("AgentIntegrationContent — MCP tab", () => {
 
     expect(pressedMode()).toBe("Local");
     expect(mcpBaseUrl()).toBe(LOCAL_MCP_BASE_URL);
+  });
+});
+
+describe("AgentIntegrationContent stable prompt origin", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the copied skill guide stable after hydration without changing MCP or OpenAPI", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    render(
+      <CoreI18nProvider locale="en">
+        <AgentIntegrationContent
+          edition="cloud"
+          editionConfirmed
+          targetSpaceId="space_original"
+          defaultOrigin="https://ssr-placeholder.example"
+          promptOrigin="https://app.preview.example:8443"
+        />
+      </CoreI18nProvider>,
+    );
+    const expected =
+      "https://app.preview.example:8443/SETUP_SKILL.md?edition=cloud&editionConfirmed=1&space=space_original";
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toContain(expected);
+    fireEvent.click(screen.getByRole("button", { name: "Copy prompt" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining(expected)));
+    openMcpTab();
+    expect(mcpBaseUrl()).toBe(CLOUD_MCP_BASE_URL);
+    expect(mcpBaseUrl()).not.toContain("app.preview.example");
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "OpenAPI" }));
+    expect(screen.getByRole("link", { name: "Open" }).getAttribute("href")).toBe(
+      `${window.location.origin}/api/v1/openapi.json`,
+    );
+  });
+
+  it("keeps the browser host for Desktop when no prompt origin is supplied", () => {
+    renderPanel("desktop");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toContain(
+      `${window.location.origin}/SETUP_SKILL.md?edition=desktop`,
+    );
+  });
+
+  it("offers no copyable skill prompt when Cloud deployment config is unavailable", () => {
+    render(
+      <CoreI18nProvider locale="en">
+        <AgentIntegrationContent edition="cloud" promptOrigin={null} />
+      </CoreI18nProvider>,
+    );
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy prompt" })).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("unavailable");
+    openMcpTab();
+    expect(mcpBaseUrl()).toBe(CLOUD_MCP_BASE_URL);
   });
 });

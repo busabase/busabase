@@ -194,7 +194,13 @@ export const getSiteState = async (nodeId: string): Promise<AirAppSiteStateVO> =
   return toState(nodeId, engine, await host.readSite(nodeId), await loadSite(nodeId));
 };
 
-const NO_DOMAINS: AirAppSiteDomainsVO = { available: false, cnameTarget: null, bindings: [] };
+const NO_DOMAINS: AirAppSiteDomainsVO = {
+  available: false,
+  cnameTarget: null,
+  bindings: [],
+  primaryHostname: null,
+  primarySupported: false,
+};
 
 /** Domain provider failures never affect the default address or publication state. */
 export const getSiteDomains = async (nodeId: string): Promise<AirAppSiteDomainsVO> => {
@@ -233,6 +239,29 @@ export const unbindSiteDomain = async (
     });
   }
   return host.unbindDomain(nodeId, hostname);
+};
+
+/**
+ * Chooses the custom domain the others redirect to, or clears it (`null`). Same
+ * permission and plan as binding: it changes what the site's addresses answer.
+ */
+export const setSitePrimaryDomain = async (
+  nodeId: string,
+  hostname: string | null,
+): Promise<AirAppSiteDomainsVO> => {
+  await assertNodePermission(nodeId, "write");
+  const host = await requireUsableHost();
+  if (!host.setPrimaryDomain) {
+    throw new ORPCError("PRECONDITION_FAILED", {
+      message: "Primary website domains are not supported on this deployment.",
+    });
+  }
+  if (hostname !== null && !(await host.readSite(nodeId)).liveVersion) {
+    throw new ORPCError("PRECONDITION_FAILED", {
+      message: "Publish this website before choosing a primary domain.",
+    });
+  }
+  return host.setPrimaryDomain(nodeId, hostname);
 };
 
 export const deploySitePreview = async (nodeId: string): Promise<AirAppSiteActionVO> => {
