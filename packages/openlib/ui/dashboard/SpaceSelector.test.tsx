@@ -6,9 +6,13 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { RecentSpaceIdsProvider } from "./recent-spaces";
 import { pickVisibleSpaces, SpaceSelector } from "./SpaceSelector";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
+});
 
 vi.mock("kui/button", () => ({
   Button: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) => (
@@ -127,5 +131,91 @@ describe("SpaceSelector space cap", () => {
 
     expect(screen.queryByText(/View all spaces/)).toBeNull();
     expect(screen.getByText("Client 4")).toBeTruthy();
+  });
+});
+
+describe("SpaceSelector order", () => {
+  const listedNames = () =>
+    screen
+      .getAllByText(/^Client \d$/)
+      .map((element) => element.textContent)
+      // The trigger and the menu header both name the active space above the list.
+      .slice(2);
+
+  it("lists the spaces made active most recently first, the rest in the host's order", () => {
+    const { rerender } = render(<SpaceSelector spaces={manySpaces} activeSpace={manySpaces[4]} />);
+    rerender(<SpaceSelector spaces={manySpaces} activeSpace={manySpaces[7]} />);
+
+    expect(listedNames()).toEqual([
+      "Client 8",
+      "Client 5",
+      "Client 1",
+      "Client 2",
+      "Client 3",
+      "Client 4",
+      "Client 6",
+      "Client 7",
+      "Client 9",
+    ]);
+  });
+
+  it("caps to the most recent spaces, so a long-unused one is behind View all", () => {
+    window.localStorage.setItem(
+      "openlib:recent-space-ids",
+      JSON.stringify(["space-9", "space-7", "space-5"]),
+    );
+    render(
+      <SpaceSelector
+        spaces={manySpaces}
+        activeSpace={manySpaces[2]}
+        maxVisibleSpaces={4}
+        onViewAllSpaces={() => undefined}
+      />,
+    );
+
+    expect(listedNames()).toEqual(["Client 3", "Client 9", "Client 7", "Client 5"]);
+    expect(screen.queryByText("Client 1")).toBeNull();
+  });
+
+  it("orders by the host's history when it provides one", () => {
+    render(
+      <RecentSpaceIdsProvider value={["space-6", "space-2"]}>
+        <SpaceSelector spaces={manySpaces} activeSpace={manySpaces[1]} />
+      </RecentSpaceIdsProvider>,
+    );
+
+    expect(listedNames().slice(0, 3)).toEqual(["Client 6", "Client 2", "Client 1"]);
+  });
+});
+
+describe("SpaceSelector with a partial list", () => {
+  it("counts the host's total and offers the rest, even under the cap", () => {
+    render(
+      <SpaceSelector
+        spaces={manySpaces.slice(0, 3)}
+        activeSpace={manySpaces[0]}
+        totalSpaces={500}
+        maxVisibleSpaces={6}
+        onViewAllSpaces={() => undefined}
+        labels={{ spaces: "Spaces", viewAllSpaces: "View all spaces" }}
+      />,
+    );
+
+    expect(screen.getByText("Spaces · 500")).toBeTruthy();
+    expect(screen.getByText("View all spaces · 500")).toBeTruthy();
+  });
+
+  it("offers nothing more when the list already is every space", () => {
+    render(
+      <SpaceSelector
+        spaces={manySpaces.slice(0, 3)}
+        activeSpace={manySpaces[0]}
+        totalSpaces={3}
+        maxVisibleSpaces={6}
+        onViewAllSpaces={() => undefined}
+      />,
+    );
+
+    expect(screen.queryByText(/View all spaces/)).toBeNull();
   });
 });

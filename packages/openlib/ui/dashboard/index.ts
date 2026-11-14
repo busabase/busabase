@@ -7,6 +7,7 @@ export * from "./demo-client";
 export * from "./hooks";
 export * from "./NavMain";
 export * from "./NavUser";
+export * from "./recent-spaces";
 export * from "./SettingsDialogShell";
 export * from "./SidebarTaskList";
 export * from "./SPABreadcrumb";

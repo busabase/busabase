@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import * as React from "react";
 import { AvatarLogo } from "../avatar-logo";
+import { orderSpacesByRecent, useRecentSpaceIds } from "./recent-spaces";
 import type { Space } from "./types";
 
 /** Whether a space is a synthetic "remote space" (e.g. a connected tunnel). */
@@ -134,8 +135,9 @@ const getPlanBadgeStyle = (plan: string) => {
 /**
  * The spaces listed in the menu when a host caps the list (`maxVisibleSpaces`).
  *
- * Keeps the host's own order and always includes the active space — swapped in
- * for the last visible row when it falls past the cap — so the check mark never
+ * Keeps the order it is given (the menu passes recently active first, see
+ * `orderSpacesByRecent`) and always includes the active space — swapped in for
+ * the last visible row when it falls past the cap — so the check mark never
  * points at a row that was cut. Uncapped, or under the cap, it is the list as-is.
  */
 export const pickVisibleSpaces = <T extends Pick<Space, "id">>(
@@ -189,6 +191,12 @@ export interface SpaceSelectorProps {
    */
   maxVisibleSpaces?: number;
   onViewAllSpaces?: () => void;
+  /**
+   * How many spaces the user has, when `spaces` is only some of them (a host
+   * that loads a bounded slice for people in hundreds of spaces). Drives the
+   * counts, and the "view all" row whenever spaces are left out.
+   */
+  totalSpaces?: number;
 }
 
 const defaultLabels = {
@@ -213,6 +221,7 @@ export function SpaceSelector({
   extraMenuItems,
   maxVisibleSpaces,
   onViewAllSpaces,
+  totalSpaces,
 }: SpaceSelectorProps) {
   const { isMobile, state } = useSidebar();
   const isCollapsed = state === "collapsed";
@@ -236,6 +245,15 @@ export function SpaceSelector({
 
   const currentSpace = activeSpace || internalActiveSpace;
   const logoSrc = currentSpace?.logo || appLogo;
+
+  // Recently active spaces first, so the ones in use stay within reach (and
+  // inside the cap) however many spaces someone belongs to. Only the host's
+  // `activeSpace` is recorded — not the `spaces[0]` fallback shown while it loads.
+  const recentSpaceIds = useRecentSpaceIds(activeSpace?.id);
+  const orderedSpaces = React.useMemo(
+    () => orderSpacesByRecent(spaces, recentSpaceIds),
+    [spaces, recentSpaceIds],
+  );
 
   // Streaming SSR can expose this button before React attaches the dropdown
   // handler. Keep it disabled until hydration so an early click is not lost.
@@ -306,9 +324,10 @@ export function SpaceSelector({
 
   // The cap only applies when the host also gives a way to reach the rest.
   const listedSpaces = onViewAllSpaces
-    ? pickVisibleSpaces(spaces, currentSpace.id, maxVisibleSpaces)
-    : spaces;
-  const hasHiddenSpaces = listedSpaces.length < spaces.length;
+    ? pickVisibleSpaces(orderedSpaces, currentSpace.id, maxVisibleSpaces)
+    : orderedSpaces;
+  const spaceCount = Math.max(totalSpaces ?? 0, spaces.length);
+  const hasHiddenSpaces = listedSpaces.length < spaceCount;
 
   if (readonly) {
     const logoSrc = currentSpace.logo || appLogo;
@@ -488,7 +507,7 @@ export function SpaceSelector({
               >
                 <div ref={scrollContentRef}>
                   <DropdownMenuLabel className="px-2 py-1.5 text-muted-foreground text-xs">
-                    {labels.spaces} · {spaces.length}
+                    {labels.spaces} · {spaceCount}
                   </DropdownMenuLabel>
                   {listedSpaces.map((space) => {
                     const isActive = space.id === currentSpace.id;
@@ -531,7 +550,7 @@ export function SpaceSelector({
                         <LayoutList className="size-4" />
                       </div>
                       <span className="text-muted-foreground">
-                        {labels.viewAllSpaces ?? "View all spaces"} · {spaces.length}
+                        {labels.viewAllSpaces ?? "View all spaces"} · {spaceCount}
                       </span>
                     </DropdownMenuItem>
                   )}

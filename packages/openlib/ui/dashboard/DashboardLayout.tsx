@@ -35,6 +35,8 @@ interface DashboardLayoutProps {
   /** See `SpaceSelectorProps.maxVisibleSpaces` — applies only with `onViewAllSpaces`. */
   spaceSelectorMaxVisibleSpaces?: number;
   onViewAllSpaces?: () => void;
+  /** See `SpaceSelectorProps.totalSpaces`. */
+  spaceSelectorTotalSpaces?: number;
   isLoadingSpaces?: boolean;
   /**
    * App branding configuration displayed when no spaces are available
@@ -136,6 +138,7 @@ export function DashboardLayout({
   spaceSelectorExtraMenuItems,
   spaceSelectorMaxVisibleSpaces,
   onViewAllSpaces,
+  spaceSelectorTotalSpaces,
   isLoadingSpaces,
   branding,
   appLogo,
@@ -193,6 +196,7 @@ export function DashboardLayout({
         spaceSelectorExtraMenuItems={spaceSelectorExtraMenuItems}
         spaceSelectorMaxVisibleSpaces={spaceSelectorMaxVisibleSpaces}
         onViewAllSpaces={onViewAllSpaces}
+        spaceSelectorTotalSpaces={spaceSelectorTotalSpaces}
         isLoadingSpaces={isLoadingSpaces}
         branding={branding}
         appLogo={appLogo}
