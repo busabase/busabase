@@ -148,6 +148,29 @@ describe("busabase-cli commands", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it("sends null for a nullable input only through its --clear flag", async () => {
+    const calls: unknown[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push(await requestBody(request));
+      return jsonResponse({ available: true, cnameTarget: null, bindings: [] });
+    }) as typeof fetch;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const base = ["--base-url", "http://localhost:15419", "airapps", "site-set-primary-domain"];
+    const node = ["--node-id", "nod_1"];
+
+    expect(await runCli([...base, ...node, "--hostname", "example.com"])).toBe(0);
+    expect(await runCli([...base, ...node, "--clear-hostname"])).toBe(0);
+    expect(calls).toEqual([{ hostname: "example.com" }, { hostname: null }]);
+
+    // Forgetting the flag must not silently clear it, and both at once is ambiguous.
+    expect(await runCli([...base, ...node])).toBe(EXIT_CODES.USAGE);
+    expect(await runCli([...base, ...node, "--hostname", "a.com", "--clear-hostname"])).toBe(
+      EXIT_CODES.USAGE,
+    );
+    expect(calls).toHaveLength(2);
+  });
+
   it("gets a Base by id or slug with one direct request", async () => {
     const urls: string[] = [];
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

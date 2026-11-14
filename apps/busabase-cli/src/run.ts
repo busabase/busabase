@@ -867,23 +867,31 @@ interface GenField {
   root?: boolean;
   /** Fixed by the command name (a union discriminator) — sent, but never a flag. */
   pinned?: string;
+  /**
+   * Required but nullable: `null` is a meaningful value (e.g. "clear the primary
+   * domain"), sent with `--clear-<key>`. Passing neither stays a usage error so a
+   * forgotten flag never sends `null` by accident.
+   */
+  nullable?: boolean;
 }
 
 /** Peel ZodOptional/ZodDefault/ZodNullable wrappers; a default or optional wrapper means not-required. */
 // Zod v4's internal `.def` shape has no public types, so these introspection helpers use `any`.
-function unwrapSchema(schema: any): { inner: any; optional: boolean } {
+function unwrapSchema(schema: any): { inner: any; optional: boolean; nullable: boolean } {
   let inner = schema;
   let optional = false;
+  let nullable = false;
   for (let i = 0; i < 6 && inner?.def; i++) {
     const type = inner.def.type;
     if (type === "optional" || type === "default") {
       optional = true;
       inner = inner.def.innerType;
     } else if (type === "nullable") {
+      nullable = true;
       inner = inner.def.innerType;
     } else break;
   }
-  return { inner, optional };
+  return { inner, optional, nullable };
 }
 
 /** Map an (unwrapped) Zod type to a CLI flag kind. Complex types (object/array/record/union) → JSON flag. */
@@ -929,9 +937,11 @@ function objectShape(inner: any): Record<string, any> | undefined {
 function fieldsFromShape(shape: Record<string, any>): GenField[] {
   const fields: GenField[] = [];
   for (const [key, sub] of Object.entries(shape)) {
-    const { inner: unwrapped, optional } = unwrapSchema(sub);
+    const { inner: unwrapped, optional, nullable } = unwrapSchema(sub);
     const { kind, choices } = classifyKind(unwrapped);
-    fields.push({ key, kind, required: !optional, choices });
+    const field: GenField = { key, kind, required: !optional, choices };
+    if (!optional && nullable && kind !== "boolean" && kind !== "json") field.nullable = true;
+    fields.push(field);
   }
   return fields;
 }
@@ -1135,6 +1145,14 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
       const flag = `--${opaqueJsonFields.has(f.key) ? "opaque-" : ""}${kebab(f.key)}`;
       // A body field named like a global flag (e.g. spaceId) is served by the global flag/header.
       if (GLOBAL_LONG_FLAGS.has(flag)) continue;
+      if (f.nullable) {
+        const opt = new Option(`${flag} <value>`, `${f.key} (or --clear-${kebab(f.key)})`);
+        if (f.kind === "enum") opt.choices(f.choices ?? []);
+        if (f.kind === "number") opt.argParser(parseNum);
+        leaf.addOption(opt);
+        leaf.option(`--clear-${kebab(f.key)}`, `send ${f.key}: null`);
+        continue;
+      }
       if (f.kind === "boolean") {
         leaf.option(flag, `${f.key} (boolean)`);
       } else if (f.kind === "json") {
@@ -1182,6 +1200,19 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
           if (GLOBAL_LONG_FLAGS.has(`--${kebab(f.key)}`)) continue;
           const optKey = optionKey(f);
           const value = (opts as Record<string, unknown>)[optKey];
+          if (f.nullable) {
+            const clearFlag = `--clear-${kebab(f.key)}`;
+            const clearKey = `clear${f.key[0].toUpperCase()}${f.key.slice(1)}`;
+            const clear = Boolean((opts as Record<string, unknown>)[clearKey]);
+            if (clear === (value !== undefined)) {
+              throw new CliOutcomeError(
+                "USAGE",
+                `Pass exactly one of --${kebab(f.key)} <value> or ${clearFlag}.`,
+              );
+            }
+            (input as Record<string, unknown>)[f.key] = clear ? null : value;
+            continue;
+          }
           if (value === undefined) continue;
           const parsed =
             f.kind === "json" ? parseJsonValue(value as string, `${kebab(f.key)}-json`) : value;
@@ -3772,8 +3803,17 @@ function explainUnsupportedCommand(
   state: CliState,
   error: unknown,
 ): { message: string; hint: string; prose: string } | undefined {
-  if (!state.procedureId?.startsWith("members.") || !isRouteMissing(error)) return undefined;
+  if (!isRouteMissing(error)) return undefined;
   const base = (state.config ?? resolveConfig({}, { strict: false })).baseUrl;
+  if (state.procedureId === "airapps.siteSetPrimaryDomain") {
+    // Primary domains shipped after custom domains: an older server has the
+    // domain routes but not this one, so its 404 is not a wrong app id.
+    const message = `${base} does not support primary custom domains yet (404: no such route).`;
+    const hint =
+      "This server predates primary domains: every custom domain bound to the website keeps serving it directly. Upgrade the server, or check again after it updates.";
+    return { message, hint, prose: [message, `  ${hint}`].join("\n") };
+  }
+  if (!state.procedureId?.startsWith("members.")) return undefined;
   const web = `open ${base}/dashboard?settings=space&tab=people (avatar menu → Account Settings → Space Settings → Members)`;
   const message = `${base} does not support member invitations over the API (404: no such route).`;
   return {
