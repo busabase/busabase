@@ -1771,6 +1771,10 @@ export const dashboardKo: CoreI18nMessages = {
     paginationPage: "{page}페이지로 이동",
     paginationCurrentPage: "{page}페이지, 현재 페이지",
     paginationRetry: "다시 시도",
+    paginationDepthLimit:
+      "페이지 번호로는 처음 {limit}개 레코드까지만 이동할 수 있습니다. 나머지는 필터나 정렬로 찾으세요.",
+    viewTooLarge:
+      "이 뷰는 레코드가 너무 많아 처리할 수 없습니다. 필터로 범위를 좁힌 뒤 다시 시도하세요.",
     hideArchivedRecords: "보관된 레코드 숨기기",
     showArchivedRecords: "보관된 레코드 표시 ({count}개)",
     createDeleteRequestTitle: "삭제 요청을 만드시겠습니까?",
@@ -2343,7 +2347,7 @@ export const dashboardKo: CoreI18nMessages = {
     typeHints: {
       folder: "컴퓨터의 폴더처럼 관련 항목을 하나로 묶습니다.",
       base: "데이터베이스 규칙이 적용된 스프레드시트입니다 — 유형이 있는 열, 필터, 저장된 뷰.",
-      doc: "변경 전에 리뷰를 거치는 하나의 문서입니다.",
+      doc: "메모, 사양서, 보고서 등 하나의 문서입니다.",
       file: "PDF, 이미지 등 업로드한 파일 하나입니다.",
       skill: "에이전트가 데이터를 다루기 전에 읽는 지침서입니다.",
       drive: "에이전트가 읽을 수 있도록 파일을 모아 둔 공간입니다.",

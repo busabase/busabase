@@ -22,6 +22,8 @@ vi.mock("@tanstack/react-query", () => ({
     isFetchingNextPage: false,
     isPending: false,
   }),
+  // A one-page month is drained, so no day asks on its own.
+  useQueries: () => [],
 }));
 vi.mock("wouter", () => ({ useSearch: () => "" }));
 vi.mock("@dnd-kit/core", () => ({

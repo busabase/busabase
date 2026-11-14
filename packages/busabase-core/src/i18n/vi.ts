@@ -1783,6 +1783,10 @@ export const dashboardVi: CoreI18nMessages = {
     paginationPage: "Đến trang {page}",
     paginationCurrentPage: "Trang {page}, trang hiện tại",
     paginationRetry: "Thử lại",
+    paginationDepthLimit:
+      "Số trang chỉ đi tới {limit} bản ghi đầu tiên. Hãy lọc hoặc sắp xếp để tìm phần còn lại.",
+    viewTooLarge:
+      "Chế độ xem này có quá nhiều bản ghi để xử lý. Hãy thêm bộ lọc để thu hẹp rồi thử lại.",
     hideArchivedRecords: "Ẩn bản ghi đã lưu trữ",
     showArchivedRecords: "Hiện bản ghi đã lưu trữ ({count})",
     createDeleteRequestTitle: "Tạo yêu cầu xóa?",
@@ -2359,7 +2363,7 @@ export const dashboardVi: CoreI18nMessages = {
     typeHints: {
       folder: "Nhóm các mục liên quan lại với nhau, giống như thư mục trên máy tính của bạn.",
       base: "Bảng tính có quy tắc của cơ sở dữ liệu — cột có kiểu dữ liệu, bộ lọc, chế độ xem đã lưu.",
-      doc: "Một tài liệu viết tay, được xem xét trước khi thay đổi.",
+      doc: "Một tài liệu văn bản — ghi chú, đặc tả, báo cáo.",
       file: "Một tệp tải lên — PDF, hình ảnh, bất cứ thứ gì.",
       skill: "Hướng dẫn bằng văn bản mà tác nhân AI đọc trước khi chạm vào dữ liệu của bạn.",
       drive: "Một kho tệp thô để tác nhân AI đọc.",

@@ -124,6 +124,29 @@ describe("SearchDialog spaces", () => {
     expect(screen.queryByText("Switch to this space")).toBeNull();
   });
 
+  it("adds the host server's matches after the instant ones, for spaces it has not loaded", async () => {
+    const onSwitch = vi.fn();
+    const search = vi.fn(async (_query: string) => [
+      { id: "s2", name: "Qiming Demo" },
+      { id: "s9", name: "Zeta Demo Agency", subtitle: "Member · PRO" },
+    ]);
+    const { container } = renderDialog({ slot: { ...slotWith(onSwitch), search } });
+
+    type(container, "demo");
+    // The loaded space shows at once; the server's other match follows.
+    expect(screen.getByRole("option", { name: /Qiming Demo/ })).toBeTruthy();
+    const remote = await screen.findByRole(
+      "option",
+      { name: /Zeta Demo Agency/ },
+      { timeout: 3000 },
+    );
+
+    expect(search).toHaveBeenCalledWith("demo");
+    expect(screen.getAllByRole("option", { name: /Qiming Demo/ })).toHaveLength(1);
+    fireEvent.click(remote);
+    expect(onSwitch).toHaveBeenCalledWith("s9");
+  });
+
   it("draws a logo only from an image address and falls back to the first letter", () => {
     const { container } = renderDialog({
       slot: {

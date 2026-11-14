@@ -160,7 +160,6 @@ import { DialogContent } from "./localized-dialog-content";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { ConfirmActionDialog } from "./primitives";
 import { RecordFind } from "./record-find-control";
-import { RecordsPaginationBar } from "./records-pagination-bar";
 import { RelationFieldAddButton } from "./relation-field";
 import { SplitSubmitButton, useWorkspacePermissionLevel } from "./split-submit-button";
 import {
@@ -1389,7 +1388,7 @@ export function BusaBaseTable({
               if (recordFind && recordsPending) return findMessages.searching;
               const displayCount = pagination?.total ?? records.length;
               return fmt(messages.base.recordCount, {
-                count: displayCount,
+                count: pagination?.totalCapped ? `${displayCount}+` : displayCount,
                 plural: displayCount === 1 ? "" : "s",
               });
             })()}
@@ -1712,9 +1711,9 @@ export function BusaBaseTable({
         <BusaBaseGantt
           activeView={activeView}
           base={base}
+          client={client}
           fields={fields}
           onPatchRecord={onPatchRecord}
-          records={records}
         />
       ) : (
         <div className="overflow-x-auto pb-5" data-base-table-scroll ref={horizontalScrollRef}>
@@ -2150,9 +2149,6 @@ export function BusaBaseTable({
           </div>
         </div>
       )}
-      {activeView && activeView.type !== "table" && pagination ? (
-        <RecordsPaginationBar className="mt-3" {...pagination} />
-      ) : null}
     </div>
   );
 }

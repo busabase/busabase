@@ -407,20 +407,29 @@ function HtmlEditor({ document: htmlDocument, node, orpc }: HtmlEditorProps) {
             {messages.common.edit}
           </Button>
         )}
-        <NodeAgentPromptsButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="html" />
-        <NodePinButton
-          payload={{ nodeId: node.id }}
-          tabId={nodeSidePanelTabId("html", node.id)}
-          tabType="html-preview"
-          title={node.name}
-        />
-        <NodeActionsMenu
-          nodeId={node.id}
-          nodeName={node.name}
-          nodeSlug={node.slug}
-          nodeType="html"
-          orpc={orpc}
-        />
+        {/* A phone has room for fullscreen, Cancel and Save only while editing;
+            the secondary actions return once editing ends. */}
+        <div className={isEditing ? "contents max-sm:hidden" : "contents"}>
+          <NodeAgentPromptsButton
+            orpc={orpc}
+            nodeId={node.id}
+            nodeName={node.name}
+            nodeType="html"
+          />
+          <NodePinButton
+            payload={{ nodeId: node.id }}
+            tabId={nodeSidePanelTabId("html", node.id)}
+            tabType="html-preview"
+            title={node.name}
+          />
+          <NodeActionsMenu
+            nodeId={node.id}
+            nodeName={node.name}
+            nodeSlug={node.slug}
+            nodeType="html"
+            orpc={orpc}
+          />
+        </div>
       </div>
     ),
     true,

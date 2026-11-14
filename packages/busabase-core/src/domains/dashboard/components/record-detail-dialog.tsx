@@ -9,6 +9,7 @@ import { mergeSearchIntoHref } from "../helpers/link-search";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { DialogContent } from "./localized-dialog-content";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
+import { RecordCopyLinkButton } from "./record-copy-link-button";
 import { RecordDetailView } from "./record-views";
 import { NodeDetailSkeleton } from "./skeletons";
 
@@ -75,6 +76,9 @@ export function RecordDetailDialog({
                   <Pencil aria-hidden="true" size={14} />
                   {messages.recordView.edit}
                 </Link>
+              ) : null}
+              {record ? (
+                <RecordCopyLinkButton baseNodeId={record.base.nodeId} recordId={record.id} />
               ) : null}
               <Link
                 aria-label={messages.recordView.openFullPage}

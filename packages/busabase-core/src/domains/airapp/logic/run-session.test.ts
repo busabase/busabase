@@ -41,12 +41,15 @@ let runs = 0;
 let emit: ((event: AirAppRuntimeEvent) => void) | null = null;
 let finish: (() => void) | null = null;
 let aborted = false;
+let localInputs: unknown[] = [];
+let remoteInputs: unknown[] = [];
 
 vi.mock("./local-runtime", () => ({
   runAirAppLocal: async function* (
-    _input: unknown,
+    input: unknown,
     signal?: AbortSignal,
   ): AsyncGenerator<AirAppRuntimeEvent> {
+    localInputs.push(input);
     runs += 1;
     const queue: AirAppRuntimeEvent[] = [];
     let wake: (() => void) | null = null;
@@ -95,6 +98,7 @@ vi.mock("./sandock-runtime", () => ({
     input: unknown,
     signal?: AbortSignal,
   ): AsyncGenerator<AirAppRuntimeEvent> {
+    remoteInputs.push(input);
     const { runAirAppLocal } = await import("./local-runtime");
     yield* runAirAppLocal(input as Parameters<typeof runAirAppLocal>[0], signal);
   },
@@ -126,6 +130,8 @@ let mod: typeof import("./run-session");
 
 beforeEach(async () => {
   runs = 0;
+  localInputs = [];
+  remoteInputs = [];
   emit = null;
   finish = null;
   aborted = false;
@@ -474,5 +480,106 @@ describe("engines this space's plan does not include", () => {
       const session = mod.runOrAttachSession({ ...INPUT, engine: "remote" as const });
       await expect(session.next()).rejects.toThrow(/not offered by this deployment/);
     });
+  });
+});
+
+describe("remote Vault environment snapshots", () => {
+  const remoteInput = { ...INPUT, engine: "remote" as const };
+
+  const startAndDetach = async (engine: "local" | "remote" = "remote") => {
+    const count = runs;
+    const stream = mod.runOrAttachSession({ ...INPUT, engine });
+    const pending = stream.next();
+    await vi.waitFor(() => expect(runs).toBe(count + 1));
+    emit?.({ type: "log", line: "started\n" });
+    await pending;
+    await stream.return(undefined as never);
+  };
+
+  it("copies the host-resolved values for each owner without changing process.env", async () => {
+    const firstEnv = {
+      ARGOCD_AWS_TOKEN: "first-owner-token",
+      ARGOCD_AWS_BASE_URL: "https://argo.one",
+    };
+    const previousProcessValue = process.env.ARGOCD_AWS_TOKEN;
+    await runWithBusabaseContext({ vaultRuntimeEnv: firstEnv }, () => startAndDetach());
+    firstEnv.ARGOCD_AWS_TOKEN = "rotated-after-start";
+    firstEnv.ARGOCD_AWS_BASE_URL = "https://changed.one";
+
+    currentOwner = "user-2";
+    await runWithBusabaseContext(
+      { vaultRuntimeEnv: { ARGOCD_AWS_TOKEN: "second-owner-token" } },
+      () => startAndDetach(),
+    );
+    expect(remoteInputs).toEqual([
+      expect.objectContaining({
+        owner: "user-1",
+        runtimeEnv: {
+          ARGOCD_AWS_TOKEN: "first-owner-token",
+          ARGOCD_AWS_BASE_URL: "https://argo.one",
+        },
+      }),
+      expect.objectContaining({
+        owner: "user-2",
+        runtimeEnv: { ARGOCD_AWS_TOKEN: "second-owner-token" },
+      }),
+    ]);
+    expect(process.env.ARGOCD_AWS_TOKEN).toBe(previousProcessValue);
+    expect(JSON.stringify(mod.listRunSessions())).not.toContain("owner-token");
+  });
+
+  it("does not forward Vault to the local runtime", async () => {
+    await runWithBusabaseContext({ vaultRuntimeEnv: { ARGOCD_AWS_TOKEN: "remote-only" } }, () =>
+      startAndDetach("local"),
+    );
+    expect(remoteInputs).toEqual([]);
+    expect(localInputs[0]).not.toHaveProperty("runtimeEnv");
+  });
+
+  it("keeps a live run's startup snapshot until Stop then Run", async () => {
+    await runWithBusabaseContext({ vaultRuntimeEnv: { ARGOCD_AWS_TOKEN: "original" } }, () =>
+      startAndDetach(),
+    );
+    await runWithBusabaseContext({ vaultRuntimeEnv: { ARGOCD_AWS_TOKEN: "rotated" } }, async () => {
+      expect(await attachAndCollect(mod.runOrAttachSession(remoteInput), 1)).toEqual([
+        { type: "log", line: "started\n" },
+      ]);
+      expect(remoteInputs).toHaveLength(1);
+      await mod.stopRunSession(INPUT.nodeId);
+      await startAndDetach();
+    });
+    expect(remoteInputs[1]).toMatchObject({ runtimeEnv: { ARGOCD_AWS_TOKEN: "rotated" } });
+  });
+
+  it("does not access Vault before permission and engine/plan gates pass", async () => {
+    const readValue = vi.fn(() => "must-not-be-read");
+    const vaultRuntimeEnv = Object.defineProperty({}, "TOKEN", {
+      enumerable: true,
+      get: readValue,
+    });
+    const { assertNodePermission } = await import("../../../logic/node-acl");
+    vi.mocked(assertNodePermission).mockRejectedValueOnce(new Error("permission denied"));
+    await runWithBusabaseContext({ vaultRuntimeEnv }, async () => {
+      await expect(mod.runOrAttachSession(remoteInput).next()).rejects.toThrow("permission denied");
+    });
+    availableEngines = ["browser"];
+    await runWithBusabaseContext({ vaultRuntimeEnv }, async () => {
+      await expect(mod.runOrAttachSession(remoteInput).next()).rejects.toThrow("not offered");
+    });
+    availableEngines = ["browser", "remote"];
+    await runWithBusabaseContext(
+      {
+        vaultRuntimeEnv,
+        resolveAirAppEngineLock: async () => ({
+          lockedEngines: ["remote"],
+          planLabel: "Plus",
+        }),
+      },
+      async () => {
+        await expect(mod.runOrAttachSession(remoteInput).next()).rejects.toThrow("not included");
+      },
+    );
+    expect(readValue).not.toHaveBeenCalled();
+    expect(remoteInputs).toEqual([]);
   });
 });

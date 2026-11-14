@@ -1828,6 +1828,10 @@ export const dashboardDe: CoreI18nMessages = {
     paginationPage: "Zu Seite {page}",
     paginationCurrentPage: "Seite {page}, aktuelle Seite",
     paginationRetry: "Erneut versuchen",
+    paginationDepthLimit:
+      "Seitenzahlen reichen bis zu den ersten {limit} Datensätzen. Filtern oder sortieren Sie, um den Rest zu finden.",
+    viewTooLarge:
+      "Diese Ansicht hat zu viele Datensätze, um sie zu verarbeiten. Grenzen Sie sie mit einem Filter ein und versuchen Sie es erneut.",
     hideArchivedRecords: "Archivierte Datensätze ausblenden",
     showArchivedRecords: "Archivierte Datensätze anzeigen ({count})",
     createDeleteRequestTitle: "Löschanfrage erstellen?",
@@ -2423,7 +2427,7 @@ export const dashboardDe: CoreI18nMessages = {
     typeHints: {
       folder: "Fasst zusammengehörige Elemente zusammen, wie ein Ordner auf Ihrem Computer.",
       base: "Eine Tabelle mit Datenbankregeln – typisierte Spalten, Filter, gespeicherte Ansichten.",
-      doc: "Ein geschriebenes Dokument, das vor jeder Änderung geprüft wird.",
+      doc: "Ein geschriebenes Dokument – Notizen, Spezifikationen, Berichte.",
       file: "Eine einzelne hochgeladene Datei – ein PDF, ein Bild, beliebig.",
       skill: "Schriftliche Anweisungen, die ein Agent liest, bevor er Ihre Daten anfasst.",
       drive: "Ein einfacher Dateihaufen, den ein Agent lesen kann.",

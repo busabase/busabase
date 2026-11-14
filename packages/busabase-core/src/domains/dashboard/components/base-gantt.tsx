@@ -1,9 +1,11 @@
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
+import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BaseFieldVO, BaseVO, GanttScale, RecordVO, ViewVO } from "busabase-contract/types";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useState } from "react";
 import { useSearch } from "wouter";
-import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import {
   calendarDayToLocalDate,
@@ -14,6 +16,8 @@ import {
 } from "../../base/utils/date-value";
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { retryRecordRead } from "../helpers/query-state";
+import { useDashboardOrpc } from "../orpc-context";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { DragReviewNotice } from "./base-kanban";
 import { useWorkspacePermissionLevel } from "./split-submit-button";
@@ -22,6 +26,11 @@ const DAY_MS = 86_400_000;
 // Pixels per day per scale — month packs tighter, week spreads out.
 const DAY_PX: Record<GanttScale, number> = { month: 5, week: 22 };
 const TITLE_COL_PX = 200;
+// Rows per request. The timeline reads the view a page at a time, so a Base
+// of any size opens on its first rows; an ordinary project — up to
+// GANTT_AUTO_PAGES pages — still shows every row without a click.
+const GANTT_PAGE_SIZE = 100;
+const GANTT_AUTO_PAGES = 5;
 
 const dateFieldTypes = ["date", "created_time", "updated_time"] as const;
 
@@ -90,14 +99,14 @@ type Row = { record: RecordVO; start: Date; end: Date };
 export function BusaBaseGantt({
   activeView,
   base,
+  client,
   fields,
-  records,
   onPatchRecord,
 }: {
   activeView: ViewVO | null;
   base: BaseVO | null;
+  client: BusabaseDashboardApiClient;
   fields: BaseFieldVO[];
-  records: RecordVO[];
   /** Reschedule: patch start/end on a record and auto-merge, no navigation. */
   onPatchRecord?: (
     record: RecordVO,
@@ -121,6 +130,45 @@ export function BusaBaseGantt({
     activeView?.config.startFieldSlug,
     activeView?.config.endFieldSlug,
   );
+  const baseId = base?.id ?? "";
+  const orpc = useDashboardOrpc();
+  // The view's own filters and sorts decide the rows, server-side, exactly as
+  // its table would list them; records without both dates are skipped below.
+  const rowsQuery = useInfiniteQuery({
+    enabled: Boolean(baseId),
+    retry: retryRecordRead,
+    getNextPageParam: (last: { page: number; totalPages: number }) =>
+      last.page < last.totalPages ? last.page + 1 : undefined,
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
+      client.listRecordsPage({
+        baseId,
+        page: pageParam as number,
+        pageSize: GANTT_PAGE_SIZE,
+        ...(activeView?.id ? { viewId: activeView.id } : {}),
+      }),
+    // Under the canonical records prefix, so live-sync and edits refresh it.
+    queryKey: [
+      ...(orpc?.records.listPage.key() ?? ["busabase"]),
+      "gantt-rows",
+      baseId,
+      activeView?.id ?? "",
+    ],
+  });
+  const loadedPages = rowsQuery.data?.pages.length ?? 0;
+  useEffect(() => {
+    if (
+      loadedPages > 0 &&
+      loadedPages < GANTT_AUTO_PAGES &&
+      rowsQuery.hasNextPage &&
+      !rowsQuery.isFetchingNextPage
+    ) {
+      void rowsQuery.fetchNextPage();
+    }
+  }, [loadedPages, rowsQuery.hasNextPage, rowsQuery.isFetchingNextPage, rowsQuery.fetchNextPage]);
+  const records = (rowsQuery.data?.pages ?? []).flatMap((page) => page.records);
+  const firstPage = rowsQuery.data?.pages[0];
+  const total = `${firstPage?.total ?? 0}${firstPage?.totalCapped ? "+" : ""}`;
   const baseSlug = base?.slug ?? records[0]?.base.slug ?? "";
 
   // Window listeners drive the active drag; committed on mouse-up.
@@ -149,6 +197,33 @@ export function BusaBaseGantt({
       <div className="px-2 py-6 text-muted-foreground text-sm">{messages.base.ganttNoDates}</div>
     );
   }
+  if (rowsQuery.isPending) {
+    return <div className="px-2 py-6 text-muted-foreground text-sm">{messages.common.loading}</div>;
+  }
+
+  // How much of the view is on screen, and the way to the rest.
+  const loadFooter =
+    rowsQuery.isError || rowsQuery.hasNextPage ? (
+      <div className="sticky left-0 flex flex-wrap items-center gap-3 px-2 py-3 text-muted-foreground text-xs">
+        <span className="tabular-nums">
+          {rowsQuery.isError
+            ? presentCoreError(messages, locale, rowsQuery.error, messages.shell.operationFailed)
+            : fmt(messages.base.paginationRange, { from: 1, to: records.length, total })}
+        </span>
+        <button
+          className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+          disabled={rowsQuery.isFetchingNextPage}
+          onClick={() => void (rowsQuery.isError ? rowsQuery.refetch() : rowsQuery.fetchNextPage())}
+          type="button"
+        >
+          {rowsQuery.isError
+            ? messages.base.paginationRetry
+            : rowsQuery.isFetchingNextPage
+              ? messages.common.loading
+              : messages.search.loadMore}
+        </button>
+      </div>
+    ) : null;
 
   const rows: Row[] = [];
   for (const record of records) {
@@ -161,7 +236,10 @@ export function BusaBaseGantt({
 
   if (rows.length === 0) {
     return (
-      <div className="px-2 py-6 text-muted-foreground text-sm">{messages.base.ganttNoDates}</div>
+      <>
+        <div className="px-2 py-6 text-muted-foreground text-sm">{messages.base.ganttNoDates}</div>
+        {loadFooter}
+      </>
     );
   }
 
@@ -345,6 +423,7 @@ export function BusaBaseGantt({
           );
         })}
       </div>
+      {loadFooter}
     </div>
   );
 }

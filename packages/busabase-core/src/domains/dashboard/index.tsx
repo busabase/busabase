@@ -28,7 +28,6 @@ import type {
   RecordVO,
   ViewVO,
 } from "busabase-contract/types";
-import { flattenViewFilters } from "busabase-contract/types";
 import { useSidebar } from "kui/sidebar";
 import {
   type FileTooLargeErrorData,
@@ -142,9 +141,14 @@ import {
   shouldMountResidentAirApp,
   shouldShowRouteGuardSkeleton,
 } from "./helpers/node-route-guard";
-import { retryUnlessNotFound, shouldShowInitialLoadingState } from "./helpers/query-state";
+import {
+  retryRecordRead,
+  retryUnlessNotFound,
+  shouldShowInitialLoadingState,
+} from "./helpers/query-state";
 import { hasStaleRecordFind, readRecordFind, writeRecordFind } from "./helpers/record-find-url";
 import { readRecordPagination, writeRecordPagination } from "./helpers/record-pagination-url";
+import { readRecordPreviewId, writeRecordPreviewId } from "./helpers/record-preview-url";
 import {
   isFullReadBehind,
   mergeRecordSnapshots,
@@ -215,10 +219,6 @@ const flattenNodesForCache = (nodes: NodeVO[]): KnownNode[] =>
 const RECORDS_PAGE_SIZE = 50;
 
 type RestorableNode = Pick<NodeVO, "id" | "name" | "type">;
-
-// Field types whose sort can be pushed to the DB (their typed value column orders
-// the same way the client would). Others keep the client-side locale sort.
-const SERVER_SORTABLE_FIELD_TYPES = new Set(["number", "auto_number", "date"]);
 
 function SidebarAwareSearchDialog({
   open,
@@ -893,16 +893,9 @@ function BusabaseDashboardContent({
               baseChildParams?.childId !== "new")))),
   );
   const recordPaginationUrl = useMemo(() => readRecordPagination(search), [search]);
-  // Kanban and Calendar are listed here not because they show a pagination
-  // bar, but because neither needs the whole Base anymore: Kanban's columns
-  // and Calendar's month grid each fetch their own scoped slice. Keeping a
-  // view type OUT of this set is what routes it into the drain loop below.
-  const usesPagePagination =
-    selectedBaseView === null ||
-    selectedBaseView.type === "table" ||
-    selectedBaseView.type === "gallery" ||
-    selectedBaseView.type === "kanban" ||
-    selectedBaseView.type === "calendar";
+  // Every view reads one page here; no view needs the whole Base. Table and
+  // Gallery render this page. Kanban columns, the Calendar month and the Gantt
+  // rows fetch their own scoped slices, and use this page only for its total.
   // The Table/Grid is a dense preview surface. Gallery, Kanban and Calendar
   // keep full rows because they render covers and cards rather than cells.
   const usesCompactRecordList = selectedBaseView === null || selectedBaseView.type === "table";
@@ -950,74 +943,15 @@ function BusabaseDashboardContent({
         : undefined,
     [usesCompactRecordList, recordFindValue],
   );
+  const collectionSearch = useMemo(() => writeRecordPreviewId(search, null), [search]);
   const baseTableViewState = useBaseCollectionState({
     identity: JSON.stringify([cacheSpaceKey, currentUserId ?? "anonymous"]),
     scope: collectionScope,
-    search,
+    // Opening or closing the record dialog is not a new query: keep selection
+    // and scroll when only `?record=` changes.
+    search: collectionSearch,
     pagination: recordPaginationUrl,
     onPaginationChange: setRecordPaginationUrl,
-  });
-  // Carry the active view's filters (tagged with each field's type) to the server
-  // for best-effort push-down; the client filter below stays the exact authority.
-  const activeViewFilters = useMemo(() => {
-    // Flattening OR branches into the old AND-only SQL hint would lose rows.
-    const config = selectedBaseView?.config;
-    if (
-      config?.filterConjunction === "or" ||
-      config?.filters.some((filter) => "conditions" in filter)
-    )
-      return undefined;
-    const filters = flattenViewFilters(config?.filters ?? []);
-    if (filters.length === 0) {
-      return undefined;
-    }
-    const fieldTypeBySlug = new Map(
-      (activeBase?.fields ?? []).map((field) => [field.slug, field.type]),
-    );
-    return filters.map((filter) => ({
-      fieldSlug: filter.fieldSlug,
-      fieldType: fieldTypeBySlug.get(filter.fieldSlug),
-      operator: filter.operator,
-      value: filter.value,
-    }));
-  }, [selectedBaseView, activeBase?.fields]);
-  // A single number/date sort with no filters can be pushed to the DB, which then
-  // orders + paginates authoritatively — so the base doesn't have to be pulled
-  // into the browser to sort. (Filters are superset-pushed and the client still
-  // narrows them, so a filtered view stays client-side. Multi-column and
-  // text/other sorts also stay client-side.)
-  const activeViewSort = useMemo(() => {
-    const config = selectedBaseView?.config;
-    if (!config || config.filters.length > 0 || config.sorts.length !== 1) {
-      return undefined;
-    }
-    const sort = config.sorts[0];
-    const fieldType = (activeBase?.fields ?? []).find((f) => f.slug === sort.fieldSlug)?.type;
-    if (!fieldType || !SERVER_SORTABLE_FIELD_TYPES.has(fieldType)) {
-      return undefined;
-    }
-    return { fieldSlug: sort.fieldSlug, fieldType, direction: sort.direction };
-  }, [selectedBaseView, activeBase?.fields]);
-  const serverSortedView = Boolean(activeViewSort);
-  // Board/timeline views still need their entire candidate set. Keep their
-  // cursor query isolated from the random-access Table/Gallery query below.
-  const recordsInfiniteQuery = useInfiniteQuery({
-    ...orpc.records.list.infiniteOptions({
-      input: (pageParam: string | undefined) => ({
-        baseId: activeBase?.id,
-        cursor: pageParam,
-        limit: RECORDS_PAGE_SIZE,
-        filters: activeViewFilters,
-        sort: activeViewSort,
-      }),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    }),
-    enabled:
-      Boolean(activeBase?.id) &&
-      !usesPagePagination &&
-      !readOnlyRecordPreview &&
-      !isResolvingBaseRoute,
   });
   const recordsPageQuery = useQuery({
     ...orpc.records.listPage.queryOptions({
@@ -1030,12 +964,8 @@ function BusabaseDashboardContent({
         pageSize: recordPaginationUrl.pageSize,
       },
     }),
-    enabled:
-      Boolean(activeBase?.id) &&
-      usesPagePagination &&
-      !readOnlyRecordPreview &&
-      !isResolvingBaseRoute,
-    retry: recordFindInput ? false : undefined,
+    enabled: Boolean(activeBase?.id) && !readOnlyRecordPreview && !isResolvingBaseRoute,
+    retry: recordFindInput ? false : retryRecordRead,
     placeholderData: (previousData, previousQuery) => {
       const previousInput = (
         previousQuery?.queryKey[1] as
@@ -1059,14 +989,10 @@ function BusabaseDashboardContent({
     },
   });
   const baseRecords = useMemo(
-    () =>
-      usesPagePagination
-        ? (recordsPageQuery.data?.records ?? [])
-        : (recordsInfiniteQuery.data?.pages.flatMap((page) => page.records) ?? []),
-    [recordsInfiniteQuery.data, recordsPageQuery.data?.records, usesPagePagination],
+    () => recordsPageQuery.data?.records ?? [],
+    [recordsPageQuery.data?.records],
   );
   const recordsPagination = useMemo(() => {
-    if (!usesPagePagination) return undefined;
     const pageData = recordsPageQuery.data;
     const changePage = (page: number) => {
       setRecordPaginationUrl(page);
@@ -1077,6 +1003,8 @@ function BusabaseDashboardContent({
       pageSize: recordPaginationUrl.pageSize,
       total: pageData?.total ?? 0,
       totalPages: pageData?.totalPages ?? 0,
+      totalCapped: pageData?.totalCapped,
+      pagesCapped: pageData?.pagesCapped,
       isLoading: recordsPageQuery.isLoading,
       isFetching: recordsPageQuery.isFetching,
       error: recordsPageQuery.error
@@ -1097,7 +1025,7 @@ function BusabaseDashboardContent({
         void recordsPageQuery.refetch();
       },
       getPageHref: (page: number) => {
-        const nextSearch = writeRecordPagination(search, {
+        const nextSearch = writeRecordPagination(collectionSearch, {
           page,
           pageSize: recordPaginationUrl.pageSize,
         });
@@ -1115,37 +1043,15 @@ function BusabaseDashboardContent({
     recordsPageQuery.isFetching,
     recordsPageQuery.isLoading,
     recordsPageQuery.refetch,
-    search,
+    collectionSearch,
     setRecordPaginationUrl,
-    usesPagePagination,
   ]);
   const isBaseViewRoute = Boolean(isBaseChildRoute && selectedBaseView);
-  // Kanban/Calendar/Gantt operate on the whole set. Their existing cursor API
-  // remains the sequential traversal path and is drained in the background.
-  const viewNeedsAllRecords = Boolean(selectedBaseView && !usesPagePagination);
-  useEffect(() => {
-    if (
-      viewNeedsAllRecords &&
-      recordsInfiniteQuery.hasNextPage &&
-      !recordsInfiniteQuery.isFetchingNextPage
-    ) {
-      void recordsInfiniteQuery.fetchNextPage();
-    }
-  }, [
-    viewNeedsAllRecords,
-    recordsInfiniteQuery.hasNextPage,
-    recordsInfiniteQuery.isFetchingNextPage,
-    recordsInfiniteQuery.fetchNextPage,
-  ]);
   // A record deletion can make the current page disappear. Converge to the new
   // last page rather than leaving an empty, out-of-range table.
   useEffect(() => {
     const totalPages = recordsPageQuery.data?.totalPages;
-    if (
-      usesPagePagination &&
-      totalPages !== undefined &&
-      recordPaginationUrl.page > Math.max(1, totalPages)
-    ) {
+    if (totalPages !== undefined && recordPaginationUrl.page > Math.max(1, totalPages)) {
       setRecordPaginationUrl(Math.max(1, totalPages), recordPaginationUrl.pageSize, true);
     }
   }, [
@@ -1153,7 +1059,6 @@ function BusabaseDashboardContent({
     recordPaginationUrl.pageSize,
     recordsPageQuery.data?.totalPages,
     setRecordPaginationUrl,
-    usesPagePagination,
   ]);
   const isRecordRoute = Boolean(
     isBaseChildRoute &&
@@ -1168,35 +1073,90 @@ function BusabaseDashboardContent({
   // Keep the clicked snapshot while the normal detail query hydrates it.
   const recordPreviewScope = `${cacheSpaceKey}:${currentUserId ?? "anonymous"}:${location}`;
   const [recordPreview, setRecordPreview] = useState<{
-    record: RecordVO;
+    recordId: string;
+    /** The clicked snapshot; null when the dialog was opened from the URL. */
+    record: RecordVO | null;
     scope: string;
     openedAt: number;
     trigger: HTMLElement | null;
   } | null>(null);
+  const previewRecordId =
+    recordPreview?.scope === recordPreviewScope ? recordPreview.recordId : null;
   const previewRecord = recordPreview?.scope === recordPreviewScope ? recordPreview.record : null;
+  // The open dialog is mirrored into `?record=` with replace, so the address
+  // bar can be copied and reopened without adding a history entry per preview.
+  // Hosts on a locked location ignore the write and keep the state alone.
+  const writeRecordPreviewUrl = useCallback(
+    (recordId: string | null) => {
+      if (readOnlyRecordPreview || readRecordPreviewId(search) === recordId) return;
+      const nextSearch = writeRecordPreviewId(search, recordId);
+      rawSetLocation(`${locationPath}${nextSearch ? `?${nextSearch}` : ""}`, { replace: true });
+    },
+    [locationPath, rawSetLocation, readOnlyRecordPreview, search],
+  );
   const openRecordPreview = useCallback(
     (record: RecordVO) => {
       setRecordPreview({
+        recordId: record.id,
         record,
         scope: recordPreviewScope,
         openedAt: Date.now(),
         trigger: document.activeElement instanceof HTMLElement ? document.activeElement : null,
       });
+      writeRecordPreviewUrl(record.id);
     },
-    [recordPreviewScope],
+    [recordPreviewScope, writeRecordPreviewUrl],
   );
+  const closeRecordPreview = useCallback(() => {
+    setRecordPreview(null);
+    writeRecordPreviewUrl(null);
+  }, [writeRecordPreviewUrl]);
   // A different route/workspace closes the preview permanently, including when
   // returning with Back. The underlying calendar stays mounted while it is open.
   useEffect(() => {
     setRecordPreview((current) => (current?.scope === recordPreviewScope ? current : null));
   }, [recordPreviewScope]);
+  // The URL drives the dialog whenever it changes on a collection: a pasted
+  // link, a refresh, Back to an entry that had a dialog open, or the bare Base
+  // route redirecting to its default view. Our own writes land here as no-ops.
+  const urlPreviewRecordId =
+    collectionScope && !readOnlyRecordPreview ? readRecordPreviewId(search) : null;
+  const syncedUrlPreview = useRef<{ scope: string; recordId: string | null } | null>(null);
+  useEffect(() => {
+    // Off the collection (e.g. its full record page) the next return re-syncs,
+    // so Back to `?record=…` reopens the dialog the address still names.
+    if (!collectionScope) {
+      syncedUrlPreview.current = null;
+      return;
+    }
+    const previous = syncedUrlPreview.current;
+    if (previous?.scope === recordPreviewScope && previous.recordId === urlPreviewRecordId) return;
+    syncedUrlPreview.current = { scope: recordPreviewScope, recordId: urlPreviewRecordId };
+    if (!urlPreviewRecordId) {
+      // Only an address that dropped the param closes the dialog; a host that
+      // cannot write the URL never had it, and keeps its click-opened dialog.
+      if (previous?.recordId) setRecordPreview(null);
+      return;
+    }
+    setRecordPreview((current) =>
+      current?.scope === recordPreviewScope && current.recordId === urlPreviewRecordId
+        ? current
+        : {
+            recordId: urlPreviewRecordId,
+            record: null,
+            scope: recordPreviewScope,
+            openedAt: Date.now(),
+            trigger: null,
+          },
+    );
+  }, [collectionScope, recordPreviewScope, urlPreviewRecordId]);
 
   const selectedRecordId =
     isEditRecordRoute && editRecordParams?.recordId
       ? editRecordParams.recordId
       : isRecordRoute && baseChildParams?.childId !== "new"
         ? baseChildParams?.childId
-        : (previewRecord?.id ?? null);
+        : previewRecordId;
   const compactPageContainsSelectedRecord =
     usesCompactRecordList &&
     Boolean(selectedRecordId) &&
@@ -1207,9 +1167,11 @@ function BusabaseDashboardContent({
   // React Query and folded into `records`, as are the records they link to.
   const fallbackRecordQuery = useQuery({
     ...orpc.records.get.queryOptions({ input: { recordId: selectedRecordId ?? "" } }),
+    // A shared link can name a record deleted since; say so at once.
+    retry: retryUnlessNotFound,
     // Hosts can keep ordinary reads fresh for tens of seconds. A reopened
     // preview must still re-read the record, even when its cache is that young.
-    ...(previewRecord ? { staleTime: 0 } : {}),
+    ...(previewRecordId ? { staleTime: 0 } : {}),
     // A previewed table row is bounded, so it never seeds the detail read. Host
     // seeds are full records, and read-only embeds have nothing else to render.
     initialData:
@@ -1220,7 +1182,7 @@ function BusabaseDashboardContent({
     enabled:
       !readOnlyRecordPreview &&
       Boolean(selectedRecordId) &&
-      (Boolean(previewRecord) ||
+      (Boolean(previewRecordId) ||
         shouldReadFullRecordForRoute ||
         !baseRecords.some((item) => item.id === selectedRecordId)),
   });
@@ -1248,9 +1210,7 @@ function BusabaseDashboardContent({
     orpc,
   });
   const records = useMemo(() => {
-    const listFetchedAt = usesPagePagination
-      ? recordsPageQuery.dataUpdatedAt
-      : recordsInfiniteQuery.dataUpdatedAt;
+    const listFetchedAt = recordsPageQuery.dataUpdatedAt;
     return mergeRecordSnapshots([
       { record: previewRecord ?? undefined, fetchedAt: recordPreview?.openedAt ?? 0 },
       { record: fallbackRecordQuery.data, fetchedAt: fallbackRecordQuery.dataUpdatedAt },
@@ -1269,11 +1229,9 @@ function BusabaseDashboardContent({
     fallbackRecordQuery.data,
     fallbackRecordQuery.dataUpdatedAt,
     linkedRecords.snapshots,
-    usesPagePagination,
     recordsPageQuery.dataUpdatedAt,
-    recordsInfiniteQuery.dataUpdatedAt,
   ]);
-  const requiresFullRecordRead = Boolean(previewRecord) || shouldReadFullRecordForRoute;
+  const requiresFullRecordRead = Boolean(previewRecordId) || shouldReadFullRecordForRoute;
   const fullRecordRead =
     fallbackRecordQuery.data?.id === selectedRecordId ? fallbackRecordQuery.data : null;
   const listedRecord = records.find((record) => record.id === selectedRecordId);
@@ -1752,8 +1710,9 @@ function BusabaseDashboardContent({
       // dragged card lands in its new column while both counts stay stale.
       queryClient.invalidateQueries({ queryKey: ["busabase", "kanban-column"] }),
       queryClient.invalidateQueries({ queryKey: ["busabase", "kanban-counts"] }),
-      // Same reasoning for Calendar's month-scoped reads.
+      // Same reasoning for Calendar's month-scoped and per-day reads.
       queryClient.invalidateQueries({ queryKey: ["busabase", "calendar-range"] }),
+      queryClient.invalidateQueries({ queryKey: ["busabase", "calendar-day"] }),
       queryClient.invalidateQueries({ queryKey: listKeys.auditEvents }),
       queryClient.invalidateQueries({
         queryKey: orpc.bases.listViews.queryOptions({ input: { baseId: activeBase?.id ?? "" } })
@@ -2210,8 +2169,9 @@ function BusabaseDashboardContent({
         autoMerge: options?.mergeImmediately === true,
       });
       if (result.materialized) {
-        if (previewRecord?.id === record.id) {
-          setRecordPreview((current) => (current?.record.id === record.id ? null : current));
+        if (previewRecordId === record.id) {
+          setRecordPreview((current) => (current?.recordId === record.id ? null : current));
+          writeRecordPreviewUrl(null);
           await refresh();
           return;
         }
@@ -2222,7 +2182,7 @@ function BusabaseDashboardContent({
       setLocation(`/inbox/${result.id}`);
       await refresh();
     },
-    [client, previewRecord?.id, refresh, setLocation],
+    [client, previewRecordId, refresh, setLocation, writeRecordPreviewUrl],
   );
 
   // Bulk delete from the table's multi-select toolbar. There is no batch
@@ -3571,7 +3531,7 @@ function BusabaseDashboardContent({
           archivedRecords={archivedRecordsForBase}
           archivedPagination={archivedRecordsPagination}
           records={records}
-          orderedRecords={usesPagePagination || serverSortedView ? baseRecords : undefined}
+          orderedRecords={baseRecords}
           orpc={orpc}
           pagination={recordsPagination}
           recordFind={
@@ -3726,8 +3686,6 @@ function BusabaseDashboardContent({
     setLocation,
     recordsPagination,
     recordLoadedNode,
-    serverSortedView,
-    usesPagePagination,
     baseRecords,
     recordRouteError,
     isRecordReadPending,
@@ -3768,9 +3726,17 @@ function BusabaseDashboardContent({
         renderer={AirAppDetail}
         scopeKey={airAppKeepAliveScopeKey}
       />
-      {previewRecord ? (
+      {previewRecordId ? (
         <RecordDetailDialog
-          baseSlug={activeBase?.slug ?? activeBase?.nodeId ?? activeBase?.id ?? ""}
+          // A pasted `?record=` can name a record from another Base; its own
+          // links (full page, edit, activity) must follow the record.
+          baseSlug={
+            activeRecord?.base.slug ??
+            activeBase?.slug ??
+            activeBase?.nodeId ??
+            activeBase?.id ??
+            ""
+          }
           client={client}
           error={
             fallbackRecordQuery.error
@@ -3783,8 +3749,8 @@ function BusabaseDashboardContent({
               : null
           }
           isLoading={isRecordReadPending}
-          key={previewRecord.id}
-          onClose={() => setRecordPreview(null)}
+          key={previewRecordId}
+          onClose={closeRecordPreview}
           onDeleteChangeRequest={submitDeleteRecord}
           record={fallbackRecordQuery.error ? null : activeRecord}
           records={records}

@@ -1800,6 +1800,10 @@ export const dashboardPt: CoreI18nMessages = {
     paginationPage: "Ir para a página {page}",
     paginationCurrentPage: "Página {page}, página atual",
     paginationRetry: "Tentar novamente",
+    paginationDepthLimit:
+      "Os números de página chegam aos primeiros {limit} registros. Filtre ou ordene para encontrar o restante.",
+    viewTooLarge:
+      "Esta visualização tem registros demais para processar. Adicione um filtro para reduzi-la e tente novamente.",
     hideArchivedRecords: "Ocultar registros arquivados",
     showArchivedRecords: "Mostrar registros arquivados ({count})",
     createDeleteRequestTitle: "Criar solicitação de exclusão?",
@@ -2392,7 +2396,7 @@ export const dashboardPt: CoreI18nMessages = {
     typeHints: {
       folder: "Agrupa itens relacionados, como uma pasta no seu computador.",
       base: "Uma planilha com regras de banco de dados — colunas tipadas, filtros, visualizações salvas.",
-      doc: "Um documento escrito, revisado antes de ser alterado.",
+      doc: "Um documento escrito — notas, especificações, relatórios.",
       file: "Um único arquivo enviado — um PDF, uma imagem, qualquer coisa.",
       skill: "Instruções escritas que um agente lê antes de mexer nos seus dados.",
       drive: "Uma pilha simples de arquivos para um agente ler.",

@@ -27,6 +27,9 @@ const LAST_VIEW_DELETE_MESSAGE =
 // Thrown (TIMEOUT) by `stopped` in logic/search-execution.ts.
 const SEARCH_TIMEOUT_MESSAGE =
   "Search took too long. Narrow the search to a Base or folder and try again.";
+// Thrown (TIMEOUT / BAD_REQUEST) by domains/base/logic/record-list-guards.ts.
+export const VIEW_TOO_LARGE_MESSAGE =
+  "This view has too many records to work through. Add a filter to narrow it, then try again.";
 const MAX_PRESENTED_ERROR_LENGTH = 300;
 
 export function localizeCoreErrorMessage(messages: CoreI18nMessages, message: string): string {
@@ -41,6 +44,9 @@ export function localizeCoreErrorMessage(messages: CoreI18nMessages, message: st
   }
   if (message === SEARCH_TIMEOUT_MESSAGE) {
     return messages.search.timedOut;
+  }
+  if (message === VIEW_TOO_LARGE_MESSAGE) {
+    return messages.base.viewTooLarge;
   }
   const slugConflictMatch = NODE_SLUG_CONFLICT_PATTERN.exec(message);
   if (slugConflictMatch) {

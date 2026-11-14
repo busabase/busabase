@@ -1717,6 +1717,8 @@ export const dashboardZhTW: CoreI18nMessages = {
     paginationPage: "前往第 {page} 頁",
     paginationCurrentPage: "第 {page} 頁，目前頁",
     paginationRetry: "重試",
+    paginationDepthLimit: "頁碼只能翻到前 {limit} 筆記錄，其餘記錄請用篩選或排序查找。",
+    viewTooLarge: "這個檢視的記錄太多，處理不過來。請新增篩選條件縮小範圍後重試。",
     hideArchivedRecords: "隱藏已封存記錄",
     showArchivedRecords: "顯示已封存記錄（{count}）",
     createDeleteRequestTitle: "建立刪除請求？",
@@ -2271,7 +2273,7 @@ export const dashboardZhTW: CoreI18nMessages = {
     typeHints: {
       folder: "把相關內容歸在一起，就像電腦裡的資料夾。",
       base: "像表格一樣填，像資料庫一樣查 —— 欄位有型別，可篩選、可存檢視。",
-      doc: "一篇文件，變更前會先經過審核。",
+      doc: "一篇文件 —— 筆記、方案、報告，都可以。",
       file: "單個上傳的檔案 —— PDF、圖片，什麼都行。",
       skill: "寫給 Agent 看的操作說明，它動你的資料前會先讀。",
       drive: "一堆純檔案，供 Agent 讀取。",

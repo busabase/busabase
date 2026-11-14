@@ -228,7 +228,11 @@ export function BaseDetailView({
         records.filter((record) => record.baseId === base?.id),
         activeView?.config,
       );
-  const isTableView = !activeView || activeView.type === "table";
+  // Table and Gallery page through one flat record list, so the pager stays
+  // docked below the scroll area. Kanban columns and the Calendar month load
+  // their own slices, and Gantt draws the whole set: none of them has a page.
+  const showsPagination =
+    !activeView || activeView.type === "table" || activeView.type === "gallery";
   return (
     <section className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
       <div
@@ -271,7 +275,7 @@ export function BaseDetailView({
           </SubmitPermissionProvider>
         </div>
       </div>
-      {isTableView && pagination ? (
+      {showsPagination && pagination ? (
         <RecordsPaginationBar
           className="mx-3 shrink-0 sm:mx-6 [&_ul]:flex-wrap [&_ul]:justify-end"
           {...pagination}

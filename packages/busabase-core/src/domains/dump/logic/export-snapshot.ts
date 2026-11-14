@@ -34,6 +34,19 @@ const STATEMENT_TIMEOUT_MS = 30_000;
 const IDENTITY_SCAN_TIMEOUT_MS = 300_000;
 const IDENTITY_BATCH = 1000;
 const SNAPSHOT_IDENTITY = "snapshot_identity";
+const SNAPSHOT_BYTES = "snapshot_bytes";
+/** Rows that may hold very large JSON are read in batches bounded by their real size. */
+const BATCH_BYTES = 16 * 1024 * 1024;
+const WIDE_BATCH_ROWS = 500;
+const WIDE_TABLES: ReadonlySet<DumpTable> = new Set([
+  "commits",
+  "operations",
+  "changeRequests",
+  "agentSessions",
+  "agentSessionEvents",
+  "agentSessionCommands",
+  "webhookDeliveries",
+]);
 const tables = [...DumpTableSchema.options];
 type Event = ExportSnapshotEventVO;
 
@@ -134,22 +147,55 @@ const assertPhysicalColumns = async (db: BusabaseDatabase): Promise<void> => {
   }
 };
 
-const pageSize = (table: DumpTable, requested: number): number =>
-  table === "commits"
-    ? 1
-    : Math.min(
-        requested,
-        [
-          "operations",
-          "changeRequests",
-          "agentSessions",
-          "agentSessionEvents",
-          "agentSessionCommands",
-          "webhookDeliveries",
-        ].includes(table)
-          ? 25
-          : 500,
-      );
+const batchRows = (table: DumpTable, requested: number): number =>
+  Math.min(requested, WIDE_TABLES.has(table) ? WIDE_BATCH_ROWS : 500);
+
+/**
+ * The exact UTF-8 size of a row's variable-length data, for batching only.
+ * `pg_column_size` would report the compressed size, and a 95 MiB payload of
+ * repeated text compresses to a few hundred KiB.
+ */
+const rowBytesSql = (table: DumpTable): SQL => {
+  const parts = Object.values(getTableColumns(DUMP_TABLE_REGISTRY[table] as never)).flatMap(
+    (value) => {
+      const column = value as AnyPgColumn;
+      const type = column.getSQLType();
+      if (type === "json" || type === "jsonb")
+        return [sql`coalesce(octet_length(${column}::text), 0)::bigint`];
+      if (type === "text" || type.startsWith("varchar"))
+        return [sql`coalesce(octet_length(${column}), 0)::bigint`];
+      return [];
+    },
+  );
+  return parts.length ? sql`(${sql.join(parts, sql` + `)})` : sql`0`;
+};
+
+interface IdentityEntry {
+  id: string;
+  bytes: number;
+}
+
+/** Group identities in cursor order; one row larger than the budget is its own batch. */
+const batchIdentities = (
+  entries: IdentityEntry[],
+  maxRows: number,
+  maxBytes: number,
+): string[][] => {
+  const batches: string[][] = [];
+  let current: string[] = [];
+  let bytes = 0;
+  for (const entry of entries) {
+    if (current.length && (current.length >= maxRows || bytes + entry.bytes > maxBytes)) {
+      batches.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(entry.id);
+    bytes += entry.bytes;
+  }
+  if (current.length) batches.push(current);
+  return batches;
+};
 
 /** Preserve PostgreSQL microseconds instead of routing timestamps through Date. */
 const snapshotColumns = (table: DumpTable): Record<string, AnyPgColumn | SQL> =>
@@ -172,50 +218,60 @@ const snapshotColumns = (table: DumpTable): Record<string, AnyPgColumn | SQL> =>
 const resultRows = (result: unknown): Array<Record<string, unknown>> =>
   Array.isArray(result) ? result : (result as { rows: Array<Record<string, unknown>> }).rows;
 
-/** Preserve SQL JSON text without expanding large payloads into another object tree. */
-const serializeCursorRow = (table: DumpTable, row: Record<string, unknown>): string => {
-  const columns = getTableColumns(DUMP_TABLE_REGISTRY[table] as never) as Record<
-    string,
-    AnyPgColumn
-  >;
-  const entries = Object.entries(columns).map(([key, column]) => {
-    const value = row[key];
+/**
+ * Preserve SQL JSON text without expanding large payloads into another object
+ * tree. Column metadata is resolved once per table, not once per row.
+ */
+const makeRowSerializer = (table: DumpTable): ((row: Record<string, unknown>) => string) => {
+  const columns = Object.entries(
+    getTableColumns(DUMP_TABLE_REGISTRY[table] as never) as Record<string, AnyPgColumn>,
+  ).map(([key, column]) => {
     const type = column.getSQLType();
-    let encoded: string | undefined;
-    if (type === "json" || type === "jsonb") {
-      // PostgreSQL has already validated this JSON. Parsing/stringifying it
-      // would keep decoded text and several wide copies of a 95 MiB payload
-      // alive alongside the escaped SSE frame. The raw token also preserves
-      // JSON strings that look like objects and legal special property names.
-      if (value !== null && typeof value !== "string")
-        throw new Error(`SQL snapshot ${table}.${key} returned invalid JSON text`);
-      encoded = value ?? "null";
-    } else {
-      // FETCH uses the raw driver; retain every registered scalar mapper and
-      // the exact timestamp text selected above.
-      const mapped =
-        value === null || type.startsWith("timestamp") ? value : column.mapFromDriverValue(value);
-      if (
-        typeof mapped === "number" &&
-        (!Number.isFinite(mapped) ||
-          (/^(smallint|integer|bigint|smallserial|serial|bigserial)\b/.test(column.getSQLType()) &&
-            !Number.isSafeInteger(mapped)))
-      )
-        throw new ORPCError("PRECONDITION_FAILED", {
-          message: `SQL snapshot ${table}.${key} cannot be represented as an exact JSON number`,
-        });
-      encoded = JSON.stringify(mapped);
-    }
-    if (encoded === undefined)
-      throw new Error(`SQL snapshot ${table}.${key} returned a missing value`);
-    return `${JSON.stringify(key)}:${encoded}`;
+    return {
+      key,
+      column,
+      token: `${JSON.stringify(key)}:`,
+      json: type === "json" || type === "jsonb",
+      timestamp: type.startsWith("timestamp"),
+      integer: /^(smallint|integer|bigint|smallserial|serial|bigserial)\b/.test(type),
+    };
   });
-  const json = `{${entries.join(",")}}`;
-  // This table alone has a deliberate credential projection; all other JSON
-  // columns remain opaque SQL text throughout the producer.
-  return table === "webhookRules"
-    ? JSON.stringify(prepareWebhookBackupRow(JSON.parse(json)))
-    : json;
+  return (row) => {
+    const entries = columns.map(({ key, column, token, json, timestamp, integer }) => {
+      const value = row[key];
+      let encoded: string | undefined;
+      if (json) {
+        // PostgreSQL has already validated this JSON. Parsing/stringifying it
+        // would keep decoded text and several wide copies of a 95 MiB payload
+        // alive alongside the escaped SSE frame. The raw token also preserves
+        // JSON strings that look like objects and legal special property names.
+        if (value !== null && typeof value !== "string")
+          throw new Error(`SQL snapshot ${table}.${key} returned invalid JSON text`);
+        encoded = value ?? "null";
+      } else {
+        // FETCH uses the raw driver; retain every registered scalar mapper and
+        // the exact timestamp text selected above.
+        const mapped = value === null || timestamp ? value : column.mapFromDriverValue(value);
+        if (
+          typeof mapped === "number" &&
+          (!Number.isFinite(mapped) || (integer && !Number.isSafeInteger(mapped)))
+        )
+          throw new ORPCError("PRECONDITION_FAILED", {
+            message: `SQL snapshot ${table}.${key} cannot be represented as an exact JSON number`,
+          });
+        encoded = JSON.stringify(mapped);
+      }
+      if (encoded === undefined)
+        throw new Error(`SQL snapshot ${table}.${key} returned a missing value`);
+      return `${token}${encoded}`;
+    });
+    const json = `{${entries.join(",")}}`;
+    // This table alone has a deliberate credential projection; all other JSON
+    // columns remain opaque SQL text throughout the producer.
+    return table === "webhookRules"
+      ? JSON.stringify(prepareWebhookBackupRow(JSON.parse(json)))
+      : json;
+  };
 };
 
 const readIdentityPage = async (
@@ -223,13 +279,17 @@ const readIdentityPage = async (
   table: DumpTable,
   cursorName: ReturnType<typeof sql.identifier>,
   limit: number,
-): Promise<string[]> => {
+): Promise<IdentityEntry[]> => {
   const result = await tx.execute(sql`FETCH FORWARD ${sql.raw(String(limit))} FROM ${cursorName}`);
   return resultRows(result).map((row) => {
     const id = row[SNAPSHOT_IDENTITY];
+    // int8 arrives as text from the raw driver.
+    const bytes = Number(row[SNAPSHOT_BYTES] ?? 0);
     if (typeof id !== "string" || !id)
       throw new Error(`SQL snapshot ${table} returned a missing identity`);
-    return id;
+    if (!Number.isFinite(bytes) || bytes < 0)
+      throw new Error(`SQL snapshot ${table} returned an invalid row size`);
+    return { id, bytes };
   });
 };
 
@@ -237,14 +297,15 @@ const readIdentityPage = async (
 const readRowsByIdentity = async (
   tx: BusabaseDatabase,
   table: DumpTable,
+  serialize: (row: Record<string, unknown>) => string,
   rowsFor: (ids: string[]) => { getSQL(): SQL },
   ids: string[],
 ) => {
-  // Raw execution, like FETCH: serializeCursorRow applies the column mappers.
+  // Raw execution, like FETCH: the serializer applies the column mappers.
   const result = await tx.execute(rowsFor(ids).getSQL());
   const rows = resultRows(result).map((row) => ({
     id: row[dumpIdentityKey(table)],
-    json: serializeCursorRow(table, row),
+    json: serialize(row),
   }));
   if (rows.length !== ids.length || rows.some((row, index) => row.id !== ids[index]))
     throw new Error(`SQL snapshot ${table} rows differ from the identities in the same snapshot`);
@@ -328,8 +389,13 @@ export const exportSnapshot = (
                 sql`${value}`.as(key),
               ]),
             );
+            const wide = WIDE_TABLES.has(table);
+            const serialize = makeRowSerializer(table);
             const identities = tx
-              .select({ identity: sql<string>`${identity}`.as(SNAPSHOT_IDENTITY) })
+              .select({
+                identity: sql<string>`${identity}`.as(SNAPSHOT_IDENTITY),
+                bytes: (wide ? rowBytesSql(table) : sql`0`).as(SNAPSHOT_BYTES),
+              })
               .from(DUMP_TABLE_REGISTRY[table] as never)
               .where(dumpSpaceScope(tx, table, spaceId))
               .orderBy(asc(ordering));
@@ -339,7 +405,10 @@ export const exportSnapshot = (
             // the sort made the first FETCH detoast and sort every payload of a
             // table (212k commits: 23 s on en_US PostgreSQL; over the statement
             // timeout on Cloud's multi-tenant tables). Rows are then read by
-            // primary key inside the same snapshot.
+            // primary key inside the same snapshot. Wide tables also carry each
+            // row's exact size so many small rows share one statement instead
+            // of paying a round trip per row, without letting a few huge rows
+            // share one result.
             await tx.execute(
               sql`DECLARE ${cursorName} NO SCROLL CURSOR FOR ${identities.getSQL()}`,
             );
@@ -375,22 +444,20 @@ export const exportSnapshot = (
                 await tx.execute(
                   sql`SELECT set_config('statement_timeout', ${String(IDENTITY_SCAN_TIMEOUT_MS)}, true)`,
                 );
-              const ids = await readIdentityPage(tx, table, cursorName, IDENTITY_BATCH);
+              const entries = await readIdentityPage(tx, table, cursorName, IDENTITY_BATCH);
               if (firstFetch) {
                 await tx.execute(
                   sql`SELECT set_config('statement_timeout', ${String(STATEMENT_TIMEOUT_MS)}, true)`,
                 );
                 firstFetch = false;
               }
-              const size = pageSize(table, parsed.data.limit);
-              for (let at = 0; at < ids.length; at += size) {
+              for (const ids of batchIdentities(
+                entries,
+                batchRows(table, parsed.data.limit),
+                BATCH_BYTES,
+              )) {
                 controller.signal.throwIfAborted();
-                const values = await readRowsByIdentity(
-                  tx,
-                  table,
-                  rowsFor,
-                  ids.slice(at, at + size),
-                );
+                const values = await readRowsByIdentity(tx, table, serialize, rowsFor, ids);
                 controller.signal.throwIfAborted();
                 for (const original of values) {
                   const id = original.id;
@@ -413,7 +480,7 @@ export const exportSnapshot = (
                   if (bufferedBytes >= EVENT_TARGET_BYTES) await flush();
                 }
               }
-              if (ids.length < IDENTITY_BATCH) break;
+              if (entries.length < IDENTITY_BATCH) break;
             }
             await tx.execute(sql`CLOSE ${cursorName}`);
             await flush();

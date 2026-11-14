@@ -1782,6 +1782,10 @@ export const dashboardJa: CoreI18nMessages = {
     paginationPage: "{page} ページへ",
     paginationCurrentPage: "{page} ページ、現在のページ",
     paginationRetry: "再試行",
+    paginationDepthLimit:
+      "ページ番号で移動できるのは最初の {limit} 件までです。残りはフィルターか並べ替えで探してください。",
+    viewTooLarge:
+      "このビューはレコードが多すぎて処理できません。フィルターで絞り込んでから、もう一度お試しください。",
     hideArchivedRecords: "アーカイブ済みレコードを非表示",
     showArchivedRecords: "アーカイブ済みレコードを表示（{count}）",
     createDeleteRequestTitle: "削除リクエストを作成しますか？",
@@ -2359,7 +2363,7 @@ export const dashboardJa: CoreI18nMessages = {
     typeHints: {
       folder: "関連するものをまとめる場所。パソコンのフォルダーと同じです。",
       base: "表計算のように書けて、データベースのように絞り込めるテーブル。",
-      doc: "1 つの文書。変更は反映前にレビューされます。",
+      doc: "1 つの文書。メモでも仕様書でも報告書でも。",
       file: "アップロードした 1 つのファイル。PDF でも画像でも。",
       skill: "エージェントが作業前に読む手順書。",
       drive: "エージェントが読むための、ただのファイル置き場。",

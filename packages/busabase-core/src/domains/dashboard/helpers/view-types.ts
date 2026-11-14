@@ -42,6 +42,10 @@ export interface RecordsPagination {
   pageSize: 25 | 50 | 100;
   total: number;
   totalPages: number;
+  /** More records match than `total` counts: show it as "at least". */
+  totalCapped?: boolean;
+  /** More records match than page numbers reach (the first 100,000). */
+  pagesCapped?: boolean;
   isLoading: boolean;
   isFetching?: boolean;
   error?: string | null;

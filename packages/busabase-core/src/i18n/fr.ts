@@ -1820,6 +1820,10 @@ export const dashboardFr: CoreI18nMessages = {
     paginationPage: "Aller à la page {page}",
     paginationCurrentPage: "Page {page}, page actuelle",
     paginationRetry: "Réessayer",
+    paginationDepthLimit:
+      "Les numéros de page couvrent les {limit} premiers enregistrements. Filtrez ou triez pour trouver les autres.",
+    viewTooLarge:
+      "Cette vue contient trop d’enregistrements pour être traitée. Ajoutez un filtre pour la réduire, puis réessayez.",
     hideArchivedRecords: "Masquer les enregistrements archivés",
     showArchivedRecords: "Afficher les enregistrements archivés ({count})",
     createDeleteRequestTitle: "Créer une demande de suppression ?",
@@ -2421,7 +2425,7 @@ export const dashboardFr: CoreI18nMessages = {
     typeHints: {
       folder: "Regroupe des éléments liés, comme un dossier sur votre ordinateur.",
       base: "Un tableur avec des règles de base de données — colonnes typées, filtres, vues enregistrées.",
-      doc: "Un document rédigé, relu avant toute modification.",
+      doc: "Un document rédigé — notes, spécifications, comptes rendus.",
       file: "Un seul fichier téléversé — un PDF, une image, n'importe quoi.",
       skill: "Des instructions écrites qu'un agent lit avant de toucher à vos données.",
       drive: "Un simple tas de fichiers à lire pour un agent.",
