@@ -6,6 +6,7 @@ import type { AirAppRuntimeEvent } from "busabase-contract/domains/airapp/contra
 type AirAppRunnerEngine = "local" | "remote";
 
 import { ORPCError } from "@orpc/server";
+import { getContextVaultRuntimeEnv } from "../../../context";
 import { assertNodePermission } from "../../../logic/node-acl";
 import { assertEngineIncludedInPlan, resolveAvailableAirAppEngines } from "./engine-availability";
 import { currentPreviewOwner } from "./local-preview-registry";
@@ -171,6 +172,7 @@ const runtimeFor = (
     files: Record<string, string>;
     binaryFiles?: Record<string, string>;
     owner: string;
+    runtimeEnv?: Record<string, string>;
   },
   signal: AbortSignal,
 ): AsyncGenerator<AirAppRuntimeEvent> => {
@@ -178,7 +180,16 @@ const runtimeFor = (
     case "remote":
       return runAirAppSandock(input, signal);
     case "local":
-      return runAirAppLocal({ ...input, engine }, signal);
+      return runAirAppLocal(
+        {
+          nodeId: input.nodeId,
+          files: input.files,
+          binaryFiles: input.binaryFiles,
+          owner: input.owner,
+          engine,
+        },
+        signal,
+      );
     default: {
       const exhaustive: never = engine;
       throw new Error(`Unknown AirApp engine: ${exhaustive}`);
@@ -190,6 +201,7 @@ const beginSession = (
   input: { nodeId: string; files: Record<string, string>; binaryFiles?: Record<string, string> },
   engine: AirAppRunnerEngine,
   owner: string,
+  runtimeEnv?: Record<string, string>,
 ): RunSession => {
   const abort = new AbortController();
   const session: RunSession = {
@@ -209,7 +221,13 @@ const beginSession = (
     try {
       for await (const event of runtimeFor(
         engine,
-        { nodeId: input.nodeId, files: input.files, binaryFiles: input.binaryFiles, owner },
+        {
+          nodeId: input.nodeId,
+          files: input.files,
+          binaryFiles: input.binaryFiles,
+          owner,
+          runtimeEnv,
+        },
         abort.signal,
       )) {
         record(session, event);
@@ -318,8 +336,13 @@ export async function* runOrAttachSession(
     // A finished run is not something to attach to: the viewer would get a dead
     // preview and no way forward. Clear it out and start fresh.
     if (existing) dropSession(input.nodeId, owner);
+    // Capture only the host-resolved, runtime-enabled values while still in the
+    // authenticated request. The detached remote run must not read ambient Vault
+    // context or mutate process.env. Existing live runs keep their startup values;
+    // Stop then Run applies credential rotations/removals. Local stays unchanged.
+    const runtimeEnv = input.engine === "remote" ? { ...getContextVaultRuntimeEnv() } : undefined;
     await enforceOwnerLimit(owner, DEFAULT_MAX_RUNS_PER_OWNER);
-    session = beginSession(input, input.engine, owner);
+    session = beginSession(input, input.engine, owner, runtimeEnv);
   }
 
   const queue: AirAppRuntimeEvent[] = [...session.buffer];

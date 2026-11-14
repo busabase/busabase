@@ -357,12 +357,37 @@ export const listRecordsPageInputSchema = z.object({
     .describe("Records per page. Capped at 100."),
 });
 
+/** `records.listPage` counts `total` exactly up to here, then reports `totalCapped`. */
+export const RECORD_EXACT_COUNT_LIMIT = 1_000_000;
+/** `records.listPage` page numbers reach this many records, then report `pagesCapped`. */
+export const RECORD_PAGE_DEPTH_LIMIT = 100_000;
+
 export const listRecordsPageResponseSchema = z.object({
   records: z.array(recordSchema),
-  total: z.number().int().nonnegative(),
-  totalPages: z.number().int().nonnegative(),
+  total: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe("Exact up to 1,000,000; past that it is 1,000,000 and `totalCapped` is true."),
+  totalPages: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe("Pages reachable by number: at most the first 100,000 records (see `pagesCapped`)."),
   page: z.number().int().min(1),
   pageSize: z.number().int().min(1).max(100),
+  totalCapped: z
+    .boolean()
+    .optional()
+    .describe(
+      "True when more than 1,000,000 records match: `total` is a lower bound. Use `records.count` for an exact number.",
+    ),
+  pagesCapped: z
+    .boolean()
+    .optional()
+    .describe(
+      "True when more records match than the first 100,000 that page numbers reach. Narrow with a filter or a sort, or read everything through `records.list`, which pages by cursor.",
+    ),
 });
 
 const countRecordsShapeSchema = z

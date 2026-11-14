@@ -23,7 +23,16 @@ export interface SearchSpace {
 }
 
 export interface SearchSpacesSlot {
+  /**
+   * Spaces matched instantly as the user types. With `search`, these are the
+   * few the host already holds (recent ones); without it, every space.
+   */
   spaces: readonly SearchSpace[];
+  /**
+   * Find spaces by name on the host's server, for people in more spaces than
+   * the host loads up front. Merged after the instant matches.
+   */
+  search?: (query: string) => Promise<readonly SearchSpace[]>;
   /** The space being searched; never offered as a switch target. */
   activeSpaceId?: string;
   onSwitch: (spaceId: string) => void;

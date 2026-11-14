@@ -89,7 +89,12 @@ export function PaginationNav({
                   { page: item },
                 )}
                 aria-disabled={disabled}
-                className={cn(disabled && "pointer-events-none opacity-50")}
+                // Square for short numbers, wider for "1999": a Base of 100,000
+                // records numbers its pages into the thousands.
+                className={cn(
+                  "w-auto min-w-8 px-1.5",
+                  disabled && "pointer-events-none opacity-50",
+                )}
                 href={pageHref(item)}
                 isActive={item === safePage}
                 onClick={handlePageLink && ((event) => handlePageLink(event, item))}

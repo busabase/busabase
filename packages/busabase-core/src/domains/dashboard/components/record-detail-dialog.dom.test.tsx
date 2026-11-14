@@ -70,10 +70,10 @@ afterEach(() => {
 function renderDialog(
   locale: CoreLocale = "en",
   visitorKind: "member" | "anonymous" = "member",
-  state: { record?: RecordVO | null; isLoading?: boolean } = {},
+  state: { record?: RecordVO | null; isLoading?: boolean; path?: string } = {},
 ) {
   const location = memoryLocation({
-    path: "/base/customers/calendar?space=tnl_test",
+    path: state.path ?? "/base/customers/calendar?space=tnl_test",
     record: true,
   });
   const trigger = document.createElement("button");
@@ -296,8 +296,39 @@ describe("record detail dialog", () => {
     const dialog = screen.getByRole("dialog", { name: "Acme follow-up" });
     expect(within(dialog).getByRole("link", { name: "Open full page" })).toBeTruthy();
     expect(within(dialog).queryByRole("link", { name: "Edit" })).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "Copy link" })).toBeNull();
     expect(within(dialog).getByText("Read the same record details here")).toBeTruthy();
   });
+
+  it.each(["en", "zh-CN"] as const)(
+    "copies the record's own page address from the header in %s",
+    async (locale) => {
+      const writeText = vi.fn(async () => undefined);
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+      renderDialog(locale, "member", {
+        path: "/base/customers/calendar?space=tnl_test&record=rec_dialog",
+      });
+      const dialog = screen.getByRole("dialog", { name: "Acme follow-up" });
+      const label = coreMessagesByLocale[locale].share.copyLink;
+      const copy = within(dialog).getByRole("button", { name: label });
+      // A quiet icon: named for screen readers and by its tooltip, no visible text.
+      expect(copy.textContent).toBe("");
+      expect(copy.getAttribute("title")).toBe(label);
+
+      fireEvent.click(copy);
+      await waitFor(() =>
+        expect(writeText).toHaveBeenCalledWith(
+          `${window.location.origin}/base/nod_customers/rec_dialog`,
+        ),
+      );
+      // The dialog's own `?record=` stays on the view; the full page drops it.
+      expect(
+        within(dialog)
+          .getByRole("link", { name: coreMessagesByLocale[locale].recordView.openFullPage })
+          .getAttribute("href"),
+      ).toBe("/base/customers/rec_dialog?space=tnl_test");
+    },
+  );
 
   it.each(["button", "Escape"])(
     "closes through %s and returns focus to the calendar card",

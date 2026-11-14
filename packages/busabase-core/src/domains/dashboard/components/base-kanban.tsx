@@ -25,6 +25,7 @@ import {
   getRelationRecordIds,
 } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { retryRecordRead } from "../helpers/query-state";
 import { useLinkedRecords } from "../hooks/use-linked-records";
 import { useDashboardOrpc } from "../orpc-context";
 import { useIsAnonymousVisitor } from "../visitor-context";
@@ -398,12 +399,14 @@ function KanbanColumn({
   viewId: string | undefined;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const resolveIString = useIString();
   const baseId = base?.id ?? "";
   const orpc = useDashboardOrpc();
 
   const cardsQuery = useInfiniteQuery({
     enabled: Boolean(baseId),
+    retry: retryRecordRead,
     getNextPageParam: (last: { page: number; totalPages: number }) =>
       last.page < last.totalPages ? last.page + 1 : undefined,
     initialPageParam: 1,
@@ -494,6 +497,20 @@ function KanbanColumn({
           <div className="px-1 py-4 text-center text-muted-foreground/70 text-xs">
             {messages.common.loading}
           </div>
+        ) : cardsQuery.isError && records.length === 0 ? (
+          // A column too large to read in time says so, rather than looking empty.
+          <div className="flex flex-col items-center gap-2 px-1 py-4 text-center text-xs">
+            <span className="text-destructive" role="alert">
+              {presentCoreError(messages, locale, cardsQuery.error, messages.shell.operationFailed)}
+            </span>
+            <button
+              className="rounded-md border border-border/70 px-2 py-1 font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => void cardsQuery.refetch()}
+              type="button"
+            >
+              {messages.base.paginationRetry}
+            </button>
+          </div>
         ) : records.length === 0 ? (
           <div className="px-1 py-4 text-center text-muted-foreground/70 text-xs">
             {resolveIString(stackField.name)}
@@ -582,6 +599,7 @@ export function BusaBaseKanban({
 
   const countsQuery = useQuery({
     enabled: Boolean(baseId) && Boolean(stackField),
+    retry: retryRecordRead,
     queryFn: () =>
       client.groupRecords({
         baseId,
@@ -655,11 +673,14 @@ export function BusaBaseKanban({
         {columns.map((column) => {
           // Hide Uncategorized when nothing is unset (keeps the board tidy).
           // `groupBy` OMITS zero-count buckets, so "no entry" — not a 0 — is what
-          // an empty bucket looks like; waiting for the aggregate to arrive first
-          // keeps the column from flickering away while it loads.
+          // an empty bucket looks like. It also waits for that aggregate: its
+          // own read ("has no value") is the board's slowest — about 20 s on a
+          // 1M-record Base — and once sent it runs on even if the column then
+          // hides, so it is only sent for a bucket known to hold records. A
+          // failed aggregate falls back to showing it.
           if (
             column.id === UNCATEGORIZED &&
-            countsQuery.data &&
+            !countsQuery.isError &&
             (countByColumn.get(UNCATEGORIZED) ?? 0) === 0
           ) {
             return null;

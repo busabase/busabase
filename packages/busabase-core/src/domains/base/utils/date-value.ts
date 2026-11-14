@@ -483,3 +483,44 @@ export const getCalendarDateRange = (
     lt: new Date(utcMidnight(gridEnd) + DAY_MS).toISOString(),
   };
 };
+
+/**
+ * The server-side `dateRange` for ONE calendar day (`YYYY-MM-DD`), exact rather
+ * than widened: a busy calendar asks each day for its first few records and
+ * its true count, so the bounds must hold that day's records and no others.
+ *
+ * A day-only `date` field stores each day at its own UTC midnight. One with
+ * `includeTime` stores instants, each on the day it falls on in the field's
+ * zone, else the reader's — the same rule as `getDateFieldCalendarDay`.
+ * `created_time` / `updated_time` are instants read in the reader's zone. The
+ * field's setting picks the bounds, so a value of the other kind — left over
+ * from switching `includeTime`, or an API-written instant at exactly UTC
+ * midnight, which reads as a day — can be counted on a neighbouring day.
+ */
+export const getCalendarDayRange = (
+  fieldType: string | null | undefined,
+  options: DateFieldOptions | null | undefined,
+  day: string,
+  readerTimeZone?: string,
+): { gte: string; lt: string } | null => {
+  const parsed = parseDateFieldValue(day);
+  if (parsed?.kind !== "day") return null;
+  const { year, month, day: date } = parsed.day;
+  const next = new Date(Date.UTC(year, month - 1, date + 1));
+  if (fieldType === "date" && !options?.includeTime) {
+    return {
+      gte: new Date(Date.UTC(year, month - 1, date)).toISOString(),
+      lt: next.toISOString(),
+    };
+  }
+  const zone = (fieldType === "date" ? usableZone(options?.timezone) : undefined) ?? readerTimeZone;
+  const nextDay = formatDayKey({
+    year: next.getUTCFullYear(),
+    month: next.getUTCMonth() + 1,
+    day: next.getUTCDate(),
+  });
+  const start = fromDateTimeInputValue(`${day}T00:00`, zone);
+  const end = fromDateTimeInputValue(`${nextDay}T00:00`, zone);
+  if (!start || !end) return null;
+  return { gte: new Date(start).toISOString(), lt: new Date(end).toISOString() };
+};

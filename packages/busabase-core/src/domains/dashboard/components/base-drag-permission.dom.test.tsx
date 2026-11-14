@@ -102,8 +102,9 @@ const view = (type: "kanban" | "gantt"): ViewVO => ({
 });
 const client = {
   groupRecords: vi.fn(async () => ({ groups: [{ value: "todo", count: 1 }] })),
+  // A board column asks for its own choice; the timeline asks for the view.
   listRecordsPage: vi.fn(async (input: { filters?: Array<{ value?: unknown }> }) => ({
-    records: input.filters?.[0]?.value === "todo" ? [record] : [],
+    records: !input.filters?.length || input.filters[0]?.value === "todo" ? [record] : [],
     total: 1,
     page: 1,
     totalPages: 1,
@@ -195,19 +196,20 @@ describe("kanban drag follows the viewer's level on the Base", () => {
 });
 
 describe("gantt drag follows the viewer's level on the Base", () => {
-  const renderTimeline = (level: ApiKeyPermissionLevel, onPatchRecord = merged()) => {
+  const renderTimeline = async (level: ApiKeyPermissionLevel, onPatchRecord = merged()) => {
     render(
       harness(
         level,
         <BusaBaseGantt
           activeView={view("gantt")}
           base={base}
+          client={client}
           fields={fields}
           onPatchRecord={onPatchRecord}
-          records={[record]}
         />,
       ),
     );
+    await screen.findAllByText("Launch");
     return onPatchRecord;
   };
   // The bar's title tracks the live preview, so find it by its label span.
@@ -224,15 +226,15 @@ describe("gantt drag follows the viewer's level on the Base", () => {
     fireEvent.mouseUp(bar());
   };
 
-  it("gives a read grant no grab cursor and no reschedule", () => {
-    const patch = renderTimeline("read");
+  it("gives a read grant no grab cursor and no reschedule", async () => {
+    const patch = await renderTimeline("read");
     expect(bar().className).not.toContain("cursor-grab");
     dragBar();
     expect(patch).not.toHaveBeenCalled();
   });
 
   it("tells a changeRequest grant the reschedule is pending review", async () => {
-    const patch = renderTimeline("changeRequest", queued());
+    const patch = await renderTimeline("changeRequest", queued());
     expect(bar().className).toContain("cursor-grab");
     dragBar();
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
@@ -245,7 +247,7 @@ describe("gantt drag follows the viewer's level on the Base", () => {
   });
 
   it("reschedules silently for a write grant", async () => {
-    const patch = renderTimeline("write");
+    const patch = await renderTimeline("write");
     dragBar();
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId("drag-review-notice")).toBeNull();

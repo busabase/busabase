@@ -284,8 +284,10 @@ describe.skipIf(!adminUrl)("consistent SQL snapshot — real PostgreSQL writers"
       expect(cursors).toHaveLength(DumpTableSchema.options.length);
       for (const query of cursors) {
         expect(query).toMatch(/as "snapshot_identity"/i);
-        expect(query).not.toMatch(/::text|to_char/);
+        // Wide tables also measure each row; that is the only ::text allowed.
+        expect(query.replace(/octet_length\([^)]*\)/g, "")).not.toMatch(/::text|to_char/);
       }
+      expect(cursors.find((query) => /"busabase_commits"/.test(query))).toMatch(/octet_length/);
       const rowReads = statements.filter(
         (query) =>
           /^\s*select\b/i.test(query) &&
@@ -300,6 +302,67 @@ describe.skipIf(!adminUrl)("consistent SQL snapshot — real PostgreSQL writers"
       await traced.end({ timeout: 2 });
     }
   });
+
+  it("reads many small commits per statement but never lets large ones share a result", async () => {
+    // One statement per commit made 233k round trips for a real workspace.
+    // A repeated-text payload compresses to almost nothing, so the batch bound
+    // has to use the real (uncompressed) size.
+    if (!adminUrl) throw new Error("BUSABASE_SNAPSHOT_PG_TEST_URL is required");
+    const small = Array.from({ length: 60 }, (_, index) => `zz-batch-small-${index}`);
+    const large = Array.from({ length: 4 }, (_, index) => `zz-batch-large-${index}`);
+    const payload = "y".repeat(9 * 1024 * 1024);
+    for (const id of [...small, ...large])
+      await writer.insert(schema.busabaseCommits).values({
+        id,
+        spaceId,
+        baseId: ids.base,
+        payload: { value: id.includes("large") ? payload : id },
+        author: "snapshot-owner",
+      });
+    const reads: string[][] = [];
+    const url = new URL(adminUrl);
+    url.pathname = "/" + database;
+    const traced = postgres(url.toString(), {
+      max: 1,
+      prepare: false,
+      debug: (_connection, query, parameters) => {
+        if (/^\s*select\b/i.test(query) && /from "busabase_commits"/i.test(query))
+          reads.push(
+            (parameters as unknown[]).filter((value): value is string => typeof value === "string"),
+          );
+      },
+    });
+    try {
+      const stream = await runWithBusabaseContext(
+        {
+          db: drizzle(traced, { schema }),
+          spaceId,
+          actorId: "snapshot-owner",
+          isSpaceManager: true,
+        },
+        async () => exportSnapshot({ limit: 500 }),
+      );
+      const exportedIds: string[] = [];
+      for await (const event of stream)
+        if (event.type === "rows" && event.table === "commits")
+          for (const row of snapshotEventRows(event)) exportedIds.push(String(row.id));
+      for (const id of [...small, ...large]) expect(exportedIds).toContain(id);
+      expect(exportedIds).toEqual(
+        [...exportedIds].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))),
+      );
+      const covering = (wanted: string[]) =>
+        reads.filter((parameters) => wanted.some((id) => parameters.includes(id)));
+      // The 9 MiB payloads are 18 MiB together: over the 16 MiB budget, so alone.
+      for (const parameters of covering(large))
+        expect(large.filter((id) => parameters.includes(id)).length).toBe(1);
+      expect(covering(large)).toHaveLength(large.length);
+      // The 60 tiny commits share a handful of statements, not 60.
+      expect(covering(small).length).toBeLessThanOrEqual(3);
+    } finally {
+      await traced.end({ timeout: 2 });
+      await writerSql`DELETE FROM busabase_commits WHERE id LIKE 'zz-batch-%'`;
+    }
+  }, 120_000);
 
   it("keeps each 95MiB commit in a separate rows event without accumulating the table", async () => {
     const size = 95 * 1024 * 1024;

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import type { AirAppRuntimeEvent } from "busabase-contract/domains/airapp/contract";
 import { createSandockClient } from "sandock";
 import { type RunPlan, resolveRunPlan, substitutePort } from "../utils/airapp-runtime-descriptor";
@@ -77,6 +78,8 @@ class CleanupTimeoutError extends Error {}
 interface ReusableSandbox {
   id: string;
   config: SandockConfig;
+  /** Effective container environment, retained only as an internal reuse fingerprint. */
+  environmentFingerprint: string;
 }
 
 /** owner -> nodeId -> stopped sandbox. Run sessions enforce one live run per key. */
@@ -364,6 +367,8 @@ export async function* runAirAppSandock(
     binaryFiles?: Record<string, string>;
     /** See `local-runtime.ts` — passed in because this runs detached from any request. */
     owner: string;
+    /** Server-only snapshot of the current request's runtime-enabled Vault values. */
+    runtimeEnv?: Record<string, string>;
   },
   signal?: AbortSignal,
 ): AsyncGenerator<AirAppRuntimeEvent> {
@@ -387,6 +392,12 @@ export async function* runAirAppSandock(
 
   const api = sandockClient(config);
   const port = plan.port ?? 3000;
+  // Platform-owned fields always win over Vault entries. Never echo this object
+  // or its fingerprint into the replayable runtime event stream.
+  const environment = { ...input.runtimeEnv, ...airAppRuntimeEnv("remote"), PORT: String(port) };
+  const environmentFingerprint = createHash("sha256")
+    .update(JSON.stringify(Object.entries(environment).sort(([a], [b]) => a.localeCompare(b))))
+    .digest("hex");
   const installCommand = substitutePort(plan.install, port);
   const startCommand = substitutePort(plan.start, port);
   let sandboxId: string | null = null;
@@ -397,7 +408,11 @@ export async function* runAirAppSandock(
   try {
     yield { type: "log", line: `[busabase] ${plan.explanation}\n` };
     let reusable = readReusableSandbox(input.owner, input.nodeId);
-    if (reusable && !hasSameSandboxConfiguration(reusable.config, config)) {
+    if (
+      reusable &&
+      (!hasSameSandboxConfiguration(reusable.config, config) ||
+        reusable.environmentFingerprint !== environmentFingerprint)
+    ) {
       const staleId = reusable.id;
       dropReusableSandbox(input.owner, input.nodeId, staleId);
       const staleApi = sandockClient(reusable.config);
@@ -451,7 +466,7 @@ export async function* runAirAppSandock(
         cpu: SANDBOX_CPU_MILLICORES,
         memory: SANDBOX_MEMORY_LIMIT_MB,
         command: ["/bin/sh", "-c", "sleep infinity"],
-        env: { ...airAppRuntimeEnv("remote"), PORT: String(port) },
+        env: environment,
         // Sandock measures this from lastStartedAt, so restarting the same ID
         // starts a fresh four-hour provider-side backstop window.
         activeDeadlineSeconds: SANDBOX_DEADLINE_SECONDS,
@@ -637,6 +652,7 @@ export async function* runAirAppSandock(
           putReusableSandbox(input.owner, input.nodeId, {
             id: cleanupSandboxId,
             config,
+            environmentFingerprint,
           });
         }
       } else {

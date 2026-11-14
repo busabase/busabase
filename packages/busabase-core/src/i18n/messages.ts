@@ -1909,6 +1909,10 @@ export const coreMessagesEn = {
     paginationPage: "Go to page {page}",
     paginationCurrentPage: "Page {page}, current page",
     paginationRetry: "Retry",
+    paginationDepthLimit:
+      "Page numbers reach the first {limit} records. Filter or sort to find the rest.",
+    viewTooLarge:
+      "This view has too many records to work through. Add a filter to narrow it, then try again.",
     hideArchivedRecords: "Hide archived records",
     showArchivedRecords: "Show archived records ({count})",
     createDeleteRequestTitle: "Create delete request?",
@@ -2496,7 +2500,7 @@ export const coreMessagesEn = {
     typeHints: {
       folder: "Groups related items together, like a folder on your computer.",
       base: "A spreadsheet with database rules — typed columns, filters, saved views.",
-      doc: "One written document, reviewed before it changes.",
+      doc: "One written document — notes, specs, write-ups.",
       file: "A single uploaded file — a PDF, an image, anything.",
       skill: "Written instructions an agent reads before it touches your data.",
       drive: "A plain pile of files for an agent to read.",

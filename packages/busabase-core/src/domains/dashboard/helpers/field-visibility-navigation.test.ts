@@ -22,4 +22,13 @@ describe("field creation navigation", () => {
     ).toBe("/base/tasks/review?space=connected&highlightField=files");
     expect(fieldRecordsHref("tasks", "", null)).toBe("/base/tasks");
   });
+
+  it("leaves an open record dialog on the page that opened it", () => {
+    expect(fieldDesignHref("tasks", "space=connected&record=rec_1", "viw_tasks")).toBe(
+      "/base/tasks/design?space=connected&originViewId=viw_tasks",
+    );
+    expect(fieldRecordsHref("tasks", "record=rec_1", { slug: "review" })).toBe(
+      "/base/tasks/review",
+    );
+  });
 });

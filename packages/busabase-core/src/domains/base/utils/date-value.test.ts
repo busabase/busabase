@@ -4,6 +4,7 @@ import {
   formatDateFieldValue,
   fromDateTimeInputValue,
   getCalendarDateRange,
+  getCalendarDayRange,
   getDateFieldDayKey,
   getDateFieldOptions,
   getDateFieldSortKey,
@@ -206,5 +207,66 @@ describe("calendar month range", () => {
       gte: start.toISOString(),
       lt: end.toISOString(),
     });
+  });
+});
+
+describe("calendar day range", () => {
+  const inRange = (value: string, range: { gte: string; lt: string } | null) => {
+    const at = new Date(value).getTime();
+    return Boolean(range) && at >= Date.parse(range?.gte ?? "") && at < Date.parse(range?.lt ?? "");
+  };
+
+  it("bounds a day-only field by the day's own UTC midnights, for every reader", () => {
+    for (const reader of READERS) {
+      expect(getCalendarDayRange("date", {}, "2026-11-13", reader)).toEqual({
+        gte: "2026-11-13T00:00:00.000Z",
+        lt: "2026-11-14T00:00:00.000Z",
+      });
+    }
+  });
+
+  it("holds exactly the instants each reader sees on that day", () => {
+    // Every half hour across three days, against the same day key the calendar
+    // buckets by. Off the hour: an exact UTC midnight in a date field is a day
+    // value, which the doc comment owns up to.
+    const instants = Array.from({ length: 144 }, (_, i) =>
+      new Date(Date.UTC(2026, 10, 12) + i * 30 * 60_000 + 15 * 60_000).toISOString(),
+    );
+    const cases: Array<{ options: { includeTime: boolean; timezone?: string }; reader?: string }> =
+      [
+        { options: { includeTime: true, timezone: "Asia/Shanghai" } },
+        { options: { includeTime: true, timezone: "America/Los_Angeles" }, reader: "Asia/Tokyo" },
+        ...READERS.map((reader) => ({ options: { includeTime: true }, reader })),
+      ];
+    for (const { options, reader } of cases) {
+      const range = getCalendarDayRange("date", options, "2026-11-13", reader);
+      for (const instant of instants) {
+        expect(inRange(instant, range), `${instant} ${JSON.stringify(options)} ${reader}`).toBe(
+          getDateFieldDayKey(instant, options, reader) === "2026-11-13",
+        );
+      }
+    }
+  });
+
+  it("spans the 25 hours of a day the clocks go back", () => {
+    expect(
+      getCalendarDayRange(
+        "date",
+        { includeTime: true, timezone: "America/Los_Angeles" },
+        "2026-11-01",
+      ),
+    ).toEqual({ gte: "2026-11-01T07:00:00.000Z", lt: "2026-11-02T08:00:00.000Z" });
+  });
+
+  it("reads system timestamps in the reader's zone", () => {
+    expect(getCalendarDayRange("created_time", {}, "2026-11-13", "Asia/Shanghai")).toEqual({
+      gte: "2026-11-12T16:00:00.000Z",
+      lt: "2026-11-13T16:00:00.000Z",
+    });
+  });
+
+  it("refuses anything that is not a day", () => {
+    expect(getCalendarDayRange("date", {}, "2026-11-13T10:00:00Z")).toBeNull();
+    expect(getCalendarDayRange("date", {}, "not a day")).toBeNull();
   });
 });

@@ -650,21 +650,37 @@ export function SearchDialog({
    * (`onSelect`): a space is not something the side panel can pin.
    */
   const spacesSlot = useSearchSpacesSlot();
+  const searchHostSpaces = spacesSlot?.search;
+  const hostSpaceSearch = useQuery({
+    queryKey: ["busabase-core", "search-spaces", spacesSlot?.activeSpaceId, debouncedQuery],
+    queryFn: () => (searchHostSpaces ? searchHostSpaces(debouncedQuery) : []),
+    enabled: Boolean(
+      searchHostSpaces && !onSelect && sections.includes("spaces") && normalizedDebouncedQuery,
+    ),
+    staleTime: 30_000,
+  });
   const spaceRows = useMemo((): DisplayResult[] => {
     if (!spacesSlot || onSelect) return [];
-    return matchSearchSpaces(spacesSlot.spaces, spacesSlot.activeSpaceId, normalizedQuery).map(
-      (space) => ({
-        key: `space-${space.id}`,
-        id: space.id,
-        href: "",
-        title: space.name,
-        body: messages.search.switchToSpace,
-        eyebrow: space.subtitle,
-        icon: <SpaceGlyph space={space} />,
-        activate: () => spacesSlot.onSwitch(space.id),
-      }),
-    );
-  }, [spacesSlot, onSelect, normalizedQuery, messages]);
+    // Instant matches from what the host holds first, then its server's answer.
+    const candidates = new Map(spacesSlot.spaces.map((space) => [space.id, space]));
+    for (const space of hostSpaceSearch.data ?? []) {
+      if (!candidates.has(space.id)) candidates.set(space.id, space);
+    }
+    return matchSearchSpaces(
+      [...candidates.values()],
+      spacesSlot.activeSpaceId,
+      normalizedQuery,
+    ).map((space) => ({
+      key: `space-${space.id}`,
+      id: space.id,
+      href: "",
+      title: space.name,
+      body: messages.search.switchToSpace,
+      eyebrow: space.subtitle,
+      icon: <SpaceGlyph space={space} />,
+      activate: () => spacesSlot.onSwitch(space.id),
+    }));
+  }, [spacesSlot, onSelect, normalizedQuery, messages, hostSpaceSearch.data]);
 
   const populatedSections = useMemo(() => {
     const built: { key: SearchSectionKey; rows: DisplayResult[] }[] = [];

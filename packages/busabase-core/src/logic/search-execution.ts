@@ -20,7 +20,7 @@ function stopped(reason: SearchStop) {
       });
 }
 
-function isStatementTimeout(error: unknown): boolean {
+export function isStatementTimeout(error: unknown): boolean {
   let current = error;
   for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
     if ("code" in current && current.code === "57014") return true;

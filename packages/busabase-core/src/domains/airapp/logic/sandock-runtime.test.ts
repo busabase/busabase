@@ -428,6 +428,90 @@ describe("runAirAppSandock", () => {
     await second.return(undefined as never);
   });
 
+  it("passes Vault to the container, keeps platform fields authoritative and events credential-free", async () => {
+    const runtimeEnv = {
+      ARGOCD_AWS_TOKEN: "private-vault-token",
+      ARGOCD_AWS_BASE_URL: "https://private-argo.example",
+      BUSABASE_AIRAPP_RUNTIME: "untrusted-runtime",
+      PORT: "9999",
+    };
+    const gen = mod.runAirAppSandock({ nodeId: "n1", files: NODE_FILES, owner: "u1", runtimeEnv });
+    const events = await drainUntilReady(gen);
+    expect(calls.find((call) => call.op === "create")?.args.env).toEqual({
+      ...runtimeEnv,
+      BUSABASE_AIRAPP_RUNTIME: "remote",
+      PORT: "3000",
+    });
+    expect(JSON.stringify(events)).not.toContain("private-vault-token");
+    expect(JSON.stringify(events)).not.toContain("https://private-argo.example");
+    expect(runtimeEnv.PORT).toBe("9999");
+    await gen.return(undefined as never);
+  });
+
+  it.each<{ label: string; nextEnv: Record<string, string>; changed: boolean }>([
+    {
+      label: "identical values in another insertion order",
+      nextEnv: { B: "two", A: "one" },
+      changed: false,
+    },
+    { label: "a rotated value", nextEnv: { A: "rotated", B: "two" }, changed: true },
+    { label: "a removed value", nextEnv: { A: "one" }, changed: true },
+    { label: "all values removed", nextEnv: {}, changed: true },
+  ])(
+    "reuses stopped containers only for the same effective environment: $label",
+    async ({ nextEnv, changed }) => {
+      const first = mod.runAirAppSandock({
+        nodeId: "n1",
+        files: NODE_FILES,
+        owner: "u1",
+        runtimeEnv: { A: "one", B: "two" },
+      });
+      await drainUntilReady(first);
+      await first.return(undefined as never);
+      calls = [];
+      const second = mod.runAirAppSandock({
+        nodeId: "n1",
+        files: NODE_FILES,
+        owner: "u1",
+        runtimeEnv: nextEnv,
+      });
+      const events = await drainUntilReady(second);
+      expect(events.at(-1)?.type).toBe("ready");
+      expect(calls.some((call) => call.op === "create")).toBe(changed);
+      expect(calls.some((call) => call.op === "delete" && call.args.id === "sbx_1")).toBe(changed);
+      expect(calls.find((call) => call.op === "start")?.args.id).toBe(changed ? "sbx_2" : "sbx_1");
+      if (changed)
+        expect(calls.find((call) => call.op === "create")?.args.env).toEqual({
+          ...nextEnv,
+          BUSABASE_AIRAPP_RUNTIME: "remote",
+          PORT: "3000",
+        });
+      // The fingerprint is an internal cache key, never part of replayed events.
+      expect(JSON.stringify(events)).not.toMatch(/[a-f0-9]{64}/);
+      await second.return(undefined as never);
+    },
+  );
+
+  it("replaces a stopped container when the manifest changes its port", async () => {
+    const first = mod.runAirAppSandock({ nodeId: "n1", files: NODE_FILES, owner: "u1" });
+    await drainUntilReady(first);
+    await first.return(undefined as never);
+    calls = [];
+    const second = mod.runAirAppSandock({
+      nodeId: "n1",
+      owner: "u1",
+      files: {
+        ...NODE_FILES,
+        "airapp.json": JSON.stringify({ install: "npm install", start: "npm run dev", port: 4321 }),
+      },
+    });
+    const events = await drainUntilReady(second);
+    expect(events.at(-1)?.type).toBe("ready");
+    expect(calls[0]).toEqual({ op: "delete", args: { id: "sbx_1" } });
+    expect(calls.find((call) => call.op === "create")?.args.env).toMatchObject({ PORT: "4321" });
+    await second.return(undefined as never);
+  });
+
   it("replaces a stopped sandbox when its non-secret Sandock configuration changes", async () => {
     process.env.SANDOCK_SPACE_ID = "space-old";
     process.env.SANDOCK_IMAGE = "image-old";

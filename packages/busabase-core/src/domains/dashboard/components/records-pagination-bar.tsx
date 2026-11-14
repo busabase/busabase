@@ -1,5 +1,6 @@
 "use client";
 
+import { RECORD_PAGE_DEPTH_LIMIT } from "busabase-contract/domains/base/contract/record-schemas";
 import { Button } from "kui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
 import { cn } from "kui/utils";
@@ -24,6 +25,10 @@ export interface RecordsPaginationBarProps {
   pageSize: RecordPageSize;
   total: number;
   totalPages: number;
+  /** `total` is a lower bound: shown as "1000000+". */
+  totalCapped?: boolean;
+  /** Records past the first RECORD_PAGE_DEPTH_LIMIT have no page number. */
+  pagesCapped?: boolean;
 }
 
 export function RecordsPaginationBar({
@@ -39,6 +44,8 @@ export function RecordsPaginationBar({
   pageSize,
   total,
   totalPages,
+  totalCapped = false,
+  pagesCapped = false,
 }: RecordsPaginationBarProps) {
   const messages = useCoreI18n();
   const safeTotalPages = Math.max(Math.trunc(totalPages) || 1, 1);
@@ -61,7 +68,7 @@ export function RecordsPaginationBar({
             : fmt(messages.base.paginationRange, {
                 from: recordRange.from,
                 to: recordRange.to,
-                total: Math.max(total, 0),
+                total: `${Math.max(total, 0)}${totalCapped ? "+" : ""}`,
               })}
         </p>
         <div className="flex items-center gap-2 whitespace-nowrap text-muted-foreground text-sm">
@@ -95,6 +102,12 @@ export function RecordsPaginationBar({
           page={safePage}
           totalPages={safeTotalPages}
         />
+
+        {pagesCapped && !error ? (
+          <p className="text-right text-muted-foreground text-xs">
+            {fmt(messages.base.paginationDepthLimit, { limit: RECORD_PAGE_DEPTH_LIMIT })}
+          </p>
+        ) : null}
 
         {error ? (
           <div className="flex min-w-0 items-center gap-2 text-destructive text-sm" role="alert">

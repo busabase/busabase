@@ -1,3 +1,5 @@
+import { VIEW_TOO_LARGE_MESSAGE } from "../../../i18n/localize-error";
+
 /** Show an initial skeleton until an unresolved query has produced authoritative data. */
 export const shouldShowInitialLoadingState = (value: unknown, isFetching: boolean): boolean =>
   value == null && isFetching;
@@ -21,3 +23,12 @@ export const isNotFoundError = (error: unknown): boolean => {
  */
 export const retryUnlessNotFound = (failureCount: number, error: unknown): boolean =>
   !isNotFoundError(error) && failureCount < 3;
+
+/**
+ * `retry` for a read of a view's records. A view too large to read fails the
+ * same way every time, after the full 15 s of database time, so trying again
+ * only repeats that work, and the reader — who sees the message once the last
+ * try is over — waits for it. Anything else keeps the default three attempts.
+ */
+export const retryRecordRead = (failureCount: number, error: unknown): boolean =>
+  !(error instanceof Error && error.message === VIEW_TOO_LARGE_MESSAGE) && failureCount < 3;

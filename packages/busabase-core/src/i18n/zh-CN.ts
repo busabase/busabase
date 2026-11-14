@@ -1715,6 +1715,8 @@ export const dashboardZhCN: CoreI18nMessages = {
     paginationPage: "前往第 {page} 页",
     paginationCurrentPage: "第 {page} 页，当前页",
     paginationRetry: "重试",
+    paginationDepthLimit: "页码只能翻到前 {limit} 条记录，其余记录请用筛选或排序查找。",
+    viewTooLarge: "这个视图的记录太多，处理不过来。请添加筛选条件缩小范围后重试。",
     hideArchivedRecords: "隐藏已归档记录",
     showArchivedRecords: "显示已归档记录（{count}）",
     createDeleteRequestTitle: "创建删除请求？",
@@ -2264,7 +2266,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     typeHints: {
       folder: "把相关内容归到一起，就像电脑里的文件夹。",
       base: "像表格一样填，像数据库一样查 —— 字段有类型，可筛选、可存视图。",
-      doc: "一篇文档，改动前会先经过审核。",
+      doc: "一篇文档 —— 笔记、方案、报告，都可以。",
       file: "单个上传的文件 —— PDF、图片，什么都行。",
       skill: "写给智能体看的操作说明，它动你的数据前会先读。",
       drive: "一堆纯文件，供智能体读取。",

@@ -118,6 +118,7 @@ import {
   SidebarRow,
   StatusBadge,
 } from "./primitives";
+import { RecordCopyLinkButton } from "./record-copy-link-button";
 import { RelationFieldEditor } from "./relation-field";
 import { ShareLinkActions } from "./share-link-actions";
 import { ShimmerSkeleton as Skeleton } from "./shimmer-skeleton";
@@ -164,6 +165,7 @@ export function RecordTopbarActions({
           recordTitle: record ? getRecordTitle(record, messages) : undefined,
         }}
       />
+      <RecordCopyLinkButton baseNodeId={base.nodeId} recordId={recordId} />
       {record && !isAnon ? (
         <NodePinButton
           payload={{ recordId }}

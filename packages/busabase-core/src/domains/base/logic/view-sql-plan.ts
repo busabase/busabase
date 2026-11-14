@@ -7,7 +7,7 @@ import type {
   ViewSortVO,
 } from "busabase-contract/types";
 import { isViewFilterGroup } from "busabase-contract/types";
-import { and, eq, inArray, isNotNull, isNull, not, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, notExists, or, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { getDb } from "../../../db";
 import { busabaseBaseFields, busabaseFieldValues, busabaseRecords } from "../../../db/schema";
@@ -271,19 +271,33 @@ const textArrayLiteral = (texts: readonly string[]): string =>
   `{${texts.map((text) => `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`;
 
 /** Ids of records whose live projected text for `slug` is one of `texts`. */
+const rowsWithText = (baseId: string, slug: string, texts: readonly string[]) =>
+  and(
+    eq(busabaseFieldValues.baseId, baseId),
+    eq(busabaseFieldValues.fieldSlug, slug),
+    isNull(busabaseFieldValues.deletedAt),
+    isNotNull(busabaseFieldValues.recordId),
+    sql`${busabaseFieldValues.valueText} = any(${textArrayLiteral(texts)}::text[])`,
+  );
 const recordsWithText = (db: Db, baseId: string, slug: string, texts: readonly string[]) =>
   db
     .select({ recordId: busabaseFieldValues.recordId })
     .from(busabaseFieldValues)
-    .where(
-      and(
-        eq(busabaseFieldValues.baseId, baseId),
-        eq(busabaseFieldValues.fieldSlug, slug),
-        isNull(busabaseFieldValues.deletedAt),
-        isNotNull(busabaseFieldValues.recordId),
-        sql`${busabaseFieldValues.valueText} = any(${textArrayLiteral(texts)}::text[])`,
+    .where(rowsWithText(baseId, slug, texts));
+// "Has none of these texts" as NOT EXISTS, never `NOT IN`: see `notMatches` in
+// queries.ts — past work_mem a NOT IN re-reads the field's rows per record.
+const recordHasNoText = (db: Db, baseId: string, slug: string, texts: readonly string[]) =>
+  notExists(
+    db
+      .select({ one: sql`1` })
+      .from(busabaseFieldValues)
+      .where(
+        and(
+          rowsWithText(baseId, slug, texts),
+          eq(busabaseFieldValues.recordId, busabaseRecords.id),
+        ),
       ),
-    );
+  ) as SQL;
 
 export const planViewSql = async (db: Db, input: PlanViewSqlInput): Promise<ViewSqlPlan> => {
   const dynamicSlugs = lookupDependentFieldSlugs(input.fields);
@@ -364,10 +378,10 @@ export const planViewSql = async (db: Db, input: PlanViewSqlInput): Promise<View
     );
     if (textArrayLiteral(set).length > MAX_PARAM_CHARS) return null;
     decidedSlugs.add(field.slug);
-    const hasOneOf = set.length
-      ? inArray(busabaseRecords.id, recordsWithText(db, input.baseId, field.slug, set))
-      : sql`false`;
-    return missingMatches ? not(hasOneOf) : hasOneOf;
+    if (!set.length) return missingMatches ? sql`true` : sql`false`;
+    return missingMatches
+      ? recordHasNoText(db, input.baseId, field.slug, set)
+      : inArray(busabaseRecords.id, recordsWithText(db, input.baseId, field.slug, set));
   };
 
   const compile = (condition: ViewFilterConditionVO): SQL | null => {

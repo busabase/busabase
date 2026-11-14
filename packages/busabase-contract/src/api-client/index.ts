@@ -222,7 +222,16 @@ export interface BusabaseDashboardApiClient {
     sort?: z.input<typeof listRecordsSortSchema>;
     page?: number;
     pageSize?: number;
-  }) => Promise<{ records: RecordVO[]; total: number; totalPages: number; page: number }>;
+  }) => Promise<{
+    records: RecordVO[];
+    total: number;
+    totalPages: number;
+    page: number;
+    /** More than 1,000,000 match: `total` is a lower bound. */
+    totalCapped?: boolean;
+    /** More match than the first 100,000 records page numbers reach. */
+    pagesCapped?: boolean;
+  }>;
   listBases: () => Promise<BaseVO[]>;
   /** One Base with its fields, by id, nodeId or slug. */
   getBase: (baseId: string) => Promise<BaseVO>;
