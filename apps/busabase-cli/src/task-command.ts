@@ -25,10 +25,36 @@ import { type Command, InvalidArgumentError, Option, type OptionValues } from "c
 export interface TaskCommandDeps {
   /** Attaches --base-url/--api-key/--space-id/--output etc. */
   readonly addGlobalFlags: (cmd: Command) => Command;
-  /** Wraps a handler with config resolution, auth, and output rendering. */
+  /**
+   * Wraps a handler with config resolution, auth, and output rendering. `after`,
+   * when given, runs once the result has been rendered — and only if the command
+   * got that far without throwing.
+   */
   readonly runAction: (
     handler: (client: unknown, opts: OptionValues) => Promise<unknown>,
+    after?: (opts: OptionValues) => Promise<void>,
   ) => (opts: OptionValues, cmd: Command) => Promise<void>;
+  /**
+   * Called after a task command succeeded, with the exact input the task ran
+   * with (variant presets included — `bases create` reaches here as
+   * `node_create` with `type: "base"`). Must never throw: the command already
+   * succeeded and printed its result.
+   */
+  /**
+   * Called just before a task command runs, with the input it is about to send.
+   * For output that must come FIRST (a notice an agent piping `| head` would
+   * otherwise lose). Must never throw.
+   */
+  readonly beforeTask?: (
+    taskName: string,
+    input: Readonly<Record<string, unknown>>,
+    opts: OptionValues,
+  ) => Promise<void>;
+  readonly afterTask?: (
+    taskName: string,
+    input: Readonly<Record<string, unknown>>,
+    opts: OptionValues,
+  ) => Promise<void>;
   /** Parses inline JSON or `@file`. */
   readonly parseJsonValue: (raw: string, flagName: string) => unknown;
   /** Parses `slug:name:type` field shorthand. */
@@ -226,12 +252,28 @@ const registerOne = (
     cmd.addHelpText("after", `\nExamples:\n  ${task.examples.join("\n  ")}`);
   }
 
+  // Captured by the handler so `afterTask` sees the input actually sent; one
+  // process runs one command, and the handler resets it on every run.
+  let ranWith: Record<string, unknown> | undefined;
+  const afterTask = deps.afterTask;
   cmd.action(
-    deps.runAction(async (client, opts) =>
-      task.execute(client as Parameters<typeof task.execute>[0], {
-        ...buildInput(task, opts, deps),
-        ...preset,
-      }),
+    deps.runAction(
+      async (client, opts) => {
+        ranWith = { ...buildInput(task, opts, deps), ...preset };
+        if (deps.beforeTask) {
+          try {
+            await deps.beforeTask(task.name, ranWith, opts);
+          } catch {
+            // A notice must never stop the command it precedes.
+          }
+        }
+        return task.execute(client as Parameters<typeof task.execute>[0], ranWith);
+      },
+      afterTask
+        ? async (opts) => {
+            if (ranWith) await afterTask(task.name, ranWith, opts);
+          }
+        : undefined,
     ),
   );
 };

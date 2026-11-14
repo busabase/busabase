@@ -31,6 +31,7 @@ import {
   collectSpaces,
   describeCredential,
   envOverrideNotes,
+  findSpace,
   runAuthConfigList,
   runAuthConfigSet,
   runAuthRemove,
@@ -54,6 +55,7 @@ import {
   profilesDir,
   resolveCredentialTarget,
   setActiveCredentialTarget,
+  writeConfigFile,
 } from "./config-file.js";
 import {
   type ContractProcedure,
@@ -138,6 +140,33 @@ import {
   SKILL_TOPICS,
   skillsDirDefaultHint,
 } from "./skill-command.js";
+import {
+  discoverHomeBusabaseSkillDirs,
+  findSpaceIndexFiles,
+  forgetSpaceIndexes,
+  homeSkillsDirs,
+  isSpaceIndexNodeType,
+  nodeSpaceIndexFs,
+  parseSpaceIndexPref,
+  planSpaceIndexHook,
+  removeSpaceIndex,
+  renderSpaceIndex,
+  resolveSpaceIndexDirs,
+  SPACE_INDEX_NODE_TYPES,
+  SPACE_INDEX_SETTING_KEY,
+  type SpaceIndexNode,
+  type SpaceIndexSpace,
+  type SpaceIndexTrigger,
+  searchSpaceIndexDirs,
+  selectIndexNodes,
+  shouldAnnounceSpaceIndexAhead,
+  spaceIndexAheadNotice,
+  spaceIndexExclusionNotice,
+  spaceIndexFingerprint,
+  spaceIndexFirstTimeNotice,
+  spaceIndexNudge,
+  writeSpaceIndex,
+} from "./space-index.js";
 import { spaceWelcomeGetCommand, spaceWelcomeSetCommand } from "./space-welcome-command.js";
 import { registerTaskCommands } from "./task-command.js";
 import { checkForUpdate } from "./update-check.js";
@@ -632,6 +661,8 @@ interface CliState {
   procedureId?: string;
   /** Method + path of the last request sent — resolves the endpoint behind a task command. */
   lastRequest?: { method: string; pathname: string };
+  /** The first-time space index notice already went out ahead of this command. */
+  spaceIndexAnnounced?: boolean;
 }
 
 type Handler = (
@@ -1565,6 +1596,141 @@ and \`check\` is a linter for template packages on disk — not this machine.`,
 }
 
 /**
+ * Who the space index describes: the space (resolved like `space use` when a
+ * selector is given, else whatever this invocation targets) and its indexable
+ * nodes. One `auth.verify` for the name and slug, one flat `nodes.list` — the
+ * lightweight, ACL-filtered summary list, so a member's index never names a
+ * Base they cannot open.
+ */
+async function loadSpaceIndexSource(
+  client: BusabaseClient,
+  config: ResolvedConfig,
+  selector?: string,
+): Promise<{ space: SpaceIndexSpace; nodes: SpaceIndexNode[] }> {
+  const auth = await client.auth.verify();
+  const chosen = selector ? findSpace(collectSpaces(auth, config.spaceId), selector) : auth.space;
+  if (!chosen) throw new CliOutcomeError("USAGE", "This credential does not resolve to a space.");
+  // A different space needs its own space header; the client is otherwise identical.
+  const target =
+    chosen.id === auth.space?.id ? client : createBusabaseClient({ ...config, spaceId: chosen.id });
+  const nodes = await target.nodes.list({ types: [...SPACE_INDEX_NODE_TYPES] });
+  return {
+    space: { id: chosen.id, name: chosen.name, slug: chosen.slug ?? null },
+    nodes: selectIndexNodes(nodes),
+  };
+}
+
+const spaceIndexEnv = () => ({ cwd: process.cwd(), home: homedir(), fs: nodeSpaceIndexFs });
+
+/**
+ * After a command that changed the space's structure, or which space this CLI
+ * points at (`login`, `space use`): keep the index in step, or say once that it is
+ * not, per the `space-index` preference (unset = `auto`).
+ *
+ * Everything here is best-effort and silent on failure. The command it follows
+ * has already succeeded and printed its result; an index problem must never turn
+ * that into a non-zero exit, and nothing here ever writes to stdout, which may be
+ * JSON a script is parsing.
+ *
+ * `config` overrides `state.config` when the command just changed it — `login`
+ * wrote a new credential, `space use` a new space — so the index describes the
+ * space the CLI points at NOW.
+ */
+/**
+ * Before a create or install: if what follows will write this space's first automatic
+ * index, say so now — see {@link spaceIndexAheadNotice} for why it cannot wait. Local
+ * checks only (the setting and the files on disk; no request). Without a space id in
+ * the config there is nothing to match the files against, so the notice stays where it
+ * was, after the command.
+ */
+function announceSpaceIndexAhead(
+  state: CliState,
+  opts: OptionValues,
+  config: ResolvedConfig | undefined,
+  exampleName?: string,
+): void {
+  if (opts.dryRun || !config?.spaceId) return;
+  try {
+    const env = spaceIndexEnv();
+    const announce = shouldAnnounceSpaceIndexAhead({
+      pref: parseSpaceIndexPref(loadConfigFile()[SPACE_INDEX_SETTING_KEY]),
+      existing: findSpaceIndexFiles({
+        dirs: searchSpaceIndexDirs(env),
+        spaceId: config.spaceId,
+        fs: env.fs,
+      }),
+      homeBusabaseDirs: discoverHomeBusabaseSkillDirs(env),
+      homeDirs: homeSkillsDirs(env.home),
+    });
+    if (!announce) return;
+    console.error(spaceIndexAheadNotice(exampleName));
+    state.spaceIndexAnnounced = true;
+  } catch {
+    // Best effort, like the refresh it announces.
+  }
+}
+
+async function syncSpaceIndexAfterChange(
+  state: CliState,
+  opts: OptionValues,
+  trigger: SpaceIndexTrigger,
+  configOverride?: ResolvedConfig,
+): Promise<void> {
+  if (opts.dryRun) return;
+  try {
+    const pref = parseSpaceIndexPref(loadConfigFile()[SPACE_INDEX_SETTING_KEY]);
+    const config = configOverride ?? state.config;
+    if (pref === "off" || !config) return;
+    const { space, nodes } = await loadSpaceIndexSource(createBusabaseClient(config), config);
+    const env = spaceIndexEnv();
+    const rendered = renderSpaceIndex({ space, nodes, generatedAt: new Date().toISOString() });
+    const plan = planSpaceIndexHook({
+      pref,
+      trigger,
+      fingerprint: spaceIndexFingerprint(nodes),
+      existing: findSpaceIndexFiles({
+        dirs: searchSpaceIndexDirs(env),
+        spaceId: space.id,
+        fs: env.fs,
+      }),
+      // Automatic writes create files only in user-level skills directories, never
+      // in the project under the cwd (which may be committed).
+      busabaseDirs: discoverHomeBusabaseSkillDirs(env),
+      homeDirs: homeSkillsDirs(env.home),
+      hasNodes: rendered.included > 0,
+    });
+    if (plan.kind === "nudge") {
+      console.error(spaceIndexNudge(space.name, plan.state, rendered.names[0]));
+      return;
+    }
+    if (plan.kind !== "refresh") return;
+    const results = writeSpaceIndex({
+      dirs: plan.dirs,
+      space,
+      content: rendered.content,
+      force: false,
+      skipUnchanged: true,
+      fs: env.fs,
+    });
+    const written = results.filter((result) => result.status === "written");
+    if (written.length > 0) {
+      if (rendered.excluded.length > 0) {
+        console.error(spaceIndexExclusionNotice(rendered.excluded));
+      }
+      // Said once, when the space gets its first index; later refreshes are silent.
+      // Also after, even when it went out ahead: an agent reads `| head` or `| tail` of
+      // the output — measured both — and either one cuts one end off.
+      if (plan.firstTime) console.error(spaceIndexFirstTimeNotice(space.name, rendered.names));
+    }
+    for (const failed of results.filter((result) => result.status === "failed")) {
+      console.error(`[busabase-cli] Could not refresh ${failed.path} — ${failed.reason}`);
+    }
+  } catch {
+    // Deliberately swallowed — see above.
+  }
+}
+
+/**
  * `skill` / `skill install` / `setup-skill`.
  *
  * Kept out of `buildProgram` only for size — it is registered inline like every other
@@ -1781,6 +1947,172 @@ Default target when neither is present: ${skillsDirDefaultHint()}`,
       console.error(
         "\n[busabase-cli] this is a pointer, not a copy — the body stays in the workspace " +
           "and is fetched on use. Everyone using it needs read access to that space.",
+      );
+    });
+
+  addGlobalFlags(skill.command("space"))
+    .argument("[dir]", "skills directory; default: beside every installed busabase skill")
+    .description("Write a local index skill that names this space's Bases, apps and skills")
+    .addOption(new Option("--dir <path>", "same as the positional argument"))
+    .addOption(
+      new Option("--space <space>", "space id, slug or name; default: the space this CLI targets"),
+    )
+    .addOption(new Option("--force", "replace a same-named skill this command did not write"))
+    .addOption(new Option("--remove", "delete this space's index instead of writing it"))
+    .addOption(
+      new Option(
+        "--forget",
+        `delete every space's index and set ${SPACE_INDEX_SETTING_KEY} to off (no sign-in needed)`,
+      ),
+    )
+    .addHelpText(
+      "after",
+      `
+An agent picks a skill from its description alone, and the busabase skill's
+description cannot know that YOUR space has a "CRM" or a "Deal Flow" — so a
+request like "add this to the CRM" never reaches it. This writes a second, small
+skill whose description names them, and which sends the work back to busabase.
+
+  busabase-cli skill space                     # index the space this CLI targets
+  busabase-cli skill space --space "Vika Team" # another of this account's spaces
+  busabase-cli skill space --remove            # delete it again
+  busabase-cli skill space --forget            # delete every space's index, never write one again
+
+Writes <dir>/busabase-space-<space-slug>/SKILL.md. It is a POINTER, like \`skill link\`:
+names and node ids of the space's Bases, folders, apps, skills, workflows and forms
+— never records, doc bodies or skill bodies. It is a local file and nothing more;
+the workspace does not know it exists.
+
+Default location: beside every busabase/SKILL.md already installed in
+./.agents/skills, ./.claude/skills, ~/.claude/skills, ~/.agents/skills or
+~/.codex/skills (the index is useless without the skill it points at). With none
+installed: ${skillsDirDefaultHint()}, or ./.agents/skills / ./.claude/skills when
+the project keeps one.
+
+Names are cleaned (invisible characters removed, long names cut short), and a name
+that reads like an instruction rather than a label — "ignore previous…", a link,
+code, or a paragraph — is left out and reported by node id.
+
+Re-running refreshes it. A file this command wrote carries a marker and is
+replaced without --force; a same-named file without the marker is never
+overwritten without --force. --remove deletes only marker-carrying files for that
+space.
+
+Keeping it in sync after login, \`space use\`, and creating Bases, apps or skills is
+a preference:
+  busabase-cli auth config set ${SPACE_INDEX_SETTING_KEY} auto   # (default) keep it current, tell the user once
+  busabase-cli auth config set ${SPACE_INDEX_SETTING_KEY} ask    # ask first, and when it is stale
+  busabase-cli auth config set ${SPACE_INDEX_SETTING_KEY} off    # never mention it
+Automatic writes go only to ~/.claude/skills, ~/.agents/skills and ~/.codex/skills
+where busabase is installed (and where an index already is) — never into a project.`,
+    )
+    .action(async (dir: string | undefined, _opts: OptionValues, cmd: Command) => {
+      const opts = cmd.optsWithGlobals();
+      const config = resolveConfig(opts);
+      const explicitDir = dir ?? (opts.dir as string | undefined);
+      if (opts.forget) {
+        // Local only: no credential, no server — "stop remembering" must work even
+        // signed out or offline.
+        state.config = config;
+        const env = spaceIndexEnv();
+        const removed = forgetSpaceIndexes({
+          dirs: explicitDir
+            ? [
+                ...searchSpaceIndexDirs(env),
+                ...resolveSpaceIndexDirs({ ...env, explicit: explicitDir }),
+              ]
+            : searchSpaceIndexDirs(env),
+          fs: env.fs,
+        });
+        writeConfigFile({ [SPACE_INDEX_SETTING_KEY]: "off" });
+        if (config.output === "json") {
+          console.log(render({ removed, [SPACE_INDEX_SETTING_KEY]: "off" }, "json"));
+          return;
+        }
+        if (removed.length === 0) console.log("No space index was found — nothing removed.");
+        else {
+          console.log(`Removed ${removed.length} space index file(s):`);
+          for (const path of removed) console.log(`  ${path}`);
+        }
+        console.log(
+          `${SPACE_INDEX_SETTING_KEY} is now off: no index will be written again unless you run \`busabase-cli skill space\`.`,
+        );
+        return;
+      }
+      const refreshedToken = await maybeAutoRefresh(config.baseUrl, config.apiKey);
+      if (refreshedToken) config.apiKey = refreshedToken;
+      state.config = config;
+      assertCredentialNotExpired(config.apiKey);
+      const { space, nodes } = await loadSpaceIndexSource(
+        createBusabaseClient(config),
+        config,
+        opts.space as string | undefined,
+      );
+      const env = spaceIndexEnv();
+      const explicit = explicitDir;
+      const spaceSummary = { id: space.id, name: space.name, slug: space.slug };
+
+      if (opts.remove) {
+        const removed = removeSpaceIndex({
+          dirs: explicit ? resolveSpaceIndexDirs({ ...env, explicit }) : searchSpaceIndexDirs(env),
+          spaceId: space.id,
+          fs: env.fs,
+        });
+        if (config.output === "json") {
+          console.log(render({ space: spaceSummary, removed }, "json"));
+          return;
+        }
+        if (removed.length === 0) {
+          console.log(`No index for "${space.name}" (${space.id}) was found — nothing removed.`);
+          return;
+        }
+        console.log(`Removed the index for "${space.name}":`);
+        for (const path of removed) console.log(`  ${path}`);
+        return;
+      }
+
+      const rendered = renderSpaceIndex({ space, nodes, generatedAt: new Date().toISOString() });
+      if (rendered.excluded.length > 0) console.error(spaceIndexExclusionNotice(rendered.excluded));
+      const results = writeSpaceIndex({
+        dirs: resolveSpaceIndexDirs({ ...env, explicit }),
+        space,
+        content: rendered.content,
+        force: Boolean(opts.force),
+        fs: env.fs,
+      });
+      const written = results.filter((result) => result.status === "written");
+      const skipped = results.filter(
+        (result) => result.status === "skipped" || result.status === "failed",
+      );
+      if (written.length === 0) {
+        throw new CliOutcomeError(
+          "CONFLICT",
+          `Not written: ${skipped.map((result) => `${result.path} — ${result.reason}`).join("; ")}`,
+        );
+      }
+      if (config.output === "json") {
+        console.log(
+          render(
+            {
+              space: spaceSummary,
+              fingerprint: spaceIndexFingerprint(nodes),
+              indexed: rendered.included,
+              excluded: rendered.excluded,
+              results,
+            },
+            "json",
+          ),
+        );
+        return;
+      }
+      console.log(`Indexed ${rendered.included} names in "${space.name}" at:`);
+      for (const result of written) console.log(`  ${result.path}`);
+      for (const result of skipped) {
+        console.error(`[busabase-cli] ${result.status} ${result.path} — ${result.reason}`);
+      }
+      console.error(
+        "\n[busabase-cli] this is a pointer: names and ids only, and the work still goes " +
+          "through the busabase skill. Remove it with `busabase-cli skill space --remove`.",
       );
     });
 
@@ -2106,6 +2438,11 @@ Do not restart login after showing the URL — a restart invalidates it.`,
       const profile = opts.profile as string | undefined;
       if (profile && !opts.refresh) activateLoggedInProfile(profile);
       console.log(render(summary, config.output));
+      // A completed sign-in only (not `--no-wait`'s pending half, not a token
+      // rotation). Re-resolved: login just wrote the credential this reads.
+      if (!opts.refresh && /^(signed in|connected)/.test(summary.status ?? "")) {
+        await syncSpaceIndexAfterChange(state, opts, "login", resolveConfig(opts));
+      }
     });
 
   addGlobalFlags(program.command("logout"))
@@ -2206,7 +2543,7 @@ skill, the docs' curl snippets and the SDK all follow along automatically.
 
   const authConfig = auth.command("config").description("CLI settings (~/.busabase/config.json)");
   addGlobalFlags(authConfig.command("set"))
-    .argument("<key>", "setting name (currently: output)")
+    .argument("<key>", `setting name: output | ${SPACE_INDEX_SETTING_KEY} (auto | ask | off)`)
     .argument("<value>", "setting value")
     .description("Save a preference that outlives an account switch")
     .action(async (key: string, value: string, _opts: OptionValues, sub: Command) => {
@@ -2260,6 +2597,10 @@ than as a 403 later. The choice is stored in the active profile and mirrored to
         selector,
       });
       console.log(render(summary, config.output));
+      await syncSpaceIndexAfterChange(state, opts, "switch", {
+        ...config,
+        spaceId: summary.spaceId,
+      });
     });
 
   const nodes = program.command("nodes").description("Workspace node tree");
@@ -2885,6 +3226,27 @@ Examples:
       ),
     );
 
+  const installAction = runArgAction(state, (repoUrl, client, opts, config) =>
+    runInstall(client, repoUrl, {
+      intoFolder: opts.intoFolder as string | undefined,
+      dryRun: Boolean(opts.dryRun),
+      // Permission-aware by default, like every other write: content merges
+      // unless the caller explicitly asks for review. `--auto-merge` is now a
+      // no-op kept for scripts that still pass it. A credential without write
+      // access still gets change requests — the server falls back gracefully
+      // rather than refusing.
+      autoMerge: opts.requireReview !== true,
+      rename: Boolean(opts.rename),
+      skill: opts.skill as string | undefined,
+      // commander maps `--no-sample-records` to `sampleRecords: false`.
+      noSampleRecords: opts.sampleRecords === false,
+      noRollback: opts.rollback === false,
+      json: config.output === "json",
+      githubToken: process.env.GITHUB_TOKEN,
+      serverUrl: config.baseUrl,
+    }),
+  );
+
   addGlobalFlags(program.command("install"))
     .description(
       "Install a Busabase package from a GitHub repo or a local directory into this space",
@@ -2960,28 +3322,13 @@ A package whose records carry relation values cannot be installed with
 exist only once the records are merged, so review would install every relation
 empty. Defining a relation field with nothing linked yet does not trigger this.`,
     )
-    .action(
-      runArgAction(state, (repoUrl, client, opts, config) =>
-        runInstall(client, repoUrl, {
-          intoFolder: opts.intoFolder as string | undefined,
-          dryRun: Boolean(opts.dryRun),
-          // Permission-aware by default, like every other write: content merges
-          // unless the caller explicitly asks for review. `--auto-merge` is now a
-          // no-op kept for scripts that still pass it. A credential without write
-          // access still gets change requests — the server falls back gracefully
-          // rather than refusing.
-          autoMerge: opts.requireReview !== true,
-          rename: Boolean(opts.rename),
-          skill: opts.skill as string | undefined,
-          // commander maps `--no-sample-records` to `sampleRecords: false`.
-          noSampleRecords: opts.sampleRecords === false,
-          noRollback: opts.rollback === false,
-          json: config.output === "json",
-          githubToken: process.env.GITHUB_TOKEN,
-          serverUrl: config.baseUrl,
-        }),
-      ),
-    );
+    .action(async (repoUrl: string, opts: OptionValues, cmd: Command) => {
+      announceSpaceIndexAhead(state, cmd.optsWithGlobals(), resolveConfig(cmd.optsWithGlobals()));
+      await installAction(repoUrl, opts, cmd);
+      // A template is the biggest structure change there is — a folder, its
+      // Bases, an app and a skill at once.
+      await syncSpaceIndexAfterChange(state, cmd.optsWithGlobals(), "create");
+    });
 
   addGlobalFlags(program.command("check"))
     .description("Check a package / Skill / template / AirApp directory against its contract")
@@ -3284,7 +3631,34 @@ To copy a still-live space's current content into another space, use
     addGlobalFlags,
     parseFieldSpecs,
     parseJsonValue,
-    runAction: (handler) => runAction(state, (client, opts) => handler(client, opts)),
+    runAction: (handler, after) => {
+      const action = runAction(state, (client, opts) => handler(client, opts));
+      if (!after) return action;
+      return async (opts, cmd) => {
+        await action(opts, cmd);
+        await after(cmd.optsWithGlobals());
+      };
+    },
+    // A new Base/folder/app/skill/workflow/form, or one archived, changes what the
+    // space's index skill should name. A Doc or a file does not, so creating one
+    // costs no extra request.
+    beforeTask: async (taskName, input, opts) => {
+      if (taskName === "node_create" && isSpaceIndexNodeType(input.type)) {
+        announceSpaceIndexAhead(
+          state,
+          opts,
+          state.config,
+          typeof input.name === "string" ? input.name : undefined,
+        );
+      }
+    },
+    afterTask: async (taskName, input, opts) => {
+      if (taskName === "node_create" && isSpaceIndexNodeType(input.type)) {
+        await syncSpaceIndexAfterChange(state, opts, "create");
+      } else if (taskName === "node_archive") {
+        await syncSpaceIndexAfterChange(state, opts, "archive");
+      }
+    },
   });
 
   // Fill in every remaining contract procedure as a generated command, so the CLI

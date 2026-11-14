@@ -80,6 +80,7 @@ Settings that outlive an account switch live in `config.json`:
 
 ```bash
 busabase-cli auth config set output json   # stop typing --output json
+busabase-cli auth config set space-index ask    # keep `skill space` in sync: auto (default) | ask | off
 busabase-cli auth config list
 ```
 
@@ -219,10 +220,27 @@ rather than assuming one of the others already did.
 busabase-cli skill              # the everyday manual, generated for your base URL
 busabase-cli skill setup        # the one-time onboarding document
 busabase-cli skill install      # write it into your agent's skills directory
+busabase-cli skill link --node-id <id>  # point at a Skill node hosted in a workspace
+busabase-cli skill space        # write a per-space index skill naming your Bases
 ```
 
 Note the singular: `skill` is this CLI's own manual, while `skills` (plural) lists
 the Skill nodes stored inside your workspace. Different things.
+
+`skill space` exists because an agent picks a skill from its description alone, and
+the generic `busabase` skill cannot know your space has a "CRM" or a "Deal Flow".
+It writes `busabase-space-<slug>/SKILL.md` beside every installed `busabase` skill:
+a pointer holding names and node ids only (never records, doc bodies or skill
+bodies) that sends the work back to `busabase`. Re-running refreshes it, `--space`
+picks another space, `--remove` deletes it, and `--forget` deletes every space's
+index and turns the preference off. Whether it is kept in sync after `login`,
+`space use` and creating Bases, apps or skills is a preference:
+`busabase-cli auth config set space-index auto|ask|off`. The default, `auto`, keeps
+it current — but only in `~/.claude/skills`, `~/.agents/skills` or `~/.codex/skills`
+where `busabase` is installed (plus wherever an index already is), never in a
+project directory — and prints one line, the first time, for the agent to tell the
+user in plain words. `ask` prints a yes/no nudge instead. Names are cleaned, and a
+name that reads like an instruction rather than a label is left out and reported.
 
 What each entry point does when conditions are less than perfect:
 

@@ -6,6 +6,7 @@ import {
   collectProfileStatus,
   findSpace,
   renderAuthStatus,
+  runAuthConfigList,
   runAuthConfigSet,
   runAuthSwitch,
   runSpaceUse,
@@ -21,6 +22,7 @@ import {
   resolveCredentialTarget,
   setActiveCredentialTarget,
   setCurrentProfile,
+  writeConfigFile,
   writeDotEnvFile,
 } from "./config-file";
 
@@ -247,5 +249,23 @@ describe("runAuthConfigSet", () => {
 
   it("saves a valid preference", () => {
     expect(runAuthConfigSet("output", "json")).toMatchObject({ status: "saved", output: "json" });
+  });
+
+  it("accepts space-index auto|ask|off and nothing else", () => {
+    expect(() => runAuthConfigSet("space-index", "always")).toThrow(/auto, ask, off/);
+    expect(runAuthConfigSet("space-index", "off")).toMatchObject({
+      status: "saved",
+      "space-index": "off",
+    });
+    expect(runAuthConfigList()["space-index"]).toBe("off");
+  });
+
+  it("lists space-index as auto by default, saying it is the default", () => {
+    expect(runAuthConfigList()["space-index"]).toBe("auto (default)");
+  });
+
+  it("lists an unrecognised space-index as ask, never auto", () => {
+    writeConfigFile({ "space-index": "automatic" });
+    expect(runAuthConfigList()["space-index"]).toBe('ask (unrecognised value "automatic")');
   });
 });
