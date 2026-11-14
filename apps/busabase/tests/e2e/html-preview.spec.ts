@@ -78,6 +78,8 @@ test("HTML preview keeps its iframe through fullscreen and pinned navigation", a
     const source = page.getByRole("textbox", { name: "HTML source" });
     await expect(source).toBeVisible();
     await expect(page.getByRole("tab", { name: "Source" })).toHaveAttribute("data-state", "active");
+    // A desktop topbar keeps the secondary actions while editing.
+    await expect(topbar.getByRole("button", { name: "Agent prompts" })).toBeVisible();
     await topbar.getByRole("button", { name: "Enter fullscreen" }).click();
     await expect(fullscreenPreview(page)).toBeVisible();
     await expect(page.getByRole("tab", { name: "Preview" })).toHaveAttribute(
@@ -196,7 +198,7 @@ test.describe("mobile", () => {
       }));
       expect(metrics.scrollWidth, name).toBeLessThanOrEqual(metrics.clientWidth);
       expect(metrics.rect.left, name).toBeGreaterThanOrEqual(0);
-      expect(metrics.rect.right, name).toBeLessThanOrEqual(390);
+      expect(metrics.rect.right, name).toBeLessThanOrEqual(page.viewportSize()?.width ?? 390);
     };
     // Reading mode: Edit instead of the Preview/Source switch, and no editor header.
     const edit = topbar.getByRole("button", { name: "Edit", exact: true });
@@ -216,8 +218,15 @@ test.describe("mobile", () => {
     await expect(page.getByRole("tab", { name: "Source" })).toBeVisible();
     await expectInsideViewport(header, "editing header");
     await expectInsideViewport(topbar, "editing topbar");
+    // A phone keeps only fullscreen, Cancel and Save while editing, so 375px fits too.
+    await expect(topbar.getByRole("button", { name: "Agent prompts" })).toBeHidden();
+    await expect(topbar.getByRole("button", { name: "More actions" })).toBeHidden();
+    await page.setViewportSize({ width: 375, height: 844 });
+    await expectInsideViewport(topbar, "editing topbar at 375px");
+    await page.setViewportSize({ width: 390, height: 844 });
     await topbar.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(page.getByRole("tab", { name: /^(Preview|Source)$/ })).toHaveCount(0);
+    await expect(topbar.getByRole("button", { name: "More actions" })).toBeVisible();
 
     await page.getByRole("button", { name: "Enter fullscreen" }).click();
     const fullscreen = fullscreenPreview(page);
