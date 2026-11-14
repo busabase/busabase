@@ -2,7 +2,7 @@
 
 Busabase organizes trusted knowledge as nodes. Every node appears in the left navigation and every change to one travels the same Change Request path — so it carries a message, a diff, an author, and a history, whether it merges on the spot or waits for review.
 
-![Create node menu showing Folder, Base, Skill, Drive, and Doc](../public/assets/docs/busabase-create-node-menu.png)
+![Create node menu, expanded with More types to show Folder, Base, File, Doc, Skill, Drive, AirApp, Form, Whiteboard, Workflow, and HTML](../public/assets/docs/busabase-create-node-menu.png)
 
 ## Current Types
 
