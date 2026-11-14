@@ -285,3 +285,64 @@ describe("members commands on a server without the route", () => {
     expect(stderr).not.toContain("member invitations");
   });
 });
+
+/**
+ * `airapps site-set-primary-domain` is newer than the other website domain
+ * commands, so it reaches servers that have `/site/domains` but not
+ * `/site/domains/primary`. Their router 404 must not read as a wrong app id.
+ */
+describe("site-set-primary-domain on a server without the route", () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  const run = async (response: Response, argv: string[]) => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    global.fetch = vi.fn(async () => response) as typeof fetch;
+    const exitCode = await runCli(argv);
+    return {
+      exitCode,
+      stdout: log.mock.calls.map((call) => call.join(" ")).join("\n"),
+      stderr: error.mock.calls.map((call) => call.join(" ")).join("\n"),
+    };
+  };
+
+  const argv = [
+    "--base-url",
+    "https://busabase.com",
+    "airapps",
+    "site-set-primary-domain",
+    "--node-id",
+    "app_1",
+    "--hostname",
+    "www.company.com",
+  ];
+
+  it("says the server predates primary domains", async () => {
+    const { exitCode, stderr } = await run(
+      Response.json(
+        { error: "Not found", path: "/api/v1/airapps/app_1/site/domains/primary" },
+        { status: 404 },
+      ),
+      argv,
+    );
+
+    expect(exitCode).toBe(EXIT_CODES.NOT_FOUND);
+    expect(stderr).toContain("does not support primary custom domains yet");
+    expect(stderr).toContain("keeps serving it directly");
+  });
+
+  it("leaves the procedure's own NOT_FOUND alone", async () => {
+    const { exitCode, stderr } = await run(
+      Response.json({ error: "AirApp not found", code: "NOT_FOUND" }, { status: 404 }),
+      argv,
+    );
+
+    expect(exitCode).toBe(EXIT_CODES.NOT_FOUND);
+    expect(stderr).toContain("AirApp not found");
+    expect(stderr).not.toContain("primary custom domains");
+  });
+});
