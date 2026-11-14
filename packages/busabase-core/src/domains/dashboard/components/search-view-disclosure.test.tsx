@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import {
   type BusabaseQueryUtils,
   createBusabaseQueryUtils,
@@ -21,9 +21,9 @@ const searchResponse = (contentTruncated: boolean) =>
     { headers: { "content-type": "application/json" } },
   );
 
-function setup(contentTruncated: boolean) {
+function setup(contentTruncated: boolean, fetchSearch?: () => Promise<Response>) {
   const actual = createBusabaseQueryUtils("http://localhost/api/rpc", {
-    fetch: async () => searchResponse(contentTruncated),
+    fetch: fetchSearch ?? (async () => searchResponse(contentTruncated)),
   });
   const orpc = {
     search: actual.search,
@@ -64,5 +64,32 @@ describe("advanced search empty state discloses unindexed text", () => {
     // `source=files` counts as a narrowed search, so the filter-aware copy shows.
     expect(view.getByText(messages.searchPage.noMatchesWithFilters)).toBeTruthy();
     expect(view.queryByText(messages.search.partialContentBody)).toBeNull();
+  });
+
+  it("explains a timed-out search and retries only when the reader asks", async () => {
+    let attempts = 0;
+    const view = setup(false, async () => {
+      attempts++;
+      return attempts === 1
+        ? new Response(
+            JSON.stringify({
+              json: {
+                defined: false,
+                code: "TIMEOUT",
+                status: 422,
+                message:
+                  "Search took too long. Narrow the search to a Base or folder and try again.",
+              },
+            }),
+            { status: 422, headers: { "content-type": "application/json" } },
+          )
+        : searchResponse(false);
+    });
+    expect(await view.findByText(messages.search.timedOut)).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(attempts).toBe(1);
+    fireEvent.click(view.getByRole("button", { name: messages.search.retry }));
+    await waitFor(() => expect(view.queryByText(messages.search.timedOut)).toBeNull());
+    expect(attempts).toBe(2);
   });
 });

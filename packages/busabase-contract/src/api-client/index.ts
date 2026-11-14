@@ -215,6 +215,8 @@ export interface BusabaseDashboardApiClient {
      * its own slice instead of the whole Base.
      */
     dateRange?: { fieldSlug: string; gte: string; lt: string };
+    /** Several date fields at once, each bound optional; a timeline's period overlap. */
+    dateRanges?: Array<{ fieldSlug: string; gte?: string; lt?: string }>;
     /**
      * Same one-field sort as `records.list` (number/date fields only); it
      * replaces the View's sort when `viewId` is also given.
@@ -222,6 +224,8 @@ export interface BusabaseDashboardApiClient {
     sort?: z.input<typeof listRecordsSortSchema>;
     page?: number;
     pageSize?: number;
+    /** Count `total` only this far; a Kanban column needs just `page * pageSize + 1`. */
+    totalLimit?: number;
   }) => Promise<{
     records: RecordVO[];
     total: number;

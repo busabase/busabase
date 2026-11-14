@@ -350,6 +350,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "airapps.siteDomains": node("write"),
   "airapps.siteBindDomain": node("write"),
   "airapps.siteUnbindDomain": node("write"),
+  "airapps.siteSetPrimaryDomain": node("write"),
   "airapps.siteDeployPreview": node("write"),
   "airapps.siteGoLive": node("write"),
   "airapps.siteRepublish": node("write"),

@@ -1,16 +1,15 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
-import type { BaseFieldVO, BaseVO, ViewVO } from "busabase-contract/types";
+import type { BaseFieldVO, BaseVO, RecordVO, ViewVO } from "busabase-contract/types";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 import { SubmitPermissionProvider } from "./split-submit-button";
 
-// The "Uncategorized" column's read ("has no value") is the board's slowest on
-// a large Base and keeps running once sent, so it waits for the column counts
-// and is only sent for a bucket that holds records.
+// Every header must come from its own bounded cards read. The board must not
+// start a whole-Base groupBy simply to show counts.
 vi.mock("wouter", () => ({ useSearch: () => "" }));
 vi.mock("openlib/ui/dashboard", () => ({
   SPALink: ({ children, ...props }: { children: ReactNode; href: string }) => (
@@ -73,21 +72,50 @@ const view: ViewVO = {
   updatedAt: "2026-10-01T00:00:00Z",
 };
 
-type ColumnInput = { filters?: Array<{ operator: string }> };
-const emptyPage = { records: [], total: 0, page: 1, totalPages: 1 };
-const makeClient = (groupRecords: () => Promise<unknown>) => {
-  const listRecordsPage = vi.fn(async (_input: ColumnInput) => emptyPage);
+type ColumnInput = Parameters<BusabaseDashboardApiClient["listRecordsPage"]>[0];
+type Page = Awaited<ReturnType<BusabaseDashboardApiClient["listRecordsPage"]>>;
+const emptyPage: Page = { records: [], total: 0, page: 1, totalPages: 1 };
+const makeClient = (read: (input: ColumnInput) => Promise<Page> = async () => emptyPage) => {
+  const listRecordsPage = vi.fn(read);
+  const groupRecords = vi.fn(async () => {
+    throw new Error("A board must not aggregate the Base");
+  });
   return {
     client: { groupRecords, listRecordsPage } as unknown as BusabaseDashboardApiClient,
-    uncategorizedReads: () =>
-      listRecordsPage.mock.calls.filter(([input]) => input.filters?.[0]?.operator === "is_empty"),
+    groupRecords,
     listRecordsPage,
   };
 };
+const record = (index: number): RecordVO => ({
+  id: `rec_${index}`,
+  base,
+  baseId: base.id,
+  headCommitId: `com_${index}`,
+  parentRecordId: null,
+  parentCommitId: null,
+  status: "active",
+  createdBy: "owner",
+  archivedAt: null,
+  createdAt: base.createdAt,
+  updatedAt: base.createdAt,
+  headCommit: {
+    id: `com_${index}`,
+    baseId: base.id,
+    targetType: "base",
+    nodeId: null,
+    operationId: null,
+    parentCommitId: null,
+    payload: { title: `Task ${index}`, state: "todo" },
+    operation: "record_create",
+    message: "",
+    author: "owner",
+    createdAt: base.createdAt,
+  },
+});
 const renderBoard = (client: BusabaseDashboardApiClient) =>
   render(
     <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      client={new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } })}
     >
       <CoreI18nProvider locale="en">
         <SubmitPermissionProvider permissionLevel="read">
@@ -99,49 +127,120 @@ const renderBoard = (client: BusabaseDashboardApiClient) =>
 
 afterEach(cleanup);
 
-describe("the Uncategorized column", () => {
-  it("is not read while the counts load, nor when they show it empty", async () => {
-    let resolveCounts: (value: unknown) => void = () => {};
-    const { client, listRecordsPage, uncategorizedReads } = makeClient(
-      () =>
-        new Promise((resolve) => {
-          resolveCounts = resolve;
-        }),
-    );
+describe("a Kanban column", () => {
+  it("gets cards and bounded headers without aggregating the Base", async () => {
+    const { client, groupRecords, listRecordsPage } = makeClient();
     renderBoard(client);
-    await waitFor(() => expect(listRecordsPage).toHaveBeenCalledTimes(2));
-    expect(uncategorizedReads()).toHaveLength(0);
-    expect(screen.queryByTestId("kanban-column-__uncategorized__")).toBeNull();
-
-    resolveCounts({ groups: [{ value: "todo", count: 3 }], total: 3 });
-    await waitFor(() => expect(screen.getByText("3")).toBeTruthy());
-    expect(screen.queryByTestId("kanban-column-__uncategorized__")).toBeNull();
-    expect(uncategorizedReads()).toHaveLength(0);
+    await waitFor(() => expect(listRecordsPage).toHaveBeenCalledTimes(3));
+    expect(groupRecords).not.toHaveBeenCalled();
+    for (const [input] of listRecordsPage.mock.calls) {
+      expect(input.totalLimit).toBe((input.page ?? 1) * 20 + 1);
+      expect(input.viewId).toBe(view.id);
+    }
+    expect(await within(screen.getByTestId("kanban-column-todo")).findByText("0")).toBeTruthy();
   });
 
-  it("is read once the counts say it holds records", async () => {
-    const { client, uncategorizedReads } = makeClient(async () => ({
-      groups: [
-        { value: "todo", count: 3 },
-        { value: null, count: 2 },
-      ],
-      total: 5,
-    }));
-    renderBoard(client);
-    expect(await screen.findByTestId("kanban-column-__uncategorized__")).toBeTruthy();
-    await waitFor(() => expect(uncategorizedReads()).toHaveLength(1));
-  });
-
-  it("still shows when the counts fail", async () => {
-    // What counting a Base too large for the 15 s budget looks like. It is not
-    // retried (any other failure is, three times, which this test would sit out).
-    const { client, uncategorizedReads } = makeClient(async () => {
-      throw new Error(
-        "This view has too many records to work through. Add a filter to narrow it, then try again.",
-      );
+  it("shows a lower bound while paginating, then the exact total, without losing cards", async () => {
+    const { client, groupRecords, listRecordsPage } = makeClient(async (input) => {
+      if (input.filters?.[0]?.value !== "todo") return emptyPage;
+      const page = input.page ?? 1;
+      return {
+        records: Array.from({ length: page === 3 ? 5 : 20 }, (_, i) => record((page - 1) * 20 + i)),
+        page,
+        total: page === 3 ? 45 : page * 20 + 1,
+        totalPages: 3,
+        totalCapped: page < 3,
+      };
     });
     renderBoard(client);
-    expect(await screen.findByTestId("kanban-column-__uncategorized__")).toBeTruthy();
-    await waitFor(() => expect(uncategorizedReads()).toHaveLength(1));
+    const column = within(screen.getByTestId("kanban-column-todo"));
+    expect(await column.findByText("20+")).toBeTruthy();
+    expect(column.getAllByRole("link")).toHaveLength(20);
+    fireEvent.click(column.getByRole("button", { name: "Load more" }));
+    expect(await column.findByText("40+")).toBeTruthy();
+    expect(column.getAllByRole("link")).toHaveLength(40);
+    fireEvent.click(column.getByRole("button", { name: "Load more" }));
+    expect(await column.findByText("45")).toBeTruthy();
+    expect(column.getAllByRole("link")).toHaveLength(45);
+    expect(column.queryByRole("button", { name: "Load more" })).toBeNull();
+    const todoReads = listRecordsPage.mock.calls.filter(
+      ([input]) => input.filters?.[0]?.value === "todo",
+    );
+    expect(todoReads.map(([input]) => input.totalLimit)).toEqual([21, 41, 61]);
+    expect(groupRecords).not.toHaveBeenCalled();
+  });
+});
+
+describe("the Uncategorized column", () => {
+  it("waits for its own read and stays hidden when that read is empty", async () => {
+    let resolveEmpty: (value: Page) => void = () => {};
+    const { client, listRecordsPage } = makeClient(async (input) =>
+      input.filters?.[0]?.operator === "is_empty"
+        ? new Promise((resolve) => {
+            resolveEmpty = resolve;
+          })
+        : emptyPage,
+    );
+    renderBoard(client);
+    await waitFor(() => expect(listRecordsPage).toHaveBeenCalledTimes(3));
+    expect(screen.queryByTestId("kanban-column-__uncategorized__")).toBeNull();
+    resolveEmpty(emptyPage);
+    await waitFor(() => expect(screen.queryByText("…")).toBeNull());
+    expect(screen.queryByTestId("kanban-column-__uncategorized__")).toBeNull();
+  });
+
+  it("shows unset records even when there is no aggregate result", async () => {
+    const { client, groupRecords } = makeClient(async (input) =>
+      input.filters?.[0]?.operator === "is_empty"
+        ? {
+            records: [
+              {
+                ...record(1),
+                headCommit: { ...record(1).headCommit, payload: { title: "Unplanned" } },
+              },
+            ],
+            total: 1,
+            page: 1,
+            totalPages: 1,
+          }
+        : emptyPage,
+    );
+    renderBoard(client);
+    const column = within(await screen.findByTestId("kanban-column-__uncategorized__"));
+    expect(column.getByRole("link", { name: "Unplanned" })).toBeTruthy();
+    expect(column.getByText("1")).toBeTruthy();
+    expect(groupRecords).not.toHaveBeenCalled();
+  });
+
+  it("shows an error and retries an unreadable bucket, without retrying automatically or hiding it", async () => {
+    let failed = true;
+    const { client, listRecordsPage } = makeClient(async (input) => {
+      if (input.filters?.[0]?.operator !== "is_empty") return emptyPage;
+      if (failed)
+        throw new Error(
+          "This view has too many records to work through. Add a filter to narrow it, then try again.",
+        );
+      return {
+        records: [
+          {
+            ...record(1),
+            headCommit: { ...record(1).headCommit, payload: { title: "Recovered" } },
+          },
+        ],
+        total: 1,
+        page: 1,
+        totalPages: 1,
+      };
+    });
+    renderBoard(client);
+    const column = within(await screen.findByTestId("kanban-column-__uncategorized__"));
+    expect(column.getByRole("alert").textContent).toContain("too many records");
+    expect(
+      listRecordsPage.mock.calls.filter(([input]) => input.filters?.[0]?.operator === "is_empty"),
+    ).toHaveLength(1);
+    failed = false;
+    fireEvent.click(column.getByRole("button", { name: "Retry" }));
+    expect(await column.findByRole("link", { name: "Recovered" })).toBeTruthy();
+    expect(column.queryByRole("alert")).toBeNull();
   });
 });

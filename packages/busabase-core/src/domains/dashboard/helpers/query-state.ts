@@ -24,6 +24,10 @@ export const isNotFoundError = (error: unknown): boolean => {
 export const retryUnlessNotFound = (failureCount: number, error: unknown): boolean =>
   !isNotFoundError(error) && failureCount < 3;
 
+/** The server's "this view has too many records" answer, after the oRPC client boundary. */
+export const isViewTooLargeError = (error: unknown): boolean =>
+  error instanceof Error && error.message === VIEW_TOO_LARGE_MESSAGE;
+
 /**
  * `retry` for a read of a view's records. A view too large to read fails the
  * same way every time, after the full 15 s of database time, so trying again
@@ -31,4 +35,4 @@ export const retryUnlessNotFound = (failureCount: number, error: unknown): boole
  * try is over — waits for it. Anything else keeps the default three attempts.
  */
 export const retryRecordRead = (failureCount: number, error: unknown): boolean =>
-  !(error instanceof Error && error.message === VIEW_TOO_LARGE_MESSAGE) && failureCount < 3;
+  !isViewTooLargeError(error) && failureCount < 3;

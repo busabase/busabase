@@ -2,14 +2,16 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BaseFieldVO, BaseVO, GanttScale, RecordVO, ViewVO } from "busabase-contract/types";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import {
   calendarDayToLocalDate,
   fromDateTimeInputValue,
+  getCalendarDayRange,
   getDateFieldCalendarDay,
   getDateFieldOptions,
   toDateTimeInputValue,
@@ -31,6 +33,13 @@ const TITLE_COL_PX = 200;
 // GANTT_AUTO_PAGES pages — still shows every row without a click.
 const GANTT_PAGE_SIZE = 100;
 const GANTT_AUTO_PAGES = 5;
+// Up to this many rows the timeline draws the whole view on one axis, as it
+// always has. A larger view is read one period at a time: the rows whose span
+// overlaps it, the way Calendar reads one month.
+const GANTT_WHOLE_VIEW_ROWS = GANTT_PAGE_SIZE * GANTT_AUTO_PAGES;
+// A period fills about a screen at either scale: 6 months at 5 px a day,
+// 6 weeks at 22 px a day.
+const PERIOD_LENGTH: Record<GanttScale, number> = { month: 6, week: 6 };
 
 const dateFieldTypes = ["date", "created_time", "updated_time"] as const;
 
@@ -91,6 +100,18 @@ const draggedDayValue = (field: BaseFieldVO, previous: unknown, day: Date): stri
   return fromDateTimeInputValue(`${toYMD(day)}T${time}`, zone) ?? toYMD(day);
 };
 
+/** The first local day of the period that holds `day`: a month's 1st, or a week's Sunday. */
+const periodStartOf = (day: Date, scale: GanttScale) =>
+  scale === "month"
+    ? new Date(day.getFullYear(), day.getMonth(), 1)
+    : new Date(day.getFullYear(), day.getMonth(), day.getDate() - day.getDay());
+
+/** The first day of the period `steps` periods away from the one starting at `start`. */
+const shiftPeriod = (start: Date, scale: GanttScale, steps: number) =>
+  scale === "month"
+    ? new Date(start.getFullYear(), start.getMonth() + PERIOD_LENGTH.month * steps, 1)
+    : addDays(start, PERIOD_LENGTH.week * 7 * steps);
+
 type DragMode = "move" | "resize-start" | "resize-end";
 type DragState = { recordId: string; mode: DragMode; originX: number; deltaDays: number };
 
@@ -119,10 +140,15 @@ export function BusaBaseGantt({
   const isAnon = useIsAnonymousVisitor();
   const permissionLevel = useWorkspacePermissionLevel();
   const [drag, setDrag] = useState<DragState | null>(null);
+  const liveDragRef = useRef<DragState | null>(null);
+  const finishDragRef = useRef<((finished: DragState) => void) | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
   const [reviewRequestId, setReviewRequestId] = useState<string | null>(null);
   // Seeds from the view's saved scale; the toolbar toggle overrides it locally.
   const [scale, setScale] = useState<GanttScale>(activeView?.config.ganttScale ?? "month");
+  const [periodStart, setPeriodStart] = useState(() =>
+    periodStartOf(new Date(), activeView?.config.ganttScale ?? "month"),
+  );
   const dayPx = DAY_PX[scale];
   const { start: startField, end: endField } = resolveGanttFields(
     base,
@@ -134,6 +160,7 @@ export function BusaBaseGantt({
   const orpc = useDashboardOrpc();
   // The view's own filters and sorts decide the rows, server-side, exactly as
   // its table would list them; records without both dates are skipped below.
+  // Counting one row past GANTT_WHOLE_VIEW_ROWS is enough to choose the mode.
   const rowsQuery = useInfiniteQuery({
     enabled: Boolean(baseId),
     retry: retryRecordRead,
@@ -145,6 +172,7 @@ export function BusaBaseGantt({
         baseId,
         page: pageParam as number,
         pageSize: GANTT_PAGE_SIZE,
+        totalLimit: GANTT_WHOLE_VIEW_ROWS + 1,
         ...(activeView?.id ? { viewId: activeView.id } : {}),
       }),
     // Under the canonical records prefix, so live-sync and edits refresh it.
@@ -155,42 +183,113 @@ export function BusaBaseGantt({
       activeView?.id ?? "",
     ],
   });
-  const loadedPages = rowsQuery.data?.pages.length ?? 0;
+  const probe = rowsQuery.data?.pages[0];
+  const periodMode = Boolean(probe && (probe.totalCapped || probe.total > GANTT_WHOLE_VIEW_ROWS));
+
+  // A period [periodStart, periodEnd) of local days. A row overlaps it when it
+  // starts before the period ends and ends on or after its first day — in each
+  // field's own day convention (see getCalendarDayRange).
+  const periodEnd = shiftPeriod(periodStart, scale, 1);
+  const startsBefore =
+    startField &&
+    getCalendarDayRange(startField.type, getDateFieldOptions(startField.options), toYMD(periodEnd))
+      ?.gte;
+  const endsFrom =
+    endField &&
+    getCalendarDayRange(endField.type, getDateFieldOptions(endField.options), toYMD(periodStart))
+      ?.gte;
+  const periodQuery = useInfiniteQuery({
+    enabled: periodMode && Boolean(startField && endField && startsBefore && endsFrom),
+    retry: retryRecordRead,
+    getNextPageParam: (last: { page: number; totalPages: number }) =>
+      last.page < last.totalPages ? last.page + 1 : undefined,
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
+      client.listRecordsPage({
+        baseId,
+        page: pageParam as number,
+        pageSize: GANTT_PAGE_SIZE,
+        // Only whether there is a next page: a period of a huge view is itself huge.
+        totalLimit: (pageParam as number) * GANTT_PAGE_SIZE + 1,
+        dateRanges: [
+          { fieldSlug: startField?.slug ?? "", lt: startsBefore ?? undefined },
+          { fieldSlug: endField?.slug ?? "", gte: endsFrom ?? undefined },
+        ],
+        // Order the schedule before paging, so "Load more" continues from the
+        // dates already shown. An explicitly saved view sort still wins.
+        ...(!activeView?.config.sorts.length && startField
+          ? { sort: { fieldSlug: startField.slug, fieldType: "date", direction: "asc" as const } }
+          : {}),
+        ...(activeView?.id ? { viewId: activeView.id } : {}),
+      }),
+    queryKey: [
+      ...(orpc?.records.listPage.key() ?? ["busabase"]),
+      "gantt-period",
+      baseId,
+      activeView?.id ?? "",
+      startField?.slug ?? "",
+      endField?.slug ?? "",
+      startsBefore ?? "",
+      endsFrom ?? "",
+    ],
+  });
+  const activeQuery = periodMode ? periodQuery : rowsQuery;
+  const loadedPages = activeQuery.data?.pages.length ?? 0;
   useEffect(() => {
     if (
+      // A long schedule uses a global date sort. Start with one page instead
+      // of immediately running five potentially expensive ordered reads.
+      !periodMode &&
       loadedPages > 0 &&
       loadedPages < GANTT_AUTO_PAGES &&
-      rowsQuery.hasNextPage &&
-      !rowsQuery.isFetchingNextPage
+      activeQuery.hasNextPage &&
+      !activeQuery.isFetchingNextPage
     ) {
-      void rowsQuery.fetchNextPage();
+      void activeQuery.fetchNextPage();
     }
-  }, [loadedPages, rowsQuery.hasNextPage, rowsQuery.isFetchingNextPage, rowsQuery.fetchNextPage]);
-  const records = (rowsQuery.data?.pages ?? []).flatMap((page) => page.records);
-  const firstPage = rowsQuery.data?.pages[0];
-  const total = `${firstPage?.total ?? 0}${firstPage?.totalCapped ? "+" : ""}`;
+  }, [
+    periodMode,
+    loadedPages,
+    activeQuery.hasNextPage,
+    activeQuery.isFetchingNextPage,
+    activeQuery.fetchNextPage,
+  ]);
+  const records = (activeQuery.data?.pages ?? []).flatMap((page) => page.records);
+  const lastPage = activeQuery.data?.pages.at(-1);
+  // A count that stopped early says "at least what is shown".
+  const total = lastPage?.totalCapped ? `${records.length}+` : `${lastPage?.total ?? 0}`;
   const baseSlug = base?.slug ?? records[0]?.base.slug ?? "";
 
   // Window listeners drive the active drag; committed on mouse-up.
   useEffect(() => {
-    if (!drag) {
-      return;
-    }
     const onMove = (event: MouseEvent) => {
-      setDrag((current) =>
-        current
-          ? { ...current, deltaDays: Math.round((event.clientX - current.originX) / dayPx) }
-          : current,
-      );
+      const current = liveDragRef.current;
+      if (!current) return;
+      const next = {
+        ...current,
+        deltaDays: Math.round((event.clientX - current.originX) / dayPx),
+      };
+      // A quick move and release may happen before React paints the preview.
+      // Keep the gesture authoritative synchronously; state is only its paint.
+      liveDragRef.current = next;
+      setDrag(next);
     };
-    const onUp = () => setDrag(null);
+    const onUp = () => {
+      const finished = liveDragRef.current;
+      if (!finished) return;
+      // A clipped edge is at the track boundary. Releasing after dragging it
+      // out of the track still finishes the gesture.
+      liveDragRef.current = null;
+      finishDragRef.current?.(finished);
+      setDrag(null);
+    };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [drag, dayPx]);
+  }, [dayPx]);
 
   if (!startField || !endField) {
     return (
@@ -203,22 +302,24 @@ export function BusaBaseGantt({
 
   // How much of the view is on screen, and the way to the rest.
   const loadFooter =
-    rowsQuery.isError || rowsQuery.hasNextPage ? (
+    activeQuery.isError || activeQuery.hasNextPage ? (
       <div className="sticky left-0 flex flex-wrap items-center gap-3 px-2 py-3 text-muted-foreground text-xs">
         <span className="tabular-nums">
-          {rowsQuery.isError
-            ? presentCoreError(messages, locale, rowsQuery.error, messages.shell.operationFailed)
+          {activeQuery.isError
+            ? presentCoreError(messages, locale, activeQuery.error, messages.shell.operationFailed)
             : fmt(messages.base.paginationRange, { from: 1, to: records.length, total })}
         </span>
         <button
           className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
-          disabled={rowsQuery.isFetchingNextPage}
-          onClick={() => void (rowsQuery.isError ? rowsQuery.refetch() : rowsQuery.fetchNextPage())}
+          disabled={activeQuery.isFetchingNextPage}
+          onClick={() =>
+            void (activeQuery.isError ? activeQuery.refetch() : activeQuery.fetchNextPage())
+          }
           type="button"
         >
-          {rowsQuery.isError
+          {activeQuery.isError
             ? messages.base.paginationRetry
-            : rowsQuery.isFetchingNextPage
+            : activeQuery.isFetchingNextPage
               ? messages.common.loading
               : messages.search.loadMore}
         </button>
@@ -234,7 +335,7 @@ export function BusaBaseGantt({
     }
   }
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && !periodMode) {
     return (
       <>
         <div className="px-2 py-6 text-muted-foreground text-sm">{messages.base.ganttNoDates}</div>
@@ -243,12 +344,23 @@ export function BusaBaseGantt({
     );
   }
 
-  // Axis range: pad to whole months around the data.
-  const minStart = rows.reduce((m, r) => (r.start < m ? r.start : m), rows[0].start);
-  const maxEnd = rows.reduce((m, r) => (r.end > m ? r.end : m), rows[0].end);
-  const rangeStart = new Date(minStart.getFullYear(), minStart.getMonth(), 1);
-  const rangeEnd = new Date(maxEnd.getFullYear(), maxEnd.getMonth() + 1, 0);
+  // Axis range: the period itself, or whole months around the data. A bar
+  // reaching past the period is cut at its edge.
+  const firstStart = rows[0]?.start ?? periodStart;
+  const lastEnd = rows[0]?.end ?? periodStart;
+  const minStart = rows.reduce((m, r) => (r.start < m ? r.start : m), firstStart);
+  const maxEnd = rows.reduce((m, r) => (r.end > m ? r.end : m), lastEnd);
+  const rangeStart = periodMode
+    ? periodStart
+    : new Date(minStart.getFullYear(), minStart.getMonth(), 1);
+  const rangeEnd = periodMode
+    ? addDays(periodEnd, -1)
+    : new Date(maxEnd.getFullYear(), maxEnd.getMonth() + 1, 0);
   const totalDays = daysBetween(rangeStart, rangeEnd) + 1;
+  const periodLabelFormat: Intl.DateTimeFormatOptions =
+    scale === "month"
+      ? { year: "numeric", month: "short" }
+      : { year: "numeric", month: "short", day: "numeric" };
   const timelineWidth = totalDays * dayPx;
 
   // Month header segments across the range.
@@ -271,32 +383,34 @@ export function BusaBaseGantt({
     Boolean(onPatchRecord) && !isAnon && hasApiKeyLevel(permissionLevel, "changeRequest");
 
   // Apply the in-flight drag delta to a row for live preview.
-  const previewDates = (row: Row): { start: Date; end: Date } => {
-    if (!drag || drag.recordId !== row.record.id || drag.deltaDays === 0) {
+  const previewDates = (row: Row, gesture = drag): { start: Date; end: Date } => {
+    if (!gesture || gesture.recordId !== row.record.id || gesture.deltaDays === 0) {
       return { start: row.start, end: row.end };
     }
-    if (drag.mode === "move") {
-      return { start: addDays(row.start, drag.deltaDays), end: addDays(row.end, drag.deltaDays) };
+    if (gesture.mode === "move") {
+      return {
+        start: addDays(row.start, gesture.deltaDays),
+        end: addDays(row.end, gesture.deltaDays),
+      };
     }
-    if (drag.mode === "resize-start") {
-      const next = addDays(row.start, drag.deltaDays);
+    if (gesture.mode === "resize-start") {
+      const next = addDays(row.start, gesture.deltaDays);
       return { start: next > row.end ? row.end : next, end: row.end };
     }
-    const next = addDays(row.end, drag.deltaDays);
+    const next = addDays(row.end, gesture.deltaDays);
     return { start: row.start, end: next < row.start ? row.start : next };
   };
 
-  const commitDrag = (row: Row) => {
+  const commitDrag = (row: Row, gesture: DragState) => {
     if (
-      !drag ||
-      drag.recordId !== row.record.id ||
-      drag.deltaDays === 0 ||
+      gesture.recordId !== row.record.id ||
+      gesture.deltaDays === 0 ||
       !onPatchRecord ||
       !canDrag
     ) {
       return;
     }
-    const { start, end } = previewDates(row);
+    const { start, end } = previewDates(row, gesture);
     const patch: Record<string, unknown> = {};
     if (start.getTime() !== row.start.getTime()) {
       patch[startField.slug] = draggedDayValue(
@@ -316,6 +430,10 @@ export function BusaBaseGantt({
       void submitPatch(row.record, { ...row.record.headCommit.payload, ...patch });
     }
   };
+  finishDragRef.current = (finished) => {
+    const row = rows.find((candidate) => candidate.record.id === finished.recordId);
+    if (row) commitDrag(row, finished);
+  };
 
   const submitPatch = async (record: RecordVO, fields: Record<string, unknown>) => {
     if (!onPatchRecord) return;
@@ -330,20 +448,31 @@ export function BusaBaseGantt({
   };
 
   const beginDrag = (event: React.MouseEvent, row: Row) => {
-    if (!canDrag) {
+    if (!canDrag || event.button !== 0) {
       return;
     }
+    event.preventDefault();
     const rect = event.currentTarget.getBoundingClientRect();
     const offsetX = event.clientX - rect.left;
     const edge = 8;
+    const resizeEdge =
+      event.target instanceof Element
+        ? event.target.closest("[data-resize-edge]")?.getAttribute("data-resize-edge")
+        : null;
     const mode: DragMode =
-      offsetX <= edge ? "resize-start" : offsetX >= rect.width - edge ? "resize-end" : "move";
-    setDrag({ recordId: row.record.id, mode, originX: event.clientX, deltaDays: 0 });
+      resizeEdge === "start" || (!resizeEdge && offsetX <= edge)
+        ? "resize-start"
+        : resizeEdge === "end" || (!resizeEdge && offsetX >= rect.width - edge)
+          ? "resize-end"
+          : "move";
+    const next = { recordId: row.record.id, mode, originX: event.clientX, deltaDays: 0 };
+    liveDragRef.current = next;
+    setDrag(next);
   };
 
   return (
     <div className="overflow-x-auto pb-5">
-      <div className="flex flex-wrap items-center gap-2 pb-2">
+      <div className="sticky left-0 flex flex-wrap items-center gap-2 pb-2">
         <span className="text-muted-foreground text-xs">{messages.base.ganttScale}</span>
         <div className="flex rounded-md bg-muted/60 p-0.5 text-xs">
           {(["week", "month"] as const).map((option) => (
@@ -354,13 +483,50 @@ export function BusaBaseGantt({
                   : "text-muted-foreground hover:text-foreground"
               }`}
               key={option}
-              onClick={() => setScale(option)}
+              onClick={() => {
+                setScale(option);
+                setPeriodStart((start) => periodStartOf(start, option));
+              }}
               type="button"
             >
               {option === "week" ? messages.base.ganttWeek : messages.base.ganttMonth}
             </button>
           ))}
         </div>
+        {periodMode ? (
+          <div className="flex items-center gap-2" data-testid="gantt-period">
+            <button
+              aria-label={messages.base.ganttEarlier}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => setPeriodStart((start) => shiftPeriod(start, scale, -1))}
+              type="button"
+            >
+              <ChevronLeft size={15} />
+            </button>
+            <button
+              aria-label={messages.base.ganttLater}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => setPeriodStart((start) => shiftPeriod(start, scale, 1))}
+              type="button"
+            >
+              <ChevronRight size={15} />
+            </button>
+            <span className="font-semibold text-sm tabular-nums">
+              {periodStart.toLocaleDateString(locale, periodLabelFormat)} –{" "}
+              {addDays(periodEnd, -1).toLocaleDateString(locale, periodLabelFormat)}
+            </span>
+            <button
+              className="ml-1 rounded-md border border-border/70 bg-card px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => setPeriodStart(periodStartOf(new Date(), scale))}
+              type="button"
+            >
+              {messages.base.calendarToday}
+            </button>
+            {activeQuery.isPending ? (
+              <span className="text-muted-foreground text-xs">{messages.common.loading}</span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <DragReviewNotice
         currentSearch={currentSearch}
@@ -390,6 +556,12 @@ export function BusaBaseGantt({
           const { start, end } = previewDates(row);
           const left = daysBetween(rangeStart, start) * dayPx;
           const width = Math.max((daysBetween(start, end) + 1) * dayPx, dayPx);
+          // Draw the visible intersection itself, rather than placing an
+          // enormous bar outside the track. Its label and resize edges remain
+          // reachable even when the real dates are outside this period. Drag
+          // deltas still apply to those real dates, never to the clipped edge.
+          const visibleLeft = Math.max(0, Math.min(timelineWidth, left));
+          const visibleWidth = Math.max(0, Math.min(timelineWidth, left + width) - visibleLeft);
           const active = drag?.recordId === row.record.id;
           return (
             <div className="flex items-center border-border/30 border-b" key={row.record.id}>
@@ -405,24 +577,50 @@ export function BusaBaseGantt({
                   {getRecordTitle(row.record, messages)}
                 </Link>
               </div>
-              <div className="relative py-1.5" style={{ width: timelineWidth, height: 32 }}>
+              <div
+                className="relative overflow-hidden py-1.5"
+                style={{ width: timelineWidth, height: 32 }}
+              >
                 {/* biome-ignore lint/a11y/noStaticElementInteractions: gantt bar is a mouse drag handle; the row title Link is the keyboard-accessible affordance */}
                 <div
                   className={`absolute top-1.5 flex h-5 items-center rounded bg-primary/80 text-primary-foreground text-xs shadow-sm ${
                     canDrag ? "cursor-grab active:cursor-grabbing" : ""
-                  } ${active ? "ring-2 ring-primary" : ""}`}
+                  } ${active ? "ring-2 ring-primary" : ""} ${visibleWidth === 0 ? "invisible" : ""}`}
                   onMouseDown={canDrag ? (event) => beginDrag(event, row) : undefined}
-                  onMouseUp={canDrag ? () => commitDrag(row) : undefined}
-                  style={{ left, width }}
+                  data-testid={`gantt-bar-${row.record.id}`}
+                  style={{ left: visibleLeft, width: visibleWidth }}
                   title={`${toYMD(start)} → ${toYMD(end)}`}
                 >
-                  <span className="truncate px-1.5">{getRecordTitle(row.record, messages)}</span>
+                  {canDrag ? (
+                    <span
+                      aria-hidden="true"
+                      className="absolute inset-y-0 left-0 z-10 w-2 cursor-ew-resize rounded-l border-primary-foreground/50 border-l-2"
+                      data-resize-edge="start"
+                      data-testid={`gantt-resize-start-${row.record.id}`}
+                    />
+                  ) : null}
+                  <span className={`truncate ${canDrag ? "px-2.5" : "px-1.5"}`}>
+                    {getRecordTitle(row.record, messages)}
+                  </span>
+                  {canDrag ? (
+                    <span
+                      aria-hidden="true"
+                      className="absolute inset-y-0 right-0 z-10 w-2 cursor-ew-resize rounded-r border-primary-foreground/50 border-r-2"
+                      data-resize-edge="end"
+                      data-testid={`gantt-resize-end-${row.record.id}`}
+                    />
+                  ) : null}
                 </div>
               </div>
             </div>
           );
         })}
       </div>
+      {periodMode && rows.length === 0 && activeQuery.isSuccess ? (
+        <div className="sticky left-0 px-2 py-6 text-muted-foreground text-sm">
+          {messages.base.ganttEmptyPeriod}
+        </div>
+      ) : null}
       {loadFooter}
     </div>
   );

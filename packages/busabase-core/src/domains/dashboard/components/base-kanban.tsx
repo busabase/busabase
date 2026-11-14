@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type {
@@ -354,21 +354,17 @@ const COLUMN_PAGE_SIZE = 20;
  * data model: a column asks only for the cards it shows, so opening a board no
  * longer depends on how many records the Base has in total.
  *
- * KNOWN DIVERGENCE (deliberate, pinned by tests): the column filter uses
- * `is_empty` for Uncategorized, which asks "does this render as empty?", while
- * the board's own bucketing rule is "is this value one of the field's choices?".
- * They agree for every value written through field validation. They differ for a
- * value that bypassed it (a seed can) — such a record buckets as Uncategorized
- * here but is not matched by `is_empty`, so its card would be missing. Catching
- * that would need a "value is not one of these" operator, which does not exist
- * and is not worth adding for data the product does not let you create.
+ * An unset single-select field belongs to Uncategorized. The column uses the
+ * same authoritative `is_empty` filter as its paged records rather than a
+ * separate aggregate with potentially different bucketing semantics. Invalid
+ * choice ids inserted outside field validation still do not match is_empty;
+ * this pre-existing divergence requires an explicit invalid-choice operator.
  */
 function KanbanColumn({
   base,
   canDrag,
   client,
   column,
-  count,
   fields,
   isOver,
   onDragOverColumn,
@@ -385,7 +381,6 @@ function KanbanColumn({
   canDrag: boolean;
   client: BusabaseDashboardApiClient;
   column: { id: string; name: string; color?: string };
-  count: number | undefined;
   fields: BaseFieldVO[];
   isOver: boolean;
   onDragOverColumn: () => void;
@@ -425,6 +420,10 @@ function KanbanColumn({
         ],
         page: pageParam as number,
         pageSize: COLUMN_PAGE_SIZE,
+        // The header is a lower bound until the column is exhausted. Count
+        // only one past this page, so neither cards nor headers wait for an
+        // aggregate over the entire Base.
+        totalLimit: (pageParam as number) * COLUMN_PAGE_SIZE + 1,
         ...(viewId ? { viewId } : {}),
       }),
     // The shared live-sync invalidates this workspace's canonical record prefix
@@ -459,9 +458,22 @@ function KanbanColumn({
   // render after access was revoked or the linked record removed.
   const { records: relationRecords } = useLinkedRecords({ client, ids: relationIds, orpc });
   const baseSlug = base?.slug ?? records[0]?.base.slug ?? "";
-  // The header count comes from the aggregate, not from what is loaded — a
-  // number that climbs while you scroll is worse than no number.
-  const total = count ?? cardsQuery.data?.pages[0]?.total;
+  const lastPage = cardsQuery.data?.pages.at(-1);
+  const total = lastPage
+    ? lastPage.totalCapped
+      ? `${Math.max(records.length, lastPage.total - 1)}+`
+      : Math.max(records.length, lastPage.total)
+    : undefined;
+  // No global count is needed to discover this bucket. Its own bounded read
+  // decides whether it exists; a failed read stays visible with retry instead
+  // of silently hiding uncategorized records.
+  if (
+    column.id === UNCATEGORIZED &&
+    !cardsQuery.isError &&
+    (cardsQuery.isPending || (lastPage?.total === 0 && records.length === 0))
+  ) {
+    return null;
+  }
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: kanban column is a native HTML5 drop target; each card's Link is the keyboard-accessible path
@@ -486,7 +498,7 @@ function KanbanColumn({
         />
         <span className="truncate font-medium text-foreground text-sm">{column.name}</span>
         <span className="ml-auto rounded-md bg-muted/60 px-1.5 text-muted-foreground text-xs">
-          {total ?? "…"}
+          {total ?? (cardsQuery.isError ? "" : "…")}
         </span>
       </div>
       {/* The column scrolls on its own, which is what gives "load more" a place
@@ -550,9 +562,9 @@ function KanbanColumn({
 
 /**
  * Kanban view — stacks records into columns by a single-select field. Each
- * column fetches its own cards and its header count comes from a server-side
- * aggregate, so opening a board costs a few small requests rather than reading
- * the entire Base into the browser.
+ * column fetches its own cards and a bounded count. Headers show a lower
+ * bound (20+, 40+, ...) while more cards remain, then an exact total. Opening
+ * the board never requests a whole-Base grouping just for header numbers.
  *
  * Dragging a card to another column writes the new choice back through
  * `onMoveRecord` (which, per busabase's approval model, opens an auto-merged
@@ -594,26 +606,6 @@ export function BusaBaseKanban({
         (field) => isFileFieldType(field.type) && field.slug === activeView.config.coverFieldSlug,
       ) ?? null)
     : null;
-  const baseId = base?.id ?? "";
-  const orpc = useDashboardOrpc();
-
-  const countsQuery = useQuery({
-    enabled: Boolean(baseId) && Boolean(stackField),
-    retry: retryRecordRead,
-    queryFn: () =>
-      client.groupRecords({
-        baseId,
-        fieldSlug: stackField?.slug ?? "",
-        ...(activeView?.id ? { viewId: activeView.id } : {}),
-      }),
-    queryKey: [
-      ...(orpc?.records.count.key() ?? ["busabase"]),
-      "kanban-counts",
-      baseId,
-      activeView?.id ?? "",
-      stackField?.slug ?? "",
-    ],
-  });
 
   if (!stackField) {
     return (
@@ -626,17 +618,6 @@ export function BusaBaseKanban({
     ...choices.map((c) => ({ id: c.id, name: c.name, color: c.color })),
     { id: UNCATEGORIZED, name: messages.base.kanbanUncategorized, color: "slate" },
   ];
-  // `groupBy` keys the unset bucket as null; the board calls it UNCATEGORIZED.
-  // The key is stringified because the endpoint can now also answer with typed
-  // keys under `bucketing: "sql"` — a board is always on the default GRID
-  // bucketing, where a select's keys are strings, so this only satisfies the
-  // wider type rather than changing what the board sees.
-  const countByColumn = new Map<string, number>(
-    (countsQuery.data?.groups ?? []).map((group) => [
-      group.value === null || group.value === undefined ? UNCATEGORIZED : String(group.value),
-      group.count,
-    ]),
-  );
 
   const canDrag =
     Boolean(onMoveRecord) && !isAnon && hasApiKeyLevel(permissionLevel, "changeRequest");
@@ -670,43 +651,26 @@ export function BusaBaseKanban({
         reviewRequestId={reviewRequestId}
       />
       <div className="flex gap-3 overflow-x-auto pb-5">
-        {columns.map((column) => {
-          // Hide Uncategorized when nothing is unset (keeps the board tidy).
-          // `groupBy` OMITS zero-count buckets, so "no entry" — not a 0 — is what
-          // an empty bucket looks like. It also waits for that aggregate: its
-          // own read ("has no value") is the board's slowest — about 20 s on a
-          // 1M-record Base — and once sent it runs on even if the column then
-          // hides, so it is only sent for a bucket known to hold records. A
-          // failed aggregate falls back to showing it.
-          if (
-            column.id === UNCATEGORIZED &&
-            !countsQuery.isError &&
-            (countByColumn.get(UNCATEGORIZED) ?? 0) === 0
-          ) {
-            return null;
-          }
-          return (
-            <KanbanColumn
-              base={base}
-              showFieldLabels={activeView?.config.showFieldLabels ?? true}
-              canDrag={canDrag}
-              client={client}
-              column={column}
-              coverField={coverField}
-              coverFit={activeView?.config.coverFit ?? "cover"}
-              count={countByColumn.get(column.id)}
-              fields={fields}
-              isOver={overColumn === column.id}
-              key={column.id}
-              onDragOverColumn={() => setOverColumn(column.id)}
-              onDragStartRecord={setDragging}
-              onDrop={() => void handleDrop(column.id)}
-              onOpenRecord={onOpenRecord}
-              stackField={stackField}
-              viewId={activeView?.id}
-            />
-          );
-        })}
+        {columns.map((column) => (
+          <KanbanColumn
+            base={base}
+            showFieldLabels={activeView?.config.showFieldLabels ?? true}
+            canDrag={canDrag}
+            client={client}
+            column={column}
+            coverField={coverField}
+            coverFit={activeView?.config.coverFit ?? "cover"}
+            fields={fields}
+            isOver={overColumn === column.id}
+            key={column.id}
+            onDragOverColumn={() => setOverColumn(column.id)}
+            onDragStartRecord={setDragging}
+            onDrop={() => void handleDrop(column.id)}
+            onOpenRecord={onOpenRecord}
+            stackField={stackField}
+            viewId={activeView?.id}
+          />
+        ))}
       </div>
     </>
   );

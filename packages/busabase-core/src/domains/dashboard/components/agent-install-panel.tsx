@@ -30,6 +30,8 @@ export interface AgentIntegrationTarget {
   edition?: McpGuideEdition;
   /** SSR fallback origin, before the panel reads `window.location.origin`. */
   defaultOrigin?: string;
+  /** Stable prompt host; undefined keeps host behavior, null disables prompt handoff. */
+  promptOrigin?: string | null;
   /** Cloud only: pins the copied setup prompt to the space being installed into. */
   targetSpaceId?: string;
 }
@@ -80,14 +82,18 @@ export function AgentInstallPanel({
       connectionCheck: messages.agentPrompts.connectionCheck,
       fmt,
     });
-  const prompt = buildPromptForOrigin(origin);
+  const promptOrigin = agentIntegration?.promptOrigin;
+  const prompt = promptOrigin === null ? "" : buildPromptForOrigin(promptOrigin ?? origin);
 
   const copy = async () => {
+    if (promptOrigin === null) return;
     try {
       // The textarea has an SSR-safe fallback URL. At the moment of copying,
-      // always rebuild from the browser origin so a host's placeholder dev URL
-      // can never reach the user's agent.
-      await navigator.clipboard.writeText(buildPromptForOrigin(window.location.origin));
+      // prefer the explicit stable prompt host; otherwise rebuild from the browser
+      // origin so an SSR placeholder dev URL cannot reach the user's agent.
+      await navigator.clipboard.writeText(
+        buildPromptForOrigin(promptOrigin ?? window.location.origin),
+      );
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
@@ -119,6 +125,14 @@ export function AgentInstallPanel({
         </Alert>
         {createManuallyLink}
       </div>
+    );
+  }
+
+  if (promptOrigin === null) {
+    return (
+      <p role="alert" className="text-muted-foreground text-sm">
+        {messages.install.installUnavailable}
+      </p>
     );
   }
 

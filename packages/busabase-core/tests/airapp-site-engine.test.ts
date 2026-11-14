@@ -453,16 +453,20 @@ describe("AirApp site engine", () => {
       available: true,
       cnameTarget: "sites.company.test",
       bindings: [],
+      primaryHostname: null,
+      primarySupported: true,
     };
     const domainHost = () => {
       const readDomains = vi.fn(async () => state);
       const bindDomain = vi.fn(async () => state);
       const unbindDomain = vi.fn(async () => state);
+      const setPrimaryDomain = vi.fn(async () => state);
       return {
-        ...createFakeHost({ readDomains, bindDomain, unbindDomain }),
+        ...createFakeHost({ readDomains, bindDomain, unbindDomain, setPrimaryDomain }),
         readDomains,
         bindDomain,
         unbindDomain,
+        setPrimaryDomain,
       };
     };
 
@@ -472,6 +476,8 @@ describe("AirApp site engine", () => {
         available: false,
         cnameTarget: null,
         bindings: [],
+        primaryHostname: null,
+        primarySupported: false,
       });
       const { host } = createFakeHost();
       await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
@@ -501,11 +507,49 @@ describe("AirApp site engine", () => {
       expect(calls.goLive).toHaveLength(1);
     });
 
+    it("chooses a primary domain only on a live site, and clears it without one", async () => {
+      const nodeId = await createApp();
+      const { host, setPrimaryDomain } = domainHost();
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        await expect(
+          client.airapps.siteSetPrimaryDomain({ nodeId, hostname: "www.company.test" }),
+        ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+        expect(setPrimaryDomain).not.toHaveBeenCalled();
+        // Clearing never needs a live version: it only stops redirects.
+        await expect(
+          client.airapps.siteSetPrimaryDomain({ nodeId, hostname: null }),
+        ).resolves.toEqual(state);
+        await client.airapps.siteDeployPreview({ nodeId });
+        await client.airapps.siteGoLive({ nodeId });
+        await expect(
+          client.airapps.siteSetPrimaryDomain({ nodeId, hostname: " WWW.Company.Test " }),
+        ).resolves.toEqual(state);
+      });
+      expect(setPrimaryDomain.mock.calls).toEqual([
+        [nodeId, null],
+        [nodeId, "www.company.test"],
+      ]);
+    });
+
+    it("refuses a primary domain on a host that cannot redirect", async () => {
+      const nodeId = await createApp();
+      const { host } = createFakeHost({ readDomains: async () => state });
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        await expect(
+          client.airapps.siteSetPrimaryDomain({ nodeId, hostname: null }),
+        ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+      });
+    });
+
     it("rejects malformed domains before the provider is called", async () => {
       const nodeId = await createApp();
-      const { host, bindDomain, unbindDomain } = domainHost();
+      const { host, bindDomain, unbindDomain, setPrimaryDomain } = domainHost();
       await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
-        for (const action of [client.airapps.siteBindDomain, client.airapps.siteUnbindDomain]) {
+        for (const action of [
+          client.airapps.siteBindDomain,
+          client.airapps.siteUnbindDomain,
+          client.airapps.siteSetPrimaryDomain,
+        ]) {
           await expect(
             action({ nodeId, hostname: "https://shop.company.test/path" }),
           ).rejects.toMatchObject({ code: "BAD_REQUEST" });
@@ -513,11 +557,12 @@ describe("AirApp site engine", () => {
       });
       expect(bindDomain).not.toHaveBeenCalled();
       expect(unbindDomain).not.toHaveBeenCalled();
+      expect(setPrimaryDomain).not.toHaveBeenCalled();
     });
 
     it("lets a lapsed plan inspect and remove domains but refuses additions", async () => {
       const nodeId = await createApp();
-      const { host, readDomains, bindDomain, unbindDomain } = domainHost();
+      const { host, readDomains, bindDomain, unbindDomain, setPrimaryDomain } = domainHost();
       await runWithBusabaseContext(
         {
           airAppSiteHost: host,
@@ -534,16 +579,20 @@ describe("AirApp site engine", () => {
           await expect(
             client.airapps.siteBindDomain({ nodeId, hostname: "shop.company.test" }),
           ).rejects.toMatchObject({ data: { reason: "AIRAPP_ENGINE_PLAN_REQUIRED" } });
+          await expect(
+            client.airapps.siteSetPrimaryDomain({ nodeId, hostname: "shop.company.test" }),
+          ).rejects.toMatchObject({ data: { reason: "AIRAPP_ENGINE_PLAN_REQUIRED" } });
         },
       );
       expect(readDomains).toHaveBeenCalledExactlyOnceWith(nodeId);
       expect(unbindDomain).toHaveBeenCalledExactlyOnceWith(nodeId, "shop.company.test");
       expect(bindDomain).not.toHaveBeenCalled();
+      expect(setPrimaryDomain).not.toHaveBeenCalled();
     });
 
     it("denies readers and cross-space requests before any provider call", async () => {
       const nodeId = await createApp();
-      const { host, readDomains, bindDomain, unbindDomain } = domainHost();
+      const { host, readDomains, bindDomain, unbindDomain, setPrimaryDomain } = domainHost();
       for (const scope of [
         { isSpaceManager: false, permissionLevel: "read" as const },
         { spaceId: "other-space" },
@@ -556,11 +605,15 @@ describe("AirApp site engine", () => {
           await expect(
             client.airapps.siteUnbindDomain({ nodeId, hostname: "shop.company.test" }),
           ).rejects.toBeTruthy();
+          await expect(
+            client.airapps.siteSetPrimaryDomain({ nodeId, hostname: "shop.company.test" }),
+          ).rejects.toBeTruthy();
         });
       }
       expect(readDomains).not.toHaveBeenCalled();
       expect(bindDomain).not.toHaveBeenCalled();
       expect(unbindDomain).not.toHaveBeenCalled();
+      expect(setPrimaryDomain).not.toHaveBeenCalled();
     });
 
     it("keeps the default state independent of domain-provider failures", async () => {

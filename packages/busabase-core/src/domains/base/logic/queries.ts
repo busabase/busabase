@@ -79,8 +79,8 @@ import {
   GROUPABLE_FIELD_TYPES,
   groupKeyForValue,
 } from "../utils/view-records";
-
 import { commitPayloadWithFields } from "./commit-payload-projection";
+import { isLatestProjectedField, selectDateOrderedPageRows } from "./date-window-page";
 import { lookupDependentFieldSlugs, lookupFormulaInputSlugs } from "./lookup-formulas";
 import { filterRecordsForFind, resolveRecordFindFields } from "./record-find";
 import {
@@ -1105,11 +1105,19 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
   if (pageVisible) {
     recordFilters.push(pageVisible);
   }
-  if (parsed.dateRange) {
-    const rangeField = base.fields.find((field) => field.slug === parsed.dateRange?.fieldSlug);
+  // A real UTC-instant comparison on the typed `valueDate` column — no
+  // client-matcher parity question here, unlike `buildExactRecordFilter`'s
+  // predicates. The caller resolved the viewer's timezone into absolute
+  // instants already; the server only compares timestamps.
+  // `baseId` is implied by the record, but naming it lets the planner read
+  // the range off the (base, field, date) index instead of probing every
+  // record of the Base: one day of a 1M-record Base, 10 s → 16 ms.
+  const datePredicates = new Set<SQL>();
+  const scopeToDateRange = (range: { fieldSlug: string; gte?: string; lt?: string }) => {
+    const rangeField = base.fields.find((field) => field.slug === range.fieldSlug);
     if (!rangeField) {
       throw new ORPCError("NOT_FOUND", {
-        message: `Field not found in Base ${base.id}: ${parsed.dateRange.fieldSlug}`,
+        message: `Field not found in Base ${base.id}: ${range.fieldSlug}`,
       });
     }
     if (!DATE_RANGE_FIELD_TYPES.has(rangeField.type)) {
@@ -1117,32 +1125,33 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
         message: `Cannot scope by a ${rangeField.type} field: ${rangeField.slug}. dateRange requires one of: ${[...DATE_RANGE_FIELD_TYPES].join(", ")}.`,
       });
     }
-    const { gte: gteIso, lt: ltIso, fieldSlug } = parsed.dateRange;
-    // A real UTC-instant comparison on the typed `valueDate` column — no
-    // client-matcher parity question here, unlike `buildExactRecordFilter`'s
-    // predicates. The caller resolved the viewer's timezone into these two
-    // absolute instants already; the server only compares timestamps.
-    // `baseId` is implied by the record, but naming it lets the planner read
-    // the range off the (base, field, date) index instead of probing every
-    // record of the Base: one day of a 1M-record Base, 10 s → 16 ms.
-    recordFilters.push(
-      exists(
-        db
-          .select({ one: sql`1` })
-          .from(busabaseFieldValues)
-          .where(
-            and(
-              eq(busabaseFieldValues.baseId, base.id),
-              eq(busabaseFieldValues.recordId, busabaseRecords.id),
-              eq(busabaseFieldValues.fieldSlug, fieldSlug),
-              isNull(busabaseFieldValues.deletedAt),
-              gte(busabaseFieldValues.valueDate, new Date(gteIso)),
-              lt(busabaseFieldValues.valueDate, new Date(ltIso)),
-            ),
+    const predicate = exists(
+      db
+        .select({ one: sql`1` })
+        .from(busabaseFieldValues)
+        .where(
+          and(
+            eq(busabaseFieldValues.baseId, base.id),
+            eq(busabaseFieldValues.recordId, busabaseRecords.id),
+            eq(busabaseFieldValues.fieldSlug, range.fieldSlug),
+            isNull(busabaseFieldValues.deletedAt),
+            isLatestProjectedField(db),
+            range.gte === undefined
+              ? undefined
+              : gte(busabaseFieldValues.valueDate, new Date(range.gte)),
+            range.lt === undefined
+              ? undefined
+              : lt(busabaseFieldValues.valueDate, new Date(range.lt)),
           ),
-      ) as SQL,
-    );
-  }
+        ),
+    ) as SQL;
+    recordFilters.push(predicate);
+    datePredicates.add(predicate);
+  };
+  if (parsed.dateRange) scopeToDateRange(parsed.dateRange);
+  // Several fields at once: a timeline's period overlaps a record's span when
+  // the span starts before the period ends and ends after it starts.
+  for (const range of parsed.dateRanges ?? []) scopeToDateRange(range);
   // The View's own filters AND any ad-hoc ones (a board column's
   // `stackField equals <choice>`). Both are authoritative here — see the
   // `filters` doc on `listRecordsPageInputSchema` for why these are not the
@@ -1157,7 +1166,7 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
       : undefined;
   assertNoReverseRelationQueryOrThrow(
     base.fields,
-    collectFieldSlugs([effectiveViewConfig, sort, parsed.dateRange]),
+    collectFieldSlugs([effectiveViewConfig, sort, parsed.dateRange, ...(parsed.dateRanges ?? [])]),
     "filter or sort",
   );
   const explicitDynamicSort =
@@ -1165,6 +1174,20 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
       ? sortColumnFor(sort.fieldType)
       : null;
   const sqlSortOrder = explicitDynamicSort ? null : buildPageSortOrder(db, sort);
+  const sortedDateRanges =
+    sort?.fieldType === "date" && !explicitDynamicSort
+      ? [...(parsed.dateRange ? [parsed.dateRange] : []), ...(parsed.dateRanges ?? [])].filter(
+          (range) => range.fieldSlug === sort.fieldSlug,
+        )
+      : [];
+
+  const otherDateRanges = [
+    ...(parsed.dateRange ? [parsed.dateRange] : []),
+    ...(parsed.dateRanges ?? []),
+  ].filter((range) => range.fieldSlug !== sort?.fieldSlug);
+  const chronologicalPageScope = (where: SQL[]) =>
+    where.filter((predicate) => !datePredicates.has(predicate));
+
   // Without an explicit sort this is exactly the order every path used before.
   const candidateOrder = sqlSortOrder ?? [
     desc(busabaseRecords.createdAt),
@@ -1179,8 +1202,28 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
   // The ordinary All view and presentation-only saved views can use true SQL
   // random access: count once, then hydrate only the requested page.
   if (!needsExactViewEvaluation && !parsed.find) {
+    if (sort && sortedDateRanges.length > 0) {
+      const counted = await budgeted(db, (tx) =>
+        boundedRecordCount(tx, recordFilters, parsed.totalLimit),
+      );
+      const window = pageWindow(parsed.page, parsed.pageSize, counted.total);
+      const rows =
+        counted.total === 0
+          ? []
+          : await selectDateOrderedPageRows(
+              db,
+              base.id,
+              chronologicalPageScope(recordFilters),
+              sort,
+              sortedDateRanges,
+              otherDateRanges,
+              { limit: parsed.pageSize, offset: window.offset },
+              budgeted,
+            );
+      return pageResponse(await hydratePageRows(rows), counted, window, parsed.pageSize);
+    }
     const { counted, window, rows } = await budgeted(db, async (tx) => {
-      const counted = await boundedRecordCount(tx, recordFilters);
+      const counted = await boundedRecordCount(tx, recordFilters, parsed.totalLimit);
       const window = pageWindow(parsed.page, parsed.pageSize, counted.total);
       const rows = await tx
         .select()
@@ -1261,9 +1304,29 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
   };
 
   if (!parsed.find && !dependsOnLookup && hasSqlOrder && plan.residual.length === 0) {
+    if (sort && sortedDateRanges.length > 0) {
+      const counted = await budgeted(db, (tx) =>
+        boundedRecordCount(tx, narrowedFilters, parsed.totalLimit),
+      );
+      const window = pageWindow(parsed.page, parsed.pageSize, counted.total);
+      const rows =
+        counted.total === 0
+          ? []
+          : await selectDateOrderedPageRows(
+              db,
+              base.id,
+              chronologicalPageScope(narrowedFilters),
+              sort,
+              sortedDateRanges,
+              otherDateRanges,
+              { limit: parsed.pageSize, offset: window.offset },
+              budgeted,
+            );
+      return pageResponse(await hydratePageRows(rows), counted, window, parsed.pageSize);
+    }
     // Fully decided: the same count-then-page random access as the All view.
     const { counted, window, rows } = await budgeted(db, async (tx) => {
-      const counted = await boundedRecordCount(tx, narrowedFilters);
+      const counted = await boundedRecordCount(tx, narrowedFilters, parsed.totalLimit);
       const window = pageWindow(parsed.page, parsed.pageSize, counted.total);
       if (!viewOrder) {
         const rows = await tx
@@ -2092,12 +2155,14 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     aggregates.length === 0 &&
     groupColumn() !== busabaseFieldValues.valueDate
   ) {
-    // Plain counts per value: the field's rows of this Base are read once
-    // through the (base, field) index into a materialized set and hash-joined
-    // to the records in scope. The scalar subquery below instead walks every
-    // projected row of each record to find one field — on a database where
-    // the Base is a small share of the table, 0.36 s → 0.05 s at 14k records
-    // and 0.69 s → 0.13 s at 60k.
+    // Plain counts per value: the records in scope LEFT JOIN the field's rows
+    // of this Base. The scalar subquery below instead walks every projected
+    // row of each record to find one field — on a database where the Base is
+    // a small share of the table, 0.36 s → 0.05 s at 14k records and 0.69 s →
+    // 0.13 s at 60k. The join is left to the planner rather than to a
+    // materialized CTE, which kept it to one process: a 3M-record Base's
+    // board counts went 7.9 s → 2.4 s, and a 125-record Base in the same
+    // table stays under 1 ms either way.
     //
     // A LEFT JOIN emits one row per record unless a record has two live rows
     // for the field (the projection's delete-then-insert should prevent it,
@@ -2110,19 +2175,15 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     const [groupRows, [scopeRow]] = await budgeted(db, async (tx) => [
       await executeRows<{ group_value: unknown; count: number | string }>(
         tx,
-        sql`with group_keys as materialized (
-          select ${busabaseFieldValues.recordId} as record_id, ${column} as group_value
-          from ${busabaseFieldValues}
-          where ${busabaseFieldValues.baseId} = ${base.id}
-            and ${busabaseFieldValues.fieldSlug} = ${groupSlug}
-            and ${busabaseFieldValues.deletedAt} is null
-            and ${busabaseFieldValues.recordId} is not null
-        )
-        select group_keys.group_value, count(*)::int as count
+        sql`select ${column} as group_value, count(*)::int as count
         from ${busabaseRecords}
-        left join group_keys on group_keys.record_id = ${busabaseRecords.id}
+        left join ${busabaseFieldValues}
+          on ${busabaseFieldValues.recordId} = ${busabaseRecords.id}
+          and ${busabaseFieldValues.baseId} = ${base.id}
+          and ${busabaseFieldValues.fieldSlug} = ${groupSlug}
+          and ${busabaseFieldValues.deletedAt} is null
         where ${scope}
-        group by group_keys.group_value`,
+        group by ${column}`,
       ),
       await tx.select({ count: sql<number>`count(*)::int` }).from(busabaseRecords).where(scope),
     ]);

@@ -897,7 +897,7 @@ it("does not begin dragging when an interactive source control is dragged", asyn
   await waitFor(() => expect(move).toHaveBeenCalledWith(record, "state", "done"));
 });
 
-it("revalidates board cards and counts with the shared workspace record prefixes", async () => {
+it("revalidates board cards and bounded header counts with the shared record prefix", async () => {
   const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const orpc = createBusabaseQueryUtils("http://localhost/api/rpc", {}, "card-workspace");
   let latest = record;
@@ -936,9 +936,10 @@ it("revalidates board cards and counts with the shared workspace record prefixes
   await waitFor(() =>
     expect(screen.getByTestId("lookup-field-total").textContent).toContain("€65"),
   );
-  const before = getCounts.mock.calls.length;
+  // Header totals arrive with these same pages; no whole-Base grouping is
+  // started by live-sync, even when the exact-count prefix is invalidated.
   await cache.invalidateQueries({ queryKey: orpc.records.count.key() });
-  expect(getCounts.mock.calls.length).toBeGreaterThan(before);
+  expect(getCounts).not.toHaveBeenCalled();
   latest = {
     ...record,
     computedFields: {

@@ -906,6 +906,14 @@ export const dashboardDe: CoreI18nMessages = {
         confirmRemove: "Domain entfernen",
         removing: "Wird entfernt…",
         cancel: "Abbrechen",
+        primary: "Primär",
+        primaryHint: "Andere eigene Domains leiten hierher weiter.",
+        redirectsTo: "Leitet weiter zu {hostname}",
+        makePrimary: "Als primär festlegen",
+        makePrimaryLabel: "{hostname} als primäre Domain festlegen",
+        makingPrimary: "Wird umgestellt…",
+        counterpartSuggestion: "Besucher tippen oft auch {hostname}.",
+        addCounterpart: "{hostname} hinzufügen",
       },
       // Keyed by `SiteBundleBlocker["code"]`.
       blockers: {
@@ -1813,6 +1821,9 @@ export const dashboardDe: CoreI18nMessages = {
     ganttScale: "Skala",
     ganttWeek: "Woche",
     ganttMonth: "Monat",
+    ganttEarlier: "Früher",
+    ganttLater: "Später",
+    ganttEmptyPeriod: "In diesem Zeitraum ist nichts geplant.",
     ganttNoDates:
       "Fügen Sie ein Start- und ein Enddatumsfeld hinzu, um eine Zeitleiste darzustellen.",
     newRecord: "Neuer Datensatz",
@@ -1992,7 +2003,7 @@ export const dashboardDe: CoreI18nMessages = {
     cannotHideLastField: "Mindestens ein Feld muss sichtbar bleiben.",
     editField: "Feld bearbeiten",
     failedQuickViewUpdate: "Ansicht konnte nicht aktualisiert werden",
-    emptyRecords: "Genehmigte Change Requests erscheinen hier nach dem Merge.",
+    emptyRecords: "Datensätze erscheinen hier, sobald sie hinzugefügt oder gemergt wurden.",
     baseNotFoundTitle: "Base nicht gefunden",
     baseNotFoundBody: "Die angeforderte Base existiert nicht.",
     baseInfo: "Base-Info",

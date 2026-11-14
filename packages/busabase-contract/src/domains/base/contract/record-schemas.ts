@@ -247,6 +247,11 @@ export const listRecordsResponseSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 
+/** `records.listPage` counts `total` exactly up to here, then reports `totalCapped`. */
+export const RECORD_EXACT_COUNT_LIMIT = 1_000_000;
+/** `records.listPage` page numbers reach this many records, then report `pagesCapped`. */
+export const RECORD_PAGE_DEPTH_LIMIT = 100_000;
+
 export const listRecordsPageInputSchema = z.object({
   baseId: z
     .string()
@@ -327,6 +332,25 @@ export const listRecordsPageInputSchema = z.object({
         "bounds yourself: a day or a month only means something in a timezone, and the server " +
         "does not know the viewer's.",
     ),
+  dateRanges: z
+    .array(
+      z
+        .object({
+          fieldSlug: z.string().min(1),
+          gte: z.string().optional().describe("Inclusive lower bound, ISO 8601 UTC instant."),
+          lt: z.string().optional().describe("EXCLUSIVE upper bound, ISO 8601 UTC instant."),
+        })
+        .refine((range) => range.gte !== undefined || range.lt !== undefined, {
+          message: "A date range needs `gte`, `lt` or both.",
+        }),
+    )
+    .max(4)
+    .optional()
+    .describe(
+      "Like `dateRange`, on several date fields at once, each bound optional; a record must " +
+        "satisfy all of them. A timeline asks for the records whose span overlaps a period " +
+        "`[from, to)` as `[{ fieldSlug: start, lt: to }, { fieldSlug: end, gte: from }]`.",
+    ),
   /**
    * The same one-field sort `records.list` takes, with the same semantics —
    * so an app can jump straight to page N of "newest follow-up first" without
@@ -355,12 +379,19 @@ export const listRecordsPageInputSchema = z.object({
     .optional()
     .default(50)
     .describe("Records per page. Capped at 100."),
+  totalLimit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(RECORD_EXACT_COUNT_LIMIT)
+    .optional()
+    .describe(
+      "Count `total` only up to this many matching records (default and maximum 1,000,000). " +
+        "Counting is the part of a page that grows with the Base, so a caller that only needs " +
+        "to know whether there is a next page — a Kanban column — passes `page * pageSize + 1`. " +
+        "Past the limit, `total` is the limit and `totalCapped` is true.",
+    ),
 });
-
-/** `records.listPage` counts `total` exactly up to here, then reports `totalCapped`. */
-export const RECORD_EXACT_COUNT_LIMIT = 1_000_000;
-/** `records.listPage` page numbers reach this many records, then report `pagesCapped`. */
-export const RECORD_PAGE_DEPTH_LIMIT = 100_000;
 
 export const listRecordsPageResponseSchema = z.object({
   records: z.array(recordSchema),

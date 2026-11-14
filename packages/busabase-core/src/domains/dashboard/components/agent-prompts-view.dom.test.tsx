@@ -2,8 +2,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AGENT_PROMPT_CLIPBOARD_MIME } from "busabase-contract/domains/agents/prompt-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CoreI18nProvider, type CoreLocale } from "../../../i18n";
+import { CoreI18nProvider, type CoreLocale, coreMessagesEn } from "../../../i18n";
 import type { NodePrompt } from "../helpers/node-agent-prompts";
+import { renderAgentLocator } from "../hooks/use-copy-locator";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
 import { AgentPromptsView } from "./agent-prompts-view";
 
@@ -680,5 +681,51 @@ describe("AgentPromptsView recently used", () => {
 
     expect(JSON.parse(window.localStorage.getItem(RECENT_KEY) ?? "[]")).toEqual(["scenario-b"]);
     expect(screen.queryByText("Recently used")).toBeNull();
+  });
+});
+
+describe("Cloud prompt host", () => {
+  it("copies the configured host for node prompts and locator examples while preserving targets", async () => {
+    const integration: AgentIntegrationTarget = {
+      edition: "cloud",
+      targetSpaceId: "space_original",
+      promptOrigin: "https://app.preview.example:8443",
+    };
+    renderView(integration, [framedPrompt]);
+    const copied = await copy();
+    expect(copied).toContain(
+      "https://app.preview.example:8443/SETUP_SKILL.md?edition=cloud&editionConfirmed=1&space=space_original",
+    );
+    expect(copied).toContain("nod_coder");
+    expect(copied).not.toContain(window.location.origin);
+    const locator = renderAgentLocator(
+      { messages: coreMessagesEn, locale: "en", integration },
+      {
+        target: "Target: nod_coder in space_original",
+        exampleKind: "other",
+      },
+      "Summarize it",
+    );
+    expect(locator).toContain(
+      "https://app.preview.example:8443/SETUP_SKILL.md?edition=cloud&editionConfirmed=1&space=space_original",
+    );
+    expect(locator).toContain("nod_coder");
+    expect(locator).toContain("Summarize it");
+  });
+
+  it("blocks node and locator prompt handoff if Cloud has no configured origin", () => {
+    const integration: AgentIntegrationTarget = { edition: "cloud", promptOrigin: null };
+    renderView(integration);
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("unavailable");
+    expect(() =>
+      renderAgentLocator(
+        { messages: coreMessagesEn, locale: "en", integration },
+        {
+          target: "nod_coder",
+          exampleKind: "other",
+        },
+      ),
+    ).toThrow("Agent prompt origin is unavailable");
   });
 });

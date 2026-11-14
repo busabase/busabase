@@ -392,7 +392,7 @@ export function AgentPromptsView({
   const copyAttemptRef = useRef(0);
   const copyResetTimeoutRef = useRef<number | null>(null);
   const snippetRef = useRef<HTMLDivElement>(null);
-  // The live browser origin, read after mount — never a host's SSR placeholder.
+  // The browser origin remains the envelope source, independently of the prompt host.
   const [origin, setOrigin] = useState<string>();
   useEffect(() => setOrigin(window.location.origin), []);
 
@@ -450,6 +450,8 @@ export function AgentPromptsView({
   // A stray targetSpaceId from a host must never leak into Desktop guidance —
   // same guard `AgentInstallPanel` applies to the same field.
   const targetSpaceId = edition === "cloud" ? agentIntegration?.targetSpaceId : undefined;
+  const promptOrigin =
+    agentIntegration?.promptOrigin === undefined ? origin : agentIntegration.promptOrigin;
 
   /**
    * The prompt as previewed — and, joined, the bytes that actually leave: body
@@ -458,8 +460,8 @@ export function AgentPromptsView({
    * There is no fallback to the host's `defaultOrigin`: that value is an SSR
    * placeholder (see `AgentInstallPanel`, which rebuilds for the same reason),
    * and a placeholder dev URL reaching a real agent is exactly the failure the
-   * rebuild exists to prevent. Until the origin is known there is simply no
-   * connection segment.
+   * rebuild exists to prevent. An explicit promptOrigin takes precedence; until
+   * either it or the browser origin is known there is no connection segment.
    */
   const segments = useMemo(
     () =>
@@ -474,14 +476,14 @@ export function AgentPromptsView({
             // as an entry point gets: we know which edition the user is looking at,
             // so the guide should not stop to ask them again.
             setupUrl:
-              edition && origin
-                ? createSetupSkillUrl(origin, edition, true, targetSpaceId)
+              edition && promptOrigin
+                ? createSetupSkillUrl(promptOrigin, edition, true, targetSpaceId)
                 : undefined,
             target: active.target,
             targetSpaceId,
           })
         : [],
-    [active, activeBody, edition, messages, origin, targetSpaceId],
+    [active, activeBody, edition, messages, promptOrigin, targetSpaceId],
   );
   // The same split of the UNFILLED body, so the preview can render each blank
   // as a control in place. Identical to `segments` when there are no blanks.
@@ -495,14 +497,14 @@ export function AgentPromptsView({
             fmt,
             leadIn: messages.agentPrompts.connectionCheckLeadIn,
             setupUrl:
-              edition && origin
-                ? createSetupSkillUrl(origin, edition, true, targetSpaceId)
+              edition && promptOrigin
+                ? createSetupSkillUrl(promptOrigin, edition, true, targetSpaceId)
                 : undefined,
             target: active.target,
             targetSpaceId,
           })
         : segments,
-    [active, edition, messages, origin, segments, targetSpaceId],
+    [active, edition, messages, promptOrigin, segments, targetSpaceId],
   );
   const dispatchText = joinPromptSegments(segments);
   const promptEnvelope = useMemo<AgentPromptEnvelope | undefined>(() => {
@@ -657,6 +659,14 @@ export function AgentPromptsView({
       >
         {messages.common.loading}
       </div>
+    );
+  }
+
+  if (promptOrigin === null) {
+    return (
+      <p role="alert" className="text-muted-foreground text-sm">
+        {messages.install.installUnavailable}
+      </p>
     );
   }
 

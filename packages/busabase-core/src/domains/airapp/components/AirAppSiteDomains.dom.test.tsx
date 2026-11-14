@@ -43,6 +43,8 @@ const binding = (
   dnsRecords: [{ type: "CNAME", name: "shop.company.com", value: "site-dns.sites.test" }],
   errors: [],
   issues: [],
+  isPrimary: false,
+  redirectsTo: null,
   ...overrides,
 });
 
@@ -53,6 +55,8 @@ const domainsState = (
   available,
   cnameTarget: "site-dns.sites.test",
   bindings,
+  primaryHostname: bindings.find((item) => item.isPrimary)?.hostname ?? null,
+  primarySupported: true,
 });
 
 const clients: QueryClient[] = [];
@@ -74,6 +78,7 @@ const renderSettings = ({
   if (domainError) read.mockRejectedValue(domainError);
   const bind = vi.fn().mockResolvedValue(domainsState([binding()]));
   const unbind = vi.fn().mockResolvedValue(domainsState());
+  const setPrimary = vi.fn().mockResolvedValue(domains);
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -94,6 +99,7 @@ const renderSettings = ({
       },
       siteBindDomain: { call: bind },
       siteUnbindDomain: { call: unbind },
+      siteSetPrimaryDomain: { call: setPrimary },
       siteRepublish: { call: vi.fn().mockResolvedValue({}) },
       siteUnpublish: { call: vi.fn().mockResolvedValue({}) },
     },
@@ -108,7 +114,7 @@ const renderSettings = ({
       </QueryClientProvider>
     </CoreI18nProvider>,
   );
-  return { read, bind, unbind, queryClient };
+  return { read, bind, unbind, setPrimary, queryClient };
 };
 
 const toolbarAddress = () =>
@@ -687,6 +693,131 @@ describe("website toolbar address", () => {
   });
 });
 
+describe("primary custom domain", () => {
+  const active = { status: "active" as const, hostnameStatus: "active", sslStatus: "active" };
+  const apex = binding({
+    ...active,
+    hostname: "company.com",
+    url: "https://company.com",
+    isPrimary: true,
+  });
+  const www = binding({
+    ...active,
+    hostname: "www.company.com",
+    url: "https://www.company.com",
+    redirectsTo: "company.com",
+  });
+  const row = (hostname: string) => {
+    const element = document.querySelector<HTMLElement>(`[data-airapp-site-domain="${hostname}"]`);
+    if (!element) throw new Error(`no row for ${hostname}`);
+    return element;
+  };
+
+  it("badges the primary and says where every other domain redirects", async () => {
+    renderSettings({ domains: domainsState([apex, www]) });
+    await screen.findByText("Primary");
+    expect(row("company.com").querySelector("[data-airapp-site-domain-primary]")).not.toBeNull();
+    expect(row("company.com").textContent).not.toContain("Redirects to");
+    expect(
+      screen.queryByRole("button", { name: "Make company.com the primary domain" }),
+    ).toBeNull();
+    expect(row("www.company.com").textContent).toContain("Redirects to company.com");
+    expect(
+      screen.getByRole("button", { name: "Make www.company.com the primary domain" }),
+    ).toBeTruthy();
+  });
+
+  it("makes another domain primary and shows the host's answer", async () => {
+    const { setPrimary } = renderSettings({ domains: domainsState([apex, www]) });
+    setPrimary.mockResolvedValueOnce(
+      domainsState([
+        { ...apex, isPrimary: false, redirectsTo: "www.company.com" },
+        { ...www, isPrimary: true, redirectsTo: null },
+      ]),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Make www.company.com the primary domain" }),
+    );
+    await waitFor(() =>
+      expect(setPrimary).toHaveBeenCalledExactlyOnceWith({
+        nodeId: "node",
+        hostname: "www.company.com",
+      }),
+    );
+    await waitFor(() =>
+      expect(row("company.com").textContent).toContain("Redirects to www.company.com"),
+    );
+    expect(
+      row("www.company.com").querySelector("[data-airapp-site-domain-primary]"),
+    ).not.toBeNull();
+  });
+
+  it("shows why making a domain primary failed, on that domain", async () => {
+    const { setPrimary } = renderSettings({ domains: domainsState([apex, www]) });
+    setPrimary.mockRejectedValueOnce(new Error("Website host is busy"));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Make www.company.com the primary domain" }),
+    );
+    await waitFor(() =>
+      expect(row("www.company.com").querySelector("[role=alert]")?.textContent).toBe(
+        "Website host is busy",
+      ),
+    );
+  });
+
+  it("shows no primary controls when the website host predates them", async () => {
+    renderSettings({
+      domains: { ...domainsState([apex, www]), primarySupported: false },
+    });
+    await screen.findByText("company.com");
+    expect(screen.queryByText("Primary")).toBeNull();
+    expect(screen.queryByText(/Redirects to/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /primary domain/ })).toBeNull();
+  });
+
+  it("suggests the www or root counterpart once, and binds it", async () => {
+    const { bind } = renderSettings({ domains: domainsState([apex]) });
+    const suggestion = await screen.findByRole("button", { name: "Add www.company.com" });
+    // Once, under the list, not inside the domain's own setup steps.
+    expect(row("company.com").textContent).not.toContain("Visitors often type");
+    expect(screen.getByText("Visitors often type www.company.com too.")).toBeTruthy();
+    fireEvent.click(suggestion);
+    await waitFor(() =>
+      expect(bind).toHaveBeenCalledExactlyOnceWith({ nodeId: "node", hostname: "www.company.com" }),
+    );
+  });
+
+  it("suggests the root for www, and nothing for subdomains or a complete pair", async () => {
+    renderSettings({
+      domains: domainsState([
+        { ...www, redirectsTo: null, isPrimary: true },
+        binding({ ...active, hostname: "shop.company.com" }),
+      ]),
+    });
+    await screen.findByRole("button", { name: "Add company.com" });
+    expect(document.querySelectorAll("[data-airapp-site-domain-suggestion]")).toHaveLength(1);
+    cleanup();
+    renderSettings({ domains: domainsState([apex, www]) });
+    await screen.findByText("Primary");
+    expect(document.querySelector("[data-airapp-site-domain-suggestion]")).toBeNull();
+  });
+
+  it("does not suggest a counterpart when nothing can be added", async () => {
+    renderSettings({
+      domains: domainsState([apex]),
+      state: siteState({ engine: "locked" }),
+    });
+    await screen.findByText("company.com");
+    expect(document.querySelector("[data-airapp-site-domain-suggestion]")).toBeNull();
+  });
+
+  it("shows no primary badge while the site has a single domain", async () => {
+    renderSettings({ domains: domainsState([apex]) });
+    await screen.findByRole("button", { name: "Add www.company.com" });
+    expect(screen.queryByText("Primary")).toBeNull();
+  });
+});
+
 describe("custom domain translations", () => {
   it.each(Object.entries(coreMessagesByLocale))(
     "%s supplies every localized field and placeholder",
@@ -719,6 +850,10 @@ describe("custom domain translations", () => {
       expect(copy.guideRootDomain).toContain("company.com");
       expect(copy.guideNameHint).toContain("shop.company.com");
       expect(copy.recordNameHint).toContain("shop.company.com");
+      expect(copy.redirectsTo).toContain("{hostname}");
+      expect(copy.makePrimaryLabel).toContain("{hostname}");
+      expect(copy.counterpartSuggestion).toContain("{hostname}");
+      expect(copy.addCounterpart).toContain("{hostname}");
     },
   );
 });

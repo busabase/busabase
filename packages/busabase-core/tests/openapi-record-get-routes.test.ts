@@ -101,7 +101,7 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 146 operations", async () => {
+  it("keeps the compressed public API at 147 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -235,6 +235,9 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/airapps/{nodeId}/site"]?.get).toBeDefined();
     expect(spec.paths?.["/api/v1/airapps/{nodeId}/site/go-live"]?.post).toBeDefined();
     expect(spec.paths?.["/api/v1/airapps/{nodeId}/site/domains/{hostname}"]?.delete).toBeDefined();
-    expect(operationCount).toBe(146);
+    // +1 -> 147: choose which custom domain of a website is primary (the others
+    // redirect to it), or clear it, so an agent can set the address people see.
+    expect(spec.paths?.["/api/v1/airapps/{nodeId}/site/domains/primary"]?.post).toBeDefined();
+    expect(operationCount).toBe(147);
   });
 });

@@ -14,6 +14,7 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { formatListTime } from "../helpers/format";
 import { highlightSearchText, searchKindIcon, searchSnippetText } from "../helpers/search";
 import {
@@ -471,7 +472,7 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
           <p className="px-3 py-6 text-muted-foreground text-sm">{t.loading}</p>
         ) : active.isError ? (
           <div className="px-3 py-6 text-destructive text-sm">
-            <p>{t.failed}</p>
+            <p>{presentCoreError(messages, locale, active.error, t.failed)}</p>
             <button
               className="mt-3 rounded-md border border-border px-3 py-1.5 text-foreground transition-colors hover:bg-muted"
               onClick={() => active.refetch()}

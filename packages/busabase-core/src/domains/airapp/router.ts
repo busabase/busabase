@@ -8,6 +8,7 @@ import {
   getSiteState,
   goLiveWithSite,
   republishSite,
+  setSitePrimaryDomain,
   unbindSiteDomain,
   unpublishSite,
 } from "./logic/site-engine";
@@ -29,6 +30,9 @@ export const airappRouter = {
   ),
   siteUnbindDomain: os.airapps.siteUnbindDomain.handler(({ input }) =>
     unbindSiteDomain(input.nodeId, input.hostname),
+  ),
+  siteSetPrimaryDomain: os.airapps.siteSetPrimaryDomain.handler(({ input }) =>
+    setSitePrimaryDomain(input.nodeId, input.hostname),
   ),
   siteDeployPreview: os.airapps.siteDeployPreview.handler(({ input }) =>
     deploySitePreview(input.nodeId),
