@@ -1,0 +1,2 @@
+CREATE INDEX "busabase_records_base_view_order_idx" ON "busabase_records" USING btree ("base_id",date_trunc('milliseconds', "updated_at") desc,("id" collate "C") desc);--> statement-breakpoint
+CREATE INDEX "busabase_records_base_odd_id_idx" ON "busabase_records" USING btree ("base_id") WHERE "busabase_records"."id" !~ '^[0-9a-z]+$';

@@ -1,0 +1,1 @@
+CREATE INDEX "busabase_field_values_active_date_record_idx" ON "busabase_field_values" USING btree ("base_id","field_slug","value_date","record_id") WHERE "busabase_field_values"."deleted_at" is null and "busabase_field_values"."value_date" is not null;

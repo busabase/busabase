@@ -111,7 +111,7 @@ test("reviewer sees structured dependencies before deleting a field and can insp
     new RegExp(`/base/${taskSlug}/${reviewSlug}(\\?originViewId=viw\\w+)?$`),
   );
   await expect(page.getByText("Budget review", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Approved change requests appear here after merge.")).toBeVisible();
+  await expect(page.getByText("Records appear here once they are added or merged.")).toBeVisible();
   await page.screenshot({
     path: test.info().outputPath("02-affected-view.png"),
     clip: { x: 255, y: 0, width: 1025, height: 720 },
