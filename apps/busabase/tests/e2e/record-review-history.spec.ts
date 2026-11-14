@@ -111,9 +111,8 @@ test("record review preview stays bounded and opens pageable record activity", a
   await activity.screenshot({ path: testInfo.outputPath("record-history-end.png") });
 
   await page.goBack();
-  // The detail dialog is not a history entry, so back lands on the grid: open the record again.
-  // The first column edits in place; the record opens from its expand button.
-  await page.getByRole("button", { name: `Open: ${title}`, exact: true }).click();
+  // The record dialog has its own URL, so it is a history entry: back returns to the dialog that
+  // opened the review history, which is already open — there is no grid in between to click.
   await expect(page.getByRole("heading", { name: title, exact: true, level: 1 })).toBeVisible();
   await expect(reviewLinks).toHaveCount(5);
   await page.setViewportSize({ width: 390, height: 844 });

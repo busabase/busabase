@@ -337,6 +337,20 @@
       "when": 1794190843568,
       "tag": "0047_classy_vermin",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1794594315442,
+      "tag": "0048_talented_black_bolt",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794658095103,
+      "tag": "0049_tearful_plazm",
+      "breakpoints": true
     }
   ]
 }
