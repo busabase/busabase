@@ -67,6 +67,7 @@ import {
   SquareCheck,
   Trash2,
   Type,
+  UserCheck,
   UserRound,
   Users,
   X,
@@ -136,6 +137,7 @@ export const FIELD_TYPE_ICONS: Record<FieldType, LucideIcon> = {
   multiselect: ListChecks,
   relation: GitBranch,
   member: Users,
+  appUser: UserCheck,
   lookup: Binoculars,
   attachment: Paperclip,
   drive: HardDrive,
@@ -152,6 +154,8 @@ const FILTER_OPERATORS_BY_KIND = {
   checkbox: ["is_true", "is_false", "is_empty", "not_empty"],
   emptyOnly: ["is_empty", "not_empty"],
   value: ["contains", "equals", "is_empty", "not_empty"],
+  // An id compares only as a whole — "contains" half an id means nothing.
+  equality: ["equals", "is_empty", "not_empty"],
 } as const satisfies Record<string, readonly ViewFilterOperator[]>;
 
 export const getFieldFilterOperators = (type: FieldType): readonly ViewFilterOperator[] => {
@@ -160,6 +164,9 @@ export const getFieldFilterOperators = (type: FieldType): readonly ViewFilterOpe
   }
   if (type === "attachment" || type === "drive" || type === "relation") {
     return FILTER_OPERATORS_BY_KIND.emptyOnly;
+  }
+  if (type === "appUser") {
+    return FILTER_OPERATORS_BY_KIND.equality;
   }
   return FILTER_OPERATORS_BY_KIND.value;
 };

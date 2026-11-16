@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
+import { DropdownMenuItem } from "kui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
 import {
   ArrowUpCircle,
   Check,
@@ -11,16 +13,16 @@ import {
   Copy,
   Loader2,
   Lock,
+  Maximize,
   Pin,
   Play,
   RotateCcw,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n } from "../../../i18n";
 import {
   FullscreenPreviewSurface,
-  PreviewFullscreenButton,
   type PreviewFullscreenState,
   usePreviewFullscreen,
 } from "../../dashboard/components/preview-fullscreen";
@@ -29,6 +31,7 @@ import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import type { SidePanelTabProps } from "../../dashboard/side-panel-registry";
 import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
+import { type AirAppPreviewState, useAirAppPreviewState } from "../hooks/use-airapp-preview-state";
 import { airAppSidePanelTabId } from "../store/airapp-keepalive-store";
 import {
   type AirAppRunEntry,
@@ -52,6 +55,8 @@ import {
 import { NodepodServiceWorkerError } from "../utils/nodepod-service-worker";
 import { AIRAPP_PREVIEW_IFRAME_SANDBOX } from "../utils/preview-sandbox";
 import { renderTerminalOutput } from "../utils/terminal-output";
+import { AirAppPreviewExternalButton, AirAppPreviewMenu } from "./AirAppPreviewMenu";
+import { AirAppPreviewFrame } from "./AirAppPreviewTools";
 import { AirAppSiteBlockers, AirAppSiteGoLive } from "./AirAppSiteControls";
 import {
   useAirAppEngineAvailability,
@@ -669,127 +674,150 @@ export function useAirAppFullscreen({
 
 interface AirAppRunControlsProps {
   runner: AirAppRunnerState;
-  /** Optional context (name/id) used by the "pin to side panel" and
-   *  fullscreen actions — the run/status controls only need `runner`. */
   airapp: AirAppVO | null;
   showPinToSidePanel?: boolean;
-  /** Fullscreen state shared with the `AirAppRunPreview` of the same surface,
-   *  so the toggle grows the existing preview instead of opening a second one. */
+  showSitePublish?: boolean;
   fullscreenState: AirAppFullscreenState;
+  previewState?: AirAppPreviewState;
+  releasesAction?: ReactNode;
+  siteActionItems?: ReactNode;
 }
 
-/** The run control cluster shared by the AirApp detail-view header and the
- *  side-panel toolbar. Fullscreen is a viewport surface rather than a modal:
- *  the already-running preview grows to fill the browser and a floating
- *  restore button returns it to the exact surface it came from (detail view
- *  or side panel). */
+/** The topbar owns Pin; both preview surfaces keep the same tab identity. */
+export function AirAppPinButton({ airapp }: { airapp: AirAppVO }) {
+  const messages = useCoreI18n();
+  return (
+    <TooltipProvider delayDuration={350}>
+      <AirAppControlHint label={messages.nodeDetail.pinToSidePanel}>
+        <Button
+          aria-label={messages.nodeDetail.pinToSidePanel}
+          className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={() =>
+            useSidePanelStore.getState().openTab({
+              id: airAppSidePanelTabId(airapp.node.id),
+              type: "airapp-preview",
+              title: airapp.node.name,
+              payload: { nodeId: airapp.node.id },
+            })
+          }
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        >
+          <Pin className="size-3.5" />
+        </Button>
+      </AirAppControlHint>
+    </TooltipProvider>
+  );
+}
+
+function AirAppControlHint({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent className="text-xs">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** A compact action cluster with a dedicated Sites menu for publication and preview tools. */
 export function AirAppRunControls({
   runner,
   airapp,
   showPinToSidePanel = true,
+  showSitePublish = true,
   fullscreenState,
+  previewState,
+  releasesAction,
+  siteActionItems,
 }: AirAppRunControlsProps) {
   const messages = useCoreI18n();
   const { status, previewUrl, errorCode, engineLock, run, stop, isBusy, isLive, runnerKind } =
     runner;
+  const ownPreview = useAirAppPreviewState(previewUrl);
+  const preview = previewState ?? ownPreview;
   const isUnsupportedBrowser = errorCode === "SERVICE_WORKER_UNAVAILABLE";
-
-  const statusLabel: Record<AirAppRunStatus, string> = {
-    idle: messages.airapp.statusIdle,
-    "loading-files": messages.airapp.statusLoadingFiles,
-    installing: messages.airapp.statusInstalling,
-    starting: messages.airapp.statusStarting,
-    ready: messages.airapp.statusReady,
-    error: messages.airapp.statusError,
-  };
-
-  const pinToSidePanel = () => {
-    if (!airapp) {
-      return;
-    }
-    useSidePanelStore.getState().openTab({
-      id: airAppSidePanelTabId(airapp.node.id),
-      type: "airapp-preview",
-      title: airapp.node.name,
-      payload: { nodeId: airapp.node.id },
-    });
-  };
-
-  // Browser translators replace live text nodes. This cluster changes on every
-  // runner phase, so keep translation out of the host controls without placing
-  // the guest iframe under the same boundary.
-  return (
-    <div
-      className="notranslate flex min-w-0 items-center gap-1.5"
-      data-airapp-node-id={airapp?.node.id}
-      data-airapp-run-status={status}
-      translate="no"
-    >
-      <span className="hidden text-muted-foreground/70 text-xs sm:inline">
-        {/* A plan lock is not a failed run: nothing was started, and the body
-            already offers the way out. "Run failed" + "Run again" here would
-            send the person round the same locked state. */}
-        {engineLock ? messages.airapp.enginePlan.statusLocked : statusLabel[status]}
-      </span>
-      {airapp && showPinToSidePanel ? (
-        <Button
-          aria-label={messages.nodeDetail.pinToSidePanel}
-          onClick={pinToSidePanel}
-          size="icon-sm"
-          title={messages.nodeDetail.pinToSidePanel}
-          type="button"
-          variant="outline"
-        >
-          <Pin className="size-3.5" />
-        </Button>
-      ) : null}
-      <PreviewFullscreenButton
-        available={Boolean(previewUrl)}
-        fullscreenState={fullscreenState}
-        label={messages.airapp.enterFullscreen}
-      />
-      {/* A website has no process to stop; taking it down is the public switch. */}
-      {isLive && runnerKind !== "site" ? (
-        <Button
-          aria-label={messages.airapp.stop}
-          onClick={() => void stop()}
-          size="icon-sm"
-          title={messages.airapp.stopHint}
-          type="button"
-          variant="outline"
-        >
-          <CircleStop className="size-3.5" />
-        </Button>
-      ) : null}
-      {airapp && runnerKind === "site" && !engineLock ? (
-        <AirAppSiteGoLive
-          filesRevision={airapp.files.map((file) => `${file.path}:${file.updatedAt}`).join("|")}
-          nodeId={airapp.node.id}
-          orpc={runner.orpc}
-          runStatus={status}
+  const runLabel =
+    status === "ready" || status === "error" ? messages.airapp.runAgain : messages.airapp.run;
+  const stopAction =
+    isLive && runnerKind !== "site" ? (
+      <DropdownMenuItem onSelect={() => void stop()}>
+        <CircleStop />
+        {messages.airapp.stop}
+      </DropdownMenuItem>
+    ) : null;
+  const controls = (sitePublishItem: ReactNode = null) => (
+    <TooltipProvider delayDuration={350}>
+      <div
+        className="notranslate flex min-w-0 shrink-0 items-center gap-1"
+        data-airapp-node-id={airapp?.node.id}
+        data-airapp-run-status={status}
+        data-airapp-preview-controls=""
+        translate="no"
+      >
+        {isUnsupportedBrowser || engineLock ? null : (
+          <AirAppControlHint label={runLabel}>
+            <Button
+              aria-label={runLabel}
+              className="h-8 w-8 gap-1.5 px-0 @min-[900px]/airapp-toolbar:w-auto @min-[900px]/airapp-toolbar:px-2.5"
+              disabled={isBusy}
+              onClick={() => void run()}
+              size="sm"
+              type="button"
+              variant={status === "ready" ? "outline" : "default"}
+            >
+              {isBusy ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : status === "ready" || status === "error" ? (
+                <RotateCcw className="size-3.5" />
+              ) : (
+                <Play className="size-3.5" />
+              )}
+              <span className="hidden @min-[900px]/airapp-toolbar:inline">{runLabel}</span>
+            </Button>
+          </AirAppControlHint>
+        )}
+        {releasesAction}
+        <AirAppPreviewExternalButton url={previewUrl} />
+        {previewUrl && !fullscreenState.fullscreen ? (
+          <AirAppControlHint label={messages.airapp.enterFullscreen}>
+            <Button
+              aria-label={messages.airapp.enterFullscreen}
+              onClick={() => fullscreenState.setFullscreen(true)}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              <Maximize className="size-3.5" />
+            </Button>
+          </AirAppControlHint>
+        ) : null}
+        <AirAppPreviewMenu
+          topItems={
+            <>
+              {siteActionItems}
+              {sitePublishItem}
+            </>
+          }
+          extraItems={stopAction}
+          kind={runnerKind}
+          previewState={preview}
+          url={previewUrl}
         />
-      ) : null}
-      {isUnsupportedBrowser || engineLock ? null : (
-        <Button
-          disabled={isBusy}
-          onClick={() => void run()}
-          size="sm"
-          type="button"
-          variant={status === "ready" ? "outline" : "default"}
-        >
-          {isBusy ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : status === "ready" || status === "error" ? (
-            <RotateCcw className="size-3.5" />
-          ) : (
-            <Play className="size-3.5" />
-          )}
-          {status === "ready" || status === "error"
-            ? messages.airapp.runAgain
-            : messages.airapp.run}
-        </Button>
-      )}
-    </div>
+        {airapp && showPinToSidePanel ? <AirAppPinButton airapp={airapp} /> : null}
+      </div>
+    </TooltipProvider>
+  );
+  return airapp && showSitePublish && runnerKind === "site" && !engineLock ? (
+    <AirAppSiteGoLive
+      filesRevision={airapp.files.map((file) => `${file.path}:${file.updatedAt}`).join("|")}
+      nodeId={airapp.node.id}
+      orpc={runner.orpc}
+      renderMenuAction={controls}
+      runStatus={status}
+    />
+  ) : (
+    controls()
   );
 }
 
@@ -807,6 +835,7 @@ interface AirAppRunPreviewProps {
    *  has no external toolbar (side panel), it is omitted and this component
    *  owns the state for its own toolbar. */
   fullscreenState?: AirAppFullscreenState;
+  previewState?: AirAppPreviewState;
 }
 
 /** The preview has no reliable shape until an AirApp boots, so use an honest
@@ -999,11 +1028,14 @@ export function AirAppRunPreview({
   airapp,
   showToolbar = true,
   fullscreenState,
+  previewState,
 }: AirAppRunPreviewProps) {
   const messages = useCoreI18n();
   const { status, previewUrl, error, errorCode, engineLock, siteBlockers } = runner;
   const ownFullscreen = useAirAppFullscreen();
   const activeFullscreen = fullscreenState ?? ownFullscreen;
+  const ownPreview = useAirAppPreviewState(previewUrl);
+  const preview = previewState ?? ownPreview;
   // `SERVICE_WORKER_UNAVAILABLE` gets its own full recovery state below
   // instead of the generic top banner + dead-end "previewFailed" text: unlike
   // every other run failure, there is no retry that can fix it in-app.
@@ -1012,6 +1044,7 @@ export function AirAppRunPreview({
   return (
     <FullscreenPreviewSurface
       aria-label={airapp?.node.name ?? messages.airapp.previewTitle}
+      bodyClassName="flex flex-col"
       banner={
         error && !isUnsupportedBrowser && !engineLock && !siteBlockers ? (
           <AirAppRunError error={error} />
@@ -1023,7 +1056,10 @@ export function AirAppRunPreview({
       fullscreenState={activeFullscreen}
       toolbar={
         showToolbar ? (
-          <div className="flex min-h-11 items-center justify-between gap-2 border-border/60 border-b px-4 py-2">
+          <div
+            className="@container/airapp-toolbar flex min-h-11 items-center justify-between gap-2 border-border/60 border-b px-3 py-2"
+            data-airapp-run-toolbar=""
+          >
             <span className="font-medium text-muted-foreground text-xs uppercase">
               {messages.airapp.runPanelTitle}
             </span>
@@ -1032,6 +1068,7 @@ export function AirAppRunPreview({
               fullscreenState={activeFullscreen}
               runner={runner}
               showPinToSidePanel={false}
+              previewState={preview}
             />
           </div>
         ) : null
@@ -1044,12 +1081,17 @@ export function AirAppRunPreview({
       ) : siteBlockers ? (
         <AirAppSiteBlockers blockers={siteBlockers} />
       ) : previewUrl ? (
-        <iframe
-          className="h-full w-full border-0 bg-white"
-          sandbox={AIRAPP_PREVIEW_IFRAME_SANDBOX}
-          src={previewUrl}
-          title={messages.airapp.previewTitle}
-        />
+        <AirAppPreviewFrame viewport={preview.viewport}>
+          <iframe
+            className="h-full w-full border-0 bg-background"
+            onError={preview.loaded}
+            onLoad={preview.loaded}
+            ref={preview.frameRef}
+            sandbox={AIRAPP_PREVIEW_IFRAME_SANDBOX}
+            src={previewUrl}
+            title={messages.airapp.previewTitle}
+          />
+        </AirAppPreviewFrame>
       ) : status === "idle" || status === "error" ? (
         <div
           className="notranslate grid h-full min-h-[160px] place-items-center p-6 text-center text-muted-foreground text-sm"

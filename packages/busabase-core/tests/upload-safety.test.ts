@@ -245,6 +245,7 @@ describe("Upload safety (.gitignore filter + default-deny list + secret scan) â€
       expect(caught).toMatchObject({
         code: "SECRET_DETECTED",
         status: 422,
+        message: expect.stringContaining("1 file/rule match(es)"),
         data: {
           findings: [{ path: "notes.md", ruleName: "aws-access-key" }],
         },

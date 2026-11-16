@@ -81,6 +81,7 @@ export type FieldInputKind =
   | "multiselect"
   | "relation"
   | "member"
+  | "appUser"
   | "attachment"
   | "drive"
   | "tags"
@@ -628,6 +629,22 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
         ? null
         : `${fieldDisplayName(def)} must be a member id or a list of member ids`,
   },
+  appUser: {
+    type: "appUser",
+    // One end user of the space's apps (a shop buyer, a member page member) —
+    // NOT a workspace member. App users exist only where the host has them
+    // (Busabase Cloud); the value is just their id (`apu_…`), stored like text
+    // so `records/query`'s exact owner filter can compare it. The host resolves
+    // ids to emails at read time; without one the raw id is shown.
+    label: "app user",
+    input: "appUser",
+    columnWidth: "minmax(180px,260px)",
+    // Shape only, the same call `member` makes: a deleted app user must not
+    // invalidate every row that names them, and an unknown id renders as
+    // "Deleted app user" rather than blocking the write.
+    validate: (value, def) =>
+      typeof value === "string" ? null : `${fieldDisplayName(def)} must be an app user id`,
+  },
   attachment: {
     type: "attachment",
     label: "file",
@@ -724,6 +741,7 @@ export const FIELD_TYPE_ORDER: FieldType[] = [
   "drive",
   "relation",
   "member",
+  "appUser",
   "lookup",
   "number",
   "formula",
@@ -806,6 +824,7 @@ export type FieldDisplayKind =
   | "attachment"
   | "relation"
   | "member"
+  | "appUser"
   | "markdown"
   | "html"
   | "code"
@@ -831,6 +850,8 @@ const DISPLAY_KIND: Partial<Record<FieldType, FieldDisplayKind>> = {
   member: "member",
   created_by: "member",
   updated_by: "member",
+  // An app user id resolved through the host (`AppUserFieldHostProvider`).
+  appUser: "appUser",
   markdown: "markdown",
   html: "html",
   code: "code",
@@ -918,6 +939,13 @@ export const collectPeopleFieldIds = (
 export const FILE_FIELD_TYPES: ReadonlySet<FieldType> = new Set(["attachment", "drive"]);
 
 export const isFileFieldType = (type: FieldType): boolean => FILE_FIELD_TYPES.has(type);
+
+/**
+ * The app user id in an `appUser` cell, or null. The cell holds one id as a
+ * string; anything else (blank, a stray array) reads as empty.
+ */
+export const getAppUserId = (value: unknown): string | null =>
+  typeof value === "string" && value.trim() ? value.trim() : null;
 
 /** The set of server-managed (computed) field types. */
 export const SYSTEM_FIELD_TYPES: ReadonlySet<FieldType> = new Set(

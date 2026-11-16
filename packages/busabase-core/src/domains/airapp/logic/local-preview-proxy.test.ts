@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { runInNewContext } from "node:vm";
+import { brotliCompressSync, deflateSync, gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { proxyLocalPreview } from "./local-preview-proxy";
 import { registerLocalPreview, unregisterLocalPreview } from "./local-preview-registry";
@@ -30,6 +31,206 @@ const listen = async (
 
 afterEach(async () => {
   await unregisterLocalPreview(NODE_ID, OWNER);
+});
+
+describe("AirApp preview response compression over real HTTP", () => {
+  const html =
+    '<!doctype html><html><head></head><body><h1>Compressed preview ready</h1><img src="/badge.png"></body></html>';
+  const binary = Buffer.from([0, 255, 128, 65, 0, 17, 66, 254, 0, 127, 17, 90]);
+  const compressors = {
+    gzip: gzipSync,
+    deflate: deflateSync,
+    br: brotliCompressSync,
+  };
+
+  it.each(["gzip", "deflate", "br"] as const)(
+    "decodes %s HTML before rewriting when a browser also advertises Zstandard",
+    async (encoding) => {
+      let negotiated = "";
+      let advertised = "";
+      const upstream = await listen((request, response) => {
+        advertised = request.headers["accept-encoding"] ?? "";
+        negotiated = advertised.includes("zstd") ? "zstd" : encoding;
+        const body =
+          negotiated === "zstd"
+            ? Buffer.from(
+                "KLUv/SBt5QIAooUTGIC3bYBI5NKhrGmSYsEApLYNHk7DLyGrEpmw2jtMwgwacKPFOCJwoGSGEcxiD5eWIyscIRy16VM6aj6CLBZz6TEOU8sxE1Zr76WOowMGAwAehAFVRpGsLAE=",
+                "base64",
+              )
+            : compressors[encoding](Buffer.from(html));
+        response.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "content-encoding": negotiated,
+          "content-length": String(body.length),
+        });
+        response.end(body);
+      });
+      await registerLocalPreview(NODE_ID, OWNER, upstream.origin);
+
+      try {
+        const response = await proxyLocalPreview(
+          new Request("https://busabase.example/api/airapp-preview/preview-node/", {
+            headers: { "accept-encoding": "gzip, deflate, br, zstd" },
+          }),
+          NODE_ID,
+          "",
+          OWNER,
+        );
+
+        const document = await response.text();
+        expect(document).toContain("<h1>Compressed preview ready</h1>");
+        expect(document).toContain('src="/api/airapp-preview/preview-node/badge.png"');
+        expect(document).toContain('<base href="/api/airapp-preview/preview-node/">');
+        expect(response.headers.get("content-encoding")).toBeNull();
+        expect(response.headers.get("content-length")).toBeNull();
+        expect(advertised).not.toContain("zstd");
+        expect(negotiated).toBe(encoding);
+      } finally {
+        await upstream.close();
+      }
+    },
+  );
+
+  it.each(["gzip", "deflate", "br"] as const)(
+    "preserves %s binary bytes when a browser also advertises Zstandard",
+    async (encoding) => {
+      let negotiated = "";
+      const upstream = await listen((request, response) => {
+        negotiated = request.headers["accept-encoding"]?.includes("zstd") ? "zstd" : encoding;
+        const body =
+          negotiated === "zstd"
+            ? Buffer.from("KLUv/SAMYQAAAP+AQQARQv4AfxFa", "base64")
+            : compressors[encoding](binary);
+        response.writeHead(200, {
+          "content-type": "application/octet-stream",
+          "content-encoding": negotiated,
+          "content-length": String(body.length),
+        });
+        response.end(body);
+      });
+      await registerLocalPreview(NODE_ID, OWNER, upstream.origin);
+
+      try {
+        const response = await proxyLocalPreview(
+          new Request("https://busabase.example/api/airapp-preview/preview-node/proof.bin", {
+            headers: { "accept-encoding": "gzip, deflate, br, zstd" },
+          }),
+          NODE_ID,
+          "proof.bin",
+          OWNER,
+        );
+
+        expect(Buffer.from(await response.arrayBuffer())).toEqual(binary);
+        expect(response.headers.get("content-encoding")).toBeNull();
+        expect(response.headers.get("content-length")).toBeNull();
+        expect(negotiated).toBe(encoding);
+      } finally {
+        await upstream.close();
+      }
+    },
+  );
+});
+
+describe("versioned private previews over real HTTP", () => {
+  it.each(["html", "binary"])("waits for the uploaded version before serving %s", async (kind) => {
+    let requests = 0;
+    const received: IncomingMessage["headers"][] = [];
+    const binary = Buffer.from([0, 255, 128, 0, 2]);
+    const upstream = await listen((request, response) => {
+      requests += 1;
+      received.push(request.headers);
+      const ready = requests > 2;
+      response.writeHead(200, {
+        "content-type": kind === "html" ? "text/html" : "application/octet-stream",
+        "cache-control": "public, max-age=3600",
+        "x-busabase-preview-version": ready ? "v2" : "v1",
+      });
+      response.end(ready ? (kind === "html" ? "<h1>version two</h1>" : binary) : "older bytes");
+    });
+    await registerLocalPreview(NODE_ID, OWNER, upstream.origin, {
+      "x-busabase-preview-token": "private-token",
+      "x-busabase-preview-version": "v2",
+    });
+    try {
+      const response = await proxyLocalPreview(
+        new Request(
+          "https://busabase.example/api/airapp-preview/preview-node/?__busabase_site_version=v2",
+          {
+            headers: {
+              "if-none-match": '"older-etag"',
+              "if-modified-since": "Mon, 16 Nov 2026 00:00:00 GMT",
+              "x-busabase-preview-version": "browser-forgery",
+            },
+          },
+        ),
+        NODE_ID,
+        "",
+        OWNER,
+      );
+      expect(response.status).toBe(200);
+      if (kind === "html") expect(await response.text()).toContain("<h1>version two</h1>");
+      else expect(Buffer.from(await response.arrayBuffer())).toEqual(binary);
+      expect(requests).toBe(3);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("x-busabase-preview-version")).toBeNull();
+      for (const headers of received) {
+        expect(headers["x-busabase-preview-version"]).toBe("v2");
+        expect(headers["if-none-match"]).toBeUndefined();
+        expect(headers["if-modified-since"]).toBeUndefined();
+      }
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  it("fails closed when an old gate never proves which version it serves", async () => {
+    const upstream = await listen((_request, response) => response.end("older unmarked bytes"));
+    await registerLocalPreview(NODE_ID, OWNER, upstream.origin, {
+      "x-busabase-preview-token": "private-token",
+      "x-busabase-preview-version": "v2",
+    });
+    try {
+      const response = await proxyLocalPreview(
+        new Request(
+          "https://busabase.example/api/airapp-preview/preview-node/?__busabase_site_version=v2",
+        ),
+        NODE_ID,
+        "",
+        OWNER,
+      );
+      expect(response.status).toBe(503);
+      expect(await response.text()).not.toContain("older unmarked bytes");
+      expect(response.headers.get("cache-control")).toBe("no-store");
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  it("does not put newer bytes at an older version URL", async () => {
+    let requests = 0;
+    const upstream = await listen((_request, response) => {
+      requests += 1;
+      response.end("newer bytes");
+    });
+    await registerLocalPreview(NODE_ID, OWNER, upstream.origin, {
+      "x-busabase-preview-token": "private-token",
+      "x-busabase-preview-version": "v2",
+    });
+    try {
+      const response = await proxyLocalPreview(
+        new Request(
+          "https://busabase.example/api/airapp-preview/preview-node/?__busabase_site_version=v1",
+        ),
+        NODE_ID,
+        "",
+        OWNER,
+      );
+      expect(response.status).toBe(503);
+      expect(requests).toBe(0);
+    } finally {
+      await upstream.close();
+    }
+  });
 });
 
 describe("AirApp preview proxy credential boundary", () => {

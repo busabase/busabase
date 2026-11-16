@@ -89,6 +89,18 @@ describe("demo mobile read surfaces", () => {
     expect(file.encoding).toBe("utf8");
     expect(file.content).toContain("# Team Files");
     expect(file.contentHash).toMatch(/^demo-/);
+    const listed = await client.fileTrees.listFiles({
+      type: "drive",
+      nodeId: "nod_drive_team_files",
+    });
+    const entries = await client.fileTrees.listEntries({
+      type: "drive",
+      nodeId: "nod_drive_team_files",
+      folder: "",
+    });
+    for (const inventory of [listed, entries.files]) {
+      expect(inventory.find((item) => item.path === file.path)?.contentHash).toBe(file.contentHash);
+    }
   });
 
   it("exposes seeded AirApps to mobile detail screens", async () => {

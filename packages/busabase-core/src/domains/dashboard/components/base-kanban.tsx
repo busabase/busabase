@@ -10,10 +10,11 @@ import type {
 } from "busabase-contract/types";
 import { ImageOff } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { type MouseEvent, type ReactNode, useRef, useState } from "react";
+import { type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
+import { recordFindErrorMessage } from "../../../i18n/record-find";
 import { getMemberIds, isFileFieldType, isPeopleFieldType } from "../../base/field-types";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { getRecordTitle } from "../helpers/change-request";
@@ -26,13 +27,19 @@ import {
 } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { retryRecordRead } from "../helpers/query-state";
+import {
+  combineRecordCollectionStatus,
+  type RecordCollectionStatus,
+} from "../helpers/record-collection-status";
 import { useLinkedRecords } from "../hooks/use-linked-records";
+import type { RecordFindControl } from "../hooks/use-record-find";
 import { useDashboardOrpc } from "../orpc-context";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { AttachmentValuePreview } from "./attachment-value-preview";
 import { CoverVideo } from "./cover-video";
 import { FieldBadgeList, FieldValuePreview, LookupFieldValue } from "./field-preview";
 import { MemberChips } from "./member-field";
+import { RecordCollectionFeedback } from "./record-collection-feedback";
 import { useWorkspacePermissionLevel } from "./split-submit-button";
 
 /**
@@ -376,6 +383,9 @@ function KanbanColumn({
   coverField,
   coverFit,
   viewId,
+  queryScope,
+  recordFind,
+  onQueryStatusChange,
 }: {
   base: BaseVO | null;
   canDrag: boolean;
@@ -392,6 +402,9 @@ function KanbanColumn({
   coverField: BaseFieldVO | null;
   coverFit: GalleryCoverFit;
   viewId: string | undefined;
+  queryScope: string;
+  recordFind?: RecordFindControl;
+  onQueryStatusChange: (columnId: string, status: RecordCollectionStatus) => void;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -401,13 +414,13 @@ function KanbanColumn({
 
   const cardsQuery = useInfiniteQuery({
     enabled: Boolean(baseId),
-    retry: retryRecordRead,
     getNextPageParam: (last: { page: number; totalPages: number }) =>
       last.page < last.totalPages ? last.page + 1 : undefined,
     initialPageParam: 1,
     queryFn: ({ pageParam }) =>
       client.listRecordsPage({
         baseId,
+        find: recordFind?.input,
         filters: [
           column.id === UNCATEGORIZED
             ? { fieldSlug: stackField.slug, fieldType: "select", operator: "is_empty" as const }
@@ -435,7 +448,10 @@ function KanbanColumn({
       viewId ?? "",
       stackField.slug,
       column.id,
+      queryScope,
+      recordFind?.input,
     ],
+    retry: recordFind?.hasQuery ? false : retryRecordRead,
   });
 
   const records = (cardsQuery.data?.pages ?? []).flatMap((page) => page.records);
@@ -459,17 +475,30 @@ function KanbanColumn({
   const { records: relationRecords } = useLinkedRecords({ client, ids: relationIds, orpc });
   const baseSlug = base?.slug ?? records[0]?.base.slug ?? "";
   const lastPage = cardsQuery.data?.pages.at(-1);
+  const totalCapped = Boolean(lastPage?.totalCapped);
   const total = lastPage
-    ? lastPage.totalCapped
-      ? `${Math.max(records.length, lastPage.total - 1)}+`
-      : Math.max(records.length, lastPage.total)
+    ? Math.max(records.length, lastPage.total - (totalCapped ? 1 : 0))
     : undefined;
-  // No global count is needed to discover this bucket. Its own bounded read
-  // decides whether it exists; a failed read stays visible with retry instead
-  // of silently hiding uncategorized records.
+  const isFetching = cardsQuery.isPending || cardsQuery.isFetching;
+  const isError = cardsQuery.isError;
+  useEffect(() => {
+    onQueryStatusChange(column.id, {
+      scope: queryScope,
+      total,
+      totalCapped,
+      isFetching,
+      isError,
+    });
+  }, [column.id, queryScope, total, totalCapped, isFetching, isError, onQueryStatusChange]);
+  const allowDrag = canDrag && !isFetching && !isError;
+  const error = cardsQuery.error
+    ? (recordFindErrorMessage(locale, cardsQuery.error) ??
+      presentCoreError(messages, locale, cardsQuery.error, messages.shell.operationFailed))
+    : null;
+  // Still report this query's state before hiding an empty Uncategorized bucket.
   if (
     column.id === UNCATEGORIZED &&
-    !cardsQuery.isError &&
+    !isError &&
     (cardsQuery.isPending || (lastPage?.total === 0 && records.length === 0))
   ) {
     return null;
@@ -483,57 +512,55 @@ function KanbanColumn({
       }`}
       data-testid={`kanban-column-${column.id}`}
       onDragOver={
-        canDrag
+        allowDrag
           ? (event) => {
               event.preventDefault();
               onDragOverColumn();
             }
           : undefined
       }
-      onDrop={canDrag ? onDrop : undefined}
+      onDrop={allowDrag ? onDrop : undefined}
     >
       <div className="flex items-center gap-2 border-border/40 border-b px-3 py-2">
         <span
           className={`h-2 w-2 shrink-0 rounded-full ${COLOR_DOT[column.color ?? "slate"] ?? COLOR_DOT.slate}`}
         />
         <span className="truncate font-medium text-foreground text-sm">{column.name}</span>
-        <span className="ml-auto rounded-md bg-muted/60 px-1.5 text-muted-foreground text-xs">
-          {total ?? (cardsQuery.isError ? "" : "…")}
+        <span
+          className="ml-auto rounded-md bg-muted/60 px-1.5 text-muted-foreground text-xs"
+          data-testid="kanban-column-count"
+        >
+          {recordFind?.isPending
+            ? "…"
+            : total === undefined
+              ? isError
+                ? ""
+                : "…"
+              : `${total}${totalCapped ? "+" : ""}`}
         </span>
       </div>
       {/* The column scrolls on its own, which is what gives "load more" a place
           to live; before this the column grew with its content and the whole
           board scrolled as one. */}
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-2">
-        {cardsQuery.isPending ? (
-          <div className="px-1 py-4 text-center text-muted-foreground/70 text-xs">
-            {messages.common.loading}
-          </div>
-        ) : cardsQuery.isError && records.length === 0 ? (
-          // A column too large to read in time says so, rather than looking empty.
-          <div className="flex flex-col items-center gap-2 px-1 py-4 text-center text-xs">
-            <span className="text-destructive" role="alert">
-              {presentCoreError(messages, locale, cardsQuery.error, messages.shell.operationFailed)}
-            </span>
-            <button
-              className="rounded-md border border-border/70 px-2 py-1 font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              onClick={() => void cardsQuery.refetch()}
-              type="button"
-            >
-              {messages.base.paginationRetry}
-            </button>
-          </div>
+        {cardsQuery.isPending || recordFind?.isPending ? (
+          <RecordCollectionFeedback find={recordFind} pending />
         ) : records.length === 0 ? (
-          <div className="px-1 py-4 text-center text-muted-foreground/70 text-xs">
-            {resolveIString(stackField.name)}
-          </div>
+          <RecordCollectionFeedback
+            empty={!isError}
+            emptyLabel={
+              recordFind?.hasQuery
+                ? messages.search.noMatchesTitle
+                : resolveIString(stackField.name)
+            }
+          />
         ) : (
           records.map((record) => (
             <KanbanCard
               baseSlug={baseSlug}
               coverField={coverField}
               coverFit={coverFit}
-              draggable={canDrag}
+              draggable={allowDrag}
               fields={fields}
               key={record.id}
               onDragStart={() => onDragStartRecord(record)}
@@ -545,7 +572,16 @@ function KanbanColumn({
             />
           ))
         )}
-        {cardsQuery.hasNextPage ? (
+        <RecordCollectionFeedback
+          error={recordFind?.isPending ? null : error}
+          find={recordFind}
+          onRetry={() => {
+            if (cardsQuery.isFetchNextPageError) void cardsQuery.fetchNextPage();
+            else void cardsQuery.refetch();
+          }}
+          pending={Boolean(error) && isFetching}
+        />
+        {cardsQuery.hasNextPage && !cardsQuery.isError && !recordFind?.isPending ? (
           <button
             className="rounded-md border border-border/50 px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/40"
             disabled={cardsQuery.isFetchingNextPage}
@@ -579,6 +615,9 @@ export function BusaBaseKanban({
   fields,
   onMoveRecord,
   onOpenRecord,
+  onCollectionStatusChange,
+  queryScope,
+  recordFind,
 }: {
   activeView: ViewVO | null;
   base: BaseVO | null;
@@ -586,6 +625,9 @@ export function BusaBaseKanban({
   fields: BaseFieldVO[];
   onMoveRecord?: KanbanMoveRecord;
   onOpenRecord?: (record: RecordVO) => void;
+  onCollectionStatusChange?: (status: RecordCollectionStatus) => void;
+  queryScope?: string;
+  recordFind?: RecordFindControl;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -596,7 +638,7 @@ export function BusaBaseKanban({
   const [reviewRequestId, setReviewRequestId] = useState<string | null>(null);
   // The dragged RECORD, not just its id: the board no longer holds an array of
   // every record to look one up in.
-  const [dragging, setDragging] = useState<RecordVO | null>(null);
+  const [dragging, setDragging] = useState<{ record: RecordVO; scope: string } | null>(null);
   const [overColumn, setOverColumn] = useState<string | null>(null);
   const stackField = resolveStackByField(base, fields, activeView?.config.stackByFieldSlug);
   // Covers are opt-in on boards: missing legacy config must not make every
@@ -606,6 +648,71 @@ export function BusaBaseKanban({
         (field) => isFileFieldType(field.type) && field.slug === activeView.config.coverFieldSlug,
       ) ?? null)
     : null;
+  const baseId = base?.id ?? "";
+  const scope =
+    queryScope ??
+    JSON.stringify([
+      baseId,
+      activeView?.id,
+      activeView?.config.filters,
+      activeView?.config.sorts,
+      stackField?.slug,
+      stackField?.options.choices?.map((choice) => choice.id),
+      recordFind?.input,
+    ]);
+  const [columnStates, setColumnStates] = useState<Record<string, RecordCollectionStatus>>({});
+  const onQueryStatusChange = useCallback((id: string, next: RecordCollectionStatus) => {
+    setColumnStates((current) => {
+      const previous = current[id];
+      if (
+        previous?.scope === next.scope &&
+        previous.total === next.total &&
+        previous.totalCapped === next.totalCapped &&
+        previous.isFetching === next.isFetching &&
+        previous.isError === next.isError
+      ) {
+        return current;
+      }
+      return { ...current, [id]: next };
+    });
+  }, []);
+
+  const choices = (stackField?.options.choices ?? []) as Choice[];
+  const columns: Array<{ id: string; name: string; color?: string }> = [
+    ...choices.map((c) => ({ id: c.id, name: c.name, color: c.color })),
+    { id: UNCATEGORIZED, name: messages.base.kanbanUncategorized, color: "slate" },
+  ];
+  const status = combineRecordCollectionStatus(
+    scope,
+    columns.map((column) => column.id),
+    columnStates,
+  );
+  const collectionTotal = stackField ? status.total : undefined;
+  const collectionTotalCapped = status.totalCapped;
+  const collectionFetching = Boolean(stackField) && status.isFetching;
+  const collectionError = status.isError;
+  useEffect(() => {
+    onCollectionStatusChange?.({
+      scope,
+      total: collectionTotal,
+      totalCapped: collectionTotalCapped,
+      isFetching: collectionFetching,
+      isError: collectionError,
+    });
+  }, [
+    scope,
+    collectionTotal,
+    collectionTotalCapped,
+    collectionFetching,
+    collectionError,
+    onCollectionStatusChange,
+  ]);
+  useEffect(() => {
+    if (recordFind?.isPending || dragging?.scope !== scope) {
+      setDragging(null);
+      setOverColumn(null);
+    }
+  }, [scope, recordFind?.isPending, dragging?.scope]);
 
   if (!stackField) {
     return (
@@ -613,16 +720,15 @@ export function BusaBaseKanban({
     );
   }
 
-  const choices = (stackField.options.choices ?? []) as Choice[];
-  const columns: Array<{ id: string; name: string; color?: string }> = [
-    ...choices.map((c) => ({ id: c.id, name: c.name, color: c.color })),
-    { id: UNCATEGORIZED, name: messages.base.kanbanUncategorized, color: "slate" },
-  ];
-
   const canDrag =
-    Boolean(onMoveRecord) && !isAnon && hasApiKeyLevel(permissionLevel, "changeRequest");
+    Boolean(onMoveRecord) &&
+    !isAnon &&
+    !recordFind?.isPending &&
+    !status.isFetching &&
+    !status.isError &&
+    hasApiKeyLevel(permissionLevel, "changeRequest");
   const handleDrop = async (columnId: string) => {
-    const record = dragging;
+    const record = dragging?.scope === scope ? dragging.record : null;
     setDragging(null);
     setOverColumn(null);
     if (!record || !onMoveRecord || !canDrag) {
@@ -650,6 +756,11 @@ export function BusaBaseKanban({
         error={moveError}
         reviewRequestId={reviewRequestId}
       />
+      {recordFind?.hasQuery && !recordFind.isPending && !status.isFetching && status.total === 0 ? (
+        <div className="px-2 py-4">
+          <RecordCollectionFeedback empty find={recordFind} />
+        </div>
+      ) : null}
       <div className="flex gap-3 overflow-x-auto pb-5">
         {columns.map((column) => (
           <KanbanColumn
@@ -664,11 +775,14 @@ export function BusaBaseKanban({
             isOver={overColumn === column.id}
             key={column.id}
             onDragOverColumn={() => setOverColumn(column.id)}
-            onDragStartRecord={setDragging}
+            onDragStartRecord={(record) => setDragging({ record, scope })}
             onDrop={() => void handleDrop(column.id)}
             onOpenRecord={onOpenRecord}
             stackField={stackField}
             viewId={activeView?.id}
+            queryScope={scope}
+            recordFind={recordFind}
+            onQueryStatusChange={onQueryStatusChange}
           />
         ))}
       </div>

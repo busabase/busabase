@@ -3,7 +3,7 @@ import type { AttachmentRef } from "open-domains/attachments/types";
 import { iStringParse } from "openlib/i18n/i-string";
 import type { CoreI18nMessages } from "../../../i18n";
 import { buildAssetContentUrl } from "../../assets/utils/asset-content-url";
-import { getMemberIds } from "../../base/field-types";
+import { getAppUserId, getMemberIds } from "../../base/field-types";
 import { formatFormulaValue } from "../../base/formula/field-preview";
 import {
   type DateFieldOptions,
@@ -513,6 +513,10 @@ export const normalizeEditorFieldValue = (field: BaseFieldVO, value: unknown): u
       : typeof value === "string" && value
         ? [value]
         : [];
+  }
+  if (field.type === "appUser") {
+    // One id, or cleared. A blank picker / input sends null, not "".
+    return getAppUserId(value);
   }
   if (field.type === "whiteboard") {
     // Re-validate/reshape defensively at submit time, same spirit as the

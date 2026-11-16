@@ -18,8 +18,11 @@ import { getRecordTitle } from "../helpers/change-request";
 import { pickCoverMedia } from "../helpers/cover-media";
 import { getFieldPreviewText } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import type { RecordsPagination } from "../helpers/view-types";
+import type { RecordFindControl } from "../hooks/use-record-find";
 import { CoverVideo } from "./cover-video";
 import { LookupFieldValue } from "./field-preview";
+import { RecordCollectionFeedback } from "./record-collection-feedback";
 
 // Card min-width per size preset — column count is left to CSS `auto-fill`
 // (responsive reflow), matching Airtable/Notion which don't let you drag a
@@ -190,6 +193,8 @@ export function BusaBaseGallery({
   archivedRecords = [],
   showArchivedRecords = false,
   onRestoreRecord,
+  pagination,
+  recordFind,
 }: {
   activeView: ViewVO | null;
   base: BaseVO | null;
@@ -198,19 +203,36 @@ export function BusaBaseGallery({
   archivedRecords?: RecordVO[];
   showArchivedRecords?: boolean;
   onRestoreRecord?: (record: RecordVO) => Promise<void>;
+  pagination?: RecordsPagination;
+  recordFind?: RecordFindControl;
 }) {
-  const messages = useCoreI18n();
   const config = activeView?.config;
   const coverField = resolveCoverField(base, fields, config?.coverFieldSlug);
   const coverFit: GalleryCoverFit = config?.coverFit ?? "cover";
   const cardSize: GalleryCardSize = config?.cardSize ?? "medium";
   const showFieldLabels = config?.showFieldLabels ?? false;
   const baseSlug = base?.slug ?? records[0]?.base.slug ?? "";
+  const pending = Boolean(
+    pagination?.isLoading ||
+      recordFind?.isPending ||
+      (recordFind?.hasQuery && pagination?.isFetching),
+  );
+  const showArchived = showArchivedRecords && !recordFind?.hasQuery && !recordFind?.isPending;
 
-  if (records.length === 0 && !(showArchivedRecords && archivedRecords.length > 0)) {
+  if (
+    pending ||
+    pagination?.error ||
+    (records.length === 0 && !(showArchived && archivedRecords.length > 0))
+  ) {
     return (
-      <div className="px-2 py-6 text-muted-foreground text-sm" data-testid="base-gallery">
-        {messages.base.emptyRecords}
+      <div aria-busy={pending} className="px-2 py-6" data-testid="base-gallery">
+        <RecordCollectionFeedback
+          empty={records.length === 0}
+          error={recordFind?.isPending ? null : pagination?.error}
+          find={recordFind}
+          onRetry={pagination?.onRetry}
+          pending={pending}
+        />
       </div>
     );
   }
@@ -232,7 +254,7 @@ export function BusaBaseGallery({
           showFieldLabels={showFieldLabels}
         />
       ))}
-      {showArchivedRecords
+      {showArchived
         ? archivedRecords.map((record) => (
             <GalleryCard
               baseSlug={baseSlug}

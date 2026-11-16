@@ -95,6 +95,7 @@ import { fieldValueToString, formatMemberChipLabel, shortIdentifier } from "../h
 import { buildGridCellText, GRID_FIELD_PRESENTATION } from "../helpers/grid-cell-layout";
 import { getInlineCellEditorKind } from "../helpers/inline-cell-edit";
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
+import type { RecordCollectionStatus } from "../helpers/record-collection-status";
 import {
   buildTableCellPreview,
   TABLE_CELL_LINK_MAX_CHARS,
@@ -130,11 +131,12 @@ import type { RecordFindControl } from "../hooks/use-record-find";
 import { getOmittedWhiteboardPreview, isListPayloadOmitted } from "../utils/list-payload-preview";
 import { toSlugInput } from "../utils/slug-input";
 import { useIsAnonymousVisitor } from "../visitor-context";
+import { AppUserFieldValue } from "./app-user-field";
 import { AttachmentValuePreview } from "./attachment-value-preview";
 import { BusaBaseCalendar } from "./base-calendar";
 import { BusaBaseGallery } from "./base-gallery";
 import { BusaBaseGantt } from "./base-gantt";
-import { BusaBaseKanban, type KanbanMoveRecord } from "./base-kanban";
+import { BusaBaseKanban, type KanbanMoveRecord, resolveStackByField } from "./base-kanban";
 import {
   type BaseGridEditingContextValue,
   InlineCellEditor,
@@ -928,10 +930,35 @@ export function BusaBaseTable({
   const resolveIString = useIString();
   const locale = useCoreLocale();
   const findMessages = recordFindMessages[locale];
+  const kanbanStackField =
+    activeView?.type === "kanban"
+      ? resolveStackByField(base, base?.fields ?? [], activeView.config.stackByFieldSlug)
+      : null;
+  const kanbanScope = JSON.stringify([
+    base?.id,
+    activeView?.id,
+    activeView?.config.filters,
+    activeView?.config.sorts,
+    kanbanStackField?.slug,
+    kanbanStackField?.options.choices?.map((choice) => choice.id),
+    recordFind?.input,
+  ]);
+  const [kanbanStatus, setKanbanStatus] = useState<RecordCollectionStatus>();
+  const currentKanbanStatus = kanbanStatus?.scope === kanbanScope ? kanbanStatus : undefined;
+  const recordFindControl = recordFind
+    ? {
+        ...recordFind,
+        isFetching:
+          activeView?.type === "kanban"
+            ? (currentKanbanStatus?.isFetching ?? true)
+            : recordFind.isFetching,
+      }
+    : undefined;
   const recordsPending = Boolean(
     pagination?.isLoading ||
       recordFind?.isPending ||
-      (recordFind?.hasQuery && pagination?.isFetching),
+      (recordFind?.hasQuery &&
+        (activeView?.type === "kanban" ? recordFindControl?.isFetching : pagination?.isFetching)),
   );
   const [location, navigate] = useLocation();
   const reduceMotion = useReducedMotion();
@@ -1384,6 +1411,20 @@ export function BusaBaseTable({
         >
           <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs @3xl/base-toolbar:flex-none">
             {(() => {
+              if (activeView?.type === "kanban") {
+                if (recordFind?.isPending) return findMessages.searching;
+                if (currentKanbanStatus?.isError) return messages.shell.operationFailed;
+                if (!currentKanbanStatus || currentKanbanStatus.isFetching) {
+                  return recordFind?.hasQuery ? findMessages.searching : messages.common.loading;
+                }
+                if (currentKanbanStatus.total === undefined) return messages.base.kanbanNoSelect;
+                return fmt(messages.base.recordCount, {
+                  count: currentKanbanStatus.totalCapped
+                    ? `${currentKanbanStatus.total}+`
+                    : currentKanbanStatus.total,
+                  plural: currentKanbanStatus.total === 1 ? "" : "s",
+                });
+              }
               if (recordFind && pagination?.error) return messages.shell.operationFailed;
               if (recordFind && recordsPending) return findMessages.searching;
               const displayCount = pagination?.total ?? records.length;
@@ -1522,9 +1563,9 @@ export function BusaBaseTable({
           fields={allFields}
           onOpen={(section) => setViewEditorRequest({ section, source: "toolbar" })}
           trailingControl={
-            recordFind ? (
+            recordFindControl ? (
               <RecordFind
-                control={recordFind}
+                control={recordFindControl}
                 fields={allFields}
                 visibleSlugs={fields.map((field) => field.slug)}
               />
@@ -1563,21 +1604,21 @@ export function BusaBaseTable({
           <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
             {messages.base.savedViewToolbarRequired}
           </span>
-          {recordFind ? (
+          {recordFindControl ? (
             <RecordFind
-              control={recordFind}
+              control={recordFindControl}
               fields={allFields}
               visibleSlugs={fields.map((field) => field.slug)}
             />
           ) : null}
         </div>
-      ) : recordFind ? (
+      ) : recordFindControl ? (
         <div
           className="mb-3 flex h-7 min-w-0 items-center [@media(pointer:coarse)]:h-11"
           data-testid="view-control-toolbar-readonly"
         >
           <RecordFind
-            control={recordFind}
+            control={recordFindControl}
             fields={allFields}
             visibleSlugs={fields.map((field) => field.slug)}
           />
@@ -1687,6 +1728,8 @@ export function BusaBaseTable({
           fields={fields}
           onRestoreRecord={canPropose ? onRestoreRecord : undefined}
           records={records}
+          pagination={pagination}
+          recordFind={recordFind}
           showArchivedRecords={showArchivedRecords}
         />
       ) : activeView?.type === "kanban" ? (
@@ -1697,6 +1740,9 @@ export function BusaBaseTable({
           fields={fields}
           onMoveRecord={onMoveRecord}
           onOpenRecord={onOpenRecord}
+          onCollectionStatusChange={setKanbanStatus}
+          queryScope={kanbanScope}
+          recordFind={recordFind}
         />
       ) : activeView?.type === "calendar" ? (
         <BusaBaseCalendar
@@ -3038,6 +3084,14 @@ function RecordTableCellContent({
           {checked ? <Check size={12} /> : null}
         </span>
       </Link>
+    );
+  }
+
+  if (kind === "appUser") {
+    return (
+      <div className="flex min-w-0 items-center py-1">
+        <AppUserFieldValue field={field} value={rawValue} />
+      </div>
     );
   }
 

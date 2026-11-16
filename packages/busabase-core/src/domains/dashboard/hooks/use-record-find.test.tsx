@@ -54,6 +54,7 @@ describe("record find request lifecycle", () => {
   it("restarts find when a committed keyword's field changes", () => {
     const { result, commits } = setup({ query: "Acme", fieldId: "" });
     act(() => result.current.setFieldId("fld_customer"));
+    expect(result.current.input).toEqual({ query: "Acme" });
     expect(result.current.isPending).toBe(true);
     act(() => vi.advanceTimersByTime(499));
     expect(commits).not.toHaveBeenCalled();
@@ -62,6 +63,22 @@ describe("record find request lifecycle", () => {
       query: "Acme",
       fieldId: "fld_customer",
     });
+    expect(result.current.input).toEqual({ query: "Acme", fieldId: "fld_customer" });
+  });
+
+  it("shares only committed input across result views and clears it immediately", () => {
+    const { result } = setup();
+    act(() => result.current.setQuery("needle"));
+    expect(result.current.input).toBeUndefined();
+    act(() => vi.advanceTimersByTime(500));
+    expect(result.current.input).toEqual({ query: "needle" });
+    act(() => result.current.startComposition());
+    act(() => result.current.setQuery("new-query"));
+    act(() => vi.advanceTimersByTime(1000));
+    expect(result.current.input).toEqual({ query: "needle" });
+    act(() => result.current.clear());
+    expect(result.current.input).toBeUndefined();
+    expect(result.current.isPending).toBe(false);
   });
 
   it("removes an active keyword even when its draft becomes empty before selecting a field", () => {

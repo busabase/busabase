@@ -744,6 +744,16 @@ export const busabaseDemoRouter: EnhancedRouter<
     siteState: os.airapps.siteState.handler(() => {
       throw demoUnsupported("Website publishing");
     }),
+    siteReleases: os.airapps.siteReleases.handler(() => ({
+      available: false,
+      versions: [],
+      history: [],
+      status: "idle" as const,
+      lastError: null,
+    })),
+    siteRollback: os.airapps.siteRollback.handler(() => {
+      throw demoUnsupported("Website rollback");
+    }),
     siteDomains: os.airapps.siteDomains.handler(() => ({
       available: false,
       cnameTarget: null,

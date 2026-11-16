@@ -7,6 +7,7 @@ export type FieldType =
   | "drive"
   | "relation"
   | "member"
+  | "appUser"
   | "number"
   | "date"
   | "checkbox"

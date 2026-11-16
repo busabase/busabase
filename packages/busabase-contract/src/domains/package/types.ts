@@ -114,6 +114,27 @@ export const PACKAGE_COMPUTED_FIELD_TYPES: readonly string[] = [
 export const PACKAGE_FILE_FIELD_TYPES: readonly string[] = ["attachment", "drive"];
 
 /**
+ * Field types whose values only mean something in the space they were written
+ * in. An `appUser` value is the id of one person in THAT space's app-user pool
+ * (a shop buyer who signed in there); in any other space no such person exists,
+ * so the id would show as "Deleted app user" and — worse — a `records/query`
+ * owner filter could never match it. A `member` value names people who belong
+ * to the source space; whoever installs the template has other members, and a
+ * shared template should not carry the source team's user ids. Same treatment
+ * as file refs: the field DEFINITION is exported, the values are dropped, and a
+ * required column is relaxed so install cannot fail on the empty cells.
+ *
+ * Space backups (busabase-dump) are a different path and keep every value.
+ */
+export const PACKAGE_SPACE_BOUND_FIELD_TYPES: readonly string[] = ["appUser", "member"];
+
+/** Field types whose definitions travel in a package but whose values never do. */
+export const PACKAGE_VALUELESS_FIELD_TYPES: readonly string[] = [
+  ...PACKAGE_FILE_FIELD_TYPES,
+  ...PACKAGE_SPACE_BOUND_FIELD_TYPES,
+];
+
+/**
  * Field types deferred to install's pass 2. `relation` because
  * `options.targetBaseSlug` only resolves against a base that already exists, and
  * relations may be cyclic (A↔B), so no base ordering satisfies them at

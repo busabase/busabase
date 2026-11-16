@@ -1,6 +1,7 @@
 "use client";
 
 import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
+import { airAppSiteReleasesTabId } from "../utils/site-release-panel";
 import { airAppSidePanelTabId, useAirAppKeepAliveStore } from "./airapp-keepalive-store";
 import { useAirAppRunnerStore } from "./airapp-runner-store";
 
@@ -22,4 +23,5 @@ export const disposeDeletedAirAppSession = ({
     keepAliveStore.releaseSlug(routeSlug);
   }
   useSidePanelStore.getState().closeTab(airAppSidePanelTabId(nodeId));
+  useSidePanelStore.getState().closeTab(airAppSiteReleasesTabId(nodeId));
 };

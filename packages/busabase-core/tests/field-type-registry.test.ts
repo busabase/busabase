@@ -8,6 +8,7 @@ import {
   fieldInputKind,
   fieldLabel,
   fieldLinkPrefix,
+  getAppUserId,
   isAiFieldType,
   isHiddenOnCreate,
   isSystemFieldType,
@@ -31,6 +32,7 @@ const VALID_INPUT_KINDS = new Set([
   "multiselect",
   "relation",
   "member",
+  "appUser",
   "attachment",
   "drive",
   "tags",
@@ -39,11 +41,26 @@ const VALID_INPUT_KINDS = new Set([
 ]);
 
 describe("FIELD_TYPES registry — complete & well-formed for every field type", () => {
-  it("has exactly 30 field types", () => {
+  it("has exactly 31 field types", () => {
     // 28 → 29 when `member` landed (the person-picker field; see
     // content/spec/member-field.md); 29 → 30 with `drive` (attachment refs
-    // organised in folders by a per-file path).
-    expect(ALL_FIELD_TYPES).toHaveLength(30);
+    // organised in folders by a per-file path); 30 → 31 with `appUser` (one
+    // app user id, shown as the person's email on Busabase Cloud).
+    expect(ALL_FIELD_TYPES).toHaveLength(31);
+  });
+
+  it("appUser holds one id as text and displays through the host resolver", () => {
+    const def = { slug: "buyer", type: "appUser", name: "Buyer" } as never;
+    const validate = FIELD_TYPES.appUser.validate;
+    expect(validate?.("apu_123", def)).toBeNull();
+    expect(validate?.(["apu_123"], def)).toMatch(/app user id/);
+    expect(validate?.(42, def)).toMatch(/app user id/);
+    expect(fieldDisplayKind("appUser")).toBe("appUser");
+    expect(FIELD_TYPES.appUser.input).toBe("appUser");
+    expect(isSystemFieldType("appUser")).toBe(false);
+    expect(getAppUserId(" apu_1 ")).toBe("apu_1");
+    expect(getAppUserId("")).toBeNull();
+    expect(getAppUserId(["apu_1"])).toBeNull();
   });
 
   it("structured text fields validate their syntax and reuse code display", () => {
@@ -153,6 +170,7 @@ describe("FIELD_TYPES registry — complete & well-formed for every field type",
       "attachment",
       "relation",
       "member",
+      "appUser",
       "markdown",
       "html",
       "code",

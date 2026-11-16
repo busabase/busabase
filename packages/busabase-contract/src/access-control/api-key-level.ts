@@ -347,6 +347,8 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "airapps.runLocal": node("write"),
   "airapps.stopLocal": node("write"),
   "airapps.siteState": node("write"),
+  "airapps.siteReleases": node("write"),
+  "airapps.siteRollback": node("write"),
   "airapps.siteDomains": node("write"),
   "airapps.siteBindDomain": node("write"),
   "airapps.siteUnbindDomain": node("write"),

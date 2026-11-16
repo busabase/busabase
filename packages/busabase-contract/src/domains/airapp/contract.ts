@@ -138,6 +138,39 @@ export type AirAppSiteActionVO = z.infer<typeof airAppSiteActionOutputSchema>;
 
 export const airAppSiteInputSchema = z.object({ nodeId: z.string() });
 
+/** Display-only release metadata. Artifacts, provider details and secrets stay server-side. */
+export const airAppSiteReleaseSchema = z.object({
+  version: z.string(),
+  releaseNumber: z.number().int().nonnegative(),
+  createdAt: z.string().datetime(),
+  createdBy: z.string().nullable(),
+  isCurrent: z.boolean(),
+  canRollback: z.boolean(),
+});
+export type AirAppSiteReleaseVO = z.infer<typeof airAppSiteReleaseSchema>;
+
+export const airAppSiteReleaseEventSchema = z.object({
+  id: z.string(),
+  releaseNumber: z.number().int().nonnegative(),
+  kind: z.enum(["publish", "rollback"]),
+  version: z.string(),
+  createdAt: z.string().datetime(),
+  createdBy: z.string().nullable(),
+});
+export type AirAppSiteReleaseEventVO = z.infer<typeof airAppSiteReleaseEventSchema>;
+
+export const airAppSiteReleasesSchema = z.object({
+  available: z.boolean(),
+  versions: z.array(airAppSiteReleaseSchema),
+  history: z.array(airAppSiteReleaseEventSchema),
+  status: z.enum(["idle", "deploying", "failed"]),
+  lastError: z.string().nullable(),
+});
+export type AirAppSiteReleasesVO = z.infer<typeof airAppSiteReleasesSchema>;
+export const airAppSiteRollbackInputSchema = airAppSiteInputSchema.extend({
+  version: z.string().min(1).max(64),
+});
+
 /** A hostname only: schemes, paths, ports, IP addresses and wildcards cannot bind. */
 export const airAppSiteHostnameSchema = z
   .string()
@@ -223,6 +256,8 @@ export const airappRuntimeContract = {
     })
     .input(airAppSiteInputSchema)
     .output(airAppSiteStateSchema),
+  siteReleases: oc.input(airAppSiteInputSchema).output(airAppSiteReleasesSchema),
+  siteRollback: oc.input(airAppSiteRollbackInputSchema).output(airAppSiteActionOutputSchema),
   /** Uploads the current files as the members-only preview, unless they already are it. */
   siteDeployPreview: oc
     .route({

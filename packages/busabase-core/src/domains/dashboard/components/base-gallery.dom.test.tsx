@@ -2,9 +2,11 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { BaseFieldVO, BaseVO, RecordVO, ViewVO } from "busabase-contract/types";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
+import type { RecordsPagination } from "../helpers/view-types";
+import { useRecordFind } from "../hooks/use-record-find";
 
 vi.mock("wouter", () => ({ useSearch: () => "" }));
 vi.mock("openlib/ui/dashboard", () => ({
@@ -107,6 +109,98 @@ function renderGallery(cover: unknown) {
 }
 
 afterEach(cleanup);
+
+describe("Gallery shared record find", () => {
+  const pagination = (patch: Partial<RecordsPagination> = {}): RecordsPagination => ({
+    page: 1,
+    pageSize: 50,
+    total: 0,
+    totalPages: 0,
+    isLoading: false,
+    onPageChange: vi.fn(),
+    onPageSizeChange: vi.fn(),
+    ...patch,
+  });
+  function FindingGallery({
+    records = [],
+    archivedRecords = [],
+    pageState = pagination(),
+    commit = vi.fn(),
+  }: {
+    records?: RecordVO[];
+    archivedRecords?: RecordVO[];
+    pageState?: RecordsPagination;
+    commit?: (value: { query: string; fieldId: string }) => void;
+  }) {
+    const [value, setValue] = useState({ query: "Sunset", fieldId: "" });
+    const find = useRecordFind({
+      value,
+      scope: `${base.id}:${view.id}`,
+      onCommit: (next) => {
+        setValue(next);
+        commit(next);
+      },
+    });
+    return (
+      <CoreI18nProvider locale="en">
+        <BusaBaseGallery
+          activeView={view}
+          archivedRecords={archivedRecords}
+          base={base}
+          fields={fields}
+          pagination={pageState}
+          recordFind={find}
+          records={records}
+          showArchivedRecords
+        />
+      </CoreI18nProvider>
+    );
+  }
+
+  it("distinguishes no matches from a failed query and offers clear or retry", () => {
+    const commit = vi.fn();
+    const retry = vi.fn();
+    const { rerender } = render(<FindingGallery commit={commit} />);
+    expect(screen.getByTestId("base-record-find-empty").textContent).toContain(
+      "No matching records in this view.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Clear find" }));
+    expect(commit).toHaveBeenCalledWith({ query: "", fieldId: "" });
+    rerender(
+      <FindingGallery
+        pageState={pagination({ error: "Could not load records", onRetry: retry })}
+      />,
+    );
+    expect(screen.getByRole("alert").textContent).toContain("Could not load records");
+    expect(screen.queryByTestId("base-record-find-empty")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("does not present stale cards or unfiltered archived cards as search matches", () => {
+    const found = record([]);
+    const archived = {
+      ...record([]),
+      id: "rec_archived",
+      headCommit: { ...found.headCommit, payload: { title: "Unrelated archive", cover: [] } },
+    };
+    const { rerender, container } = render(
+      <FindingGallery archivedRecords={[archived]} records={[found]} />,
+    );
+    expect(container.querySelectorAll("[data-record-id]")).toHaveLength(1);
+    expect(screen.queryByText("Unrelated archive")).toBeNull();
+    rerender(
+      <FindingGallery
+        archivedRecords={[archived]}
+        pageState={pagination({ isFetching: true, total: 1 })}
+        records={[found]}
+      />,
+    );
+    expect(screen.getByRole("status").textContent).toBe("Finding records…");
+    expect(container.querySelectorAll("[data-record-id]")).toHaveLength(0);
+    expect(screen.queryByTestId("base-record-find-empty")).toBeNull();
+  });
+});
 
 describe("BusaBaseGallery cover motion", () => {
   it("adds a short, reduced-motion-safe zoom only to a real cover image", () => {

@@ -25,6 +25,7 @@ import type { FieldHelp } from "../domains/base/contract/base-schemas";
 import type {
   groupRecordsInputSchema,
   groupRecordsResponseSchema,
+  listRecordsPageInputSchema,
   listRecordsSortSchema,
 } from "../domains/base/contract/record-schemas";
 import type {
@@ -202,6 +203,7 @@ export interface BusabaseDashboardApiClient {
   listRecordsPage: (params: {
     baseId: string;
     viewId?: string;
+    find?: z.input<typeof listRecordsPageInputSchema>["find"];
     filters?: Array<{
       fieldSlug: string;
       fieldType?: string;

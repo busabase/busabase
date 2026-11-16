@@ -28,6 +28,17 @@ const SENSITIVE_REQUEST_HEADERS = new Set([
 const PREVIEW_RETRYABLE_STATUSES = new Set([502, 503, 504]);
 const PREVIEW_MAX_GET_ATTEMPTS = 5;
 const PREVIEW_RETRY_DELAY_MS = 500;
+const PREVIEW_VERSION_HEADER = "x-busabase-preview-version";
+const unavailablePreviewVersion = () =>
+  new Response("This preview is still updating. Refresh the Site preview and try again shortly.", {
+    status: 503,
+    headers: {
+      "cache-control": "no-store",
+      "retry-after": "1",
+      "Cross-Origin-Embedder-Policy": "credentialless",
+      "Cross-Origin-Resource-Policy": "same-origin",
+    },
+  });
 const ROOT_URL_ATTRIBUTE_NAMES = new Set(["action", "href", "poster", "src"]);
 const ROOT_SRCSET_ATTRIBUTE_NAMES = new Set(["imagesrcset", "srcset"]);
 
@@ -209,6 +220,10 @@ const previewRequestHeaders = (requestHeaders: Headers): Headers => {
       headers.delete(name);
     }
   }
+  // This fetch decodes the upstream body before HTML rewriting or streaming.
+  // Advertise the server's decoders, not newer browser encodings such as zstd
+  // that Node's fetch may otherwise pass through as compressed bytes.
+  headers.set("accept-encoding", "gzip, deflate, br");
   return headers;
 };
 
@@ -263,7 +278,16 @@ export async function proxyLocalPreview(
     return new Response("AirApp preview not running", { status: 404 });
   }
 
-  const search = new URL(req.url).search;
+  const requestUrl = new URL(req.url);
+  const search = requestUrl.search;
+  const targetHeaders = new Headers(upstreamEntry.headers);
+  const requestedVersions = requestUrl.searchParams.getAll("__busabase_site_version");
+  const previewVersion =
+    targetHeaders.get(PREVIEW_VERSION_HEADER) ??
+    (targetHeaders.has("x-busabase-preview-token") ? requestedVersions[0] : null);
+  if (previewVersion && requestedVersions.some((version) => version !== previewVersion)) {
+    return unavailablePreviewVersion();
+  }
   const upstreamUrl = `${upstreamEntry.target}/${path}${search}`;
 
   // Forward ordinary application headers, never host credentials or routing
@@ -273,6 +297,10 @@ export async function proxyLocalPreview(
   // Added after the scrub: these are the proxy's own credentials for the target,
   // not anything a browser sent, and a browser cannot set or read them.
   for (const [name, value] of Object.entries(upstreamEntry.headers)) headers.set(name, value);
+  if (previewVersion && (req.method === "GET" || req.method === "HEAD")) {
+    headers.delete("if-none-match");
+    headers.delete("if-modified-since");
+  }
 
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   const canRetry = req.method === "GET" || req.method === "HEAD";
@@ -297,6 +325,15 @@ export async function proxyLocalPreview(
       if (attempt === maxAttempts) {
         return new Response(`AirApp preview upstream error: ${String(error)}`, { status: 502 });
       }
+      await new Promise((resolve) => setTimeout(resolve, PREVIEW_RETRY_DELAY_MS));
+      continue;
+    }
+    // An accepted provider upload can still route to the previous Worker for a
+    // short time. Never let that 200 body stand in for the requested version,
+    // including during rollout from a legacy gate with no version marker.
+    if (previewVersion && upstream.headers.get(PREVIEW_VERSION_HEADER) !== previewVersion) {
+      await upstream.body?.cancel().catch(() => undefined);
+      if (attempt === maxAttempts) return unavailablePreviewVersion();
       await new Promise((resolve) => setTimeout(resolve, PREVIEW_RETRY_DELAY_MS));
       continue;
     }
@@ -336,6 +373,7 @@ export async function proxyLocalPreview(
   if (cacheControl) {
     responseHeaders.set("cache-control", cacheControl);
   }
+  if (previewVersion) responseHeaders.set("cache-control", "no-store");
   const location = upstream.headers.get("location");
   if (location) {
     responseHeaders.set("location", previewRedirectLocation(location, nodeId));

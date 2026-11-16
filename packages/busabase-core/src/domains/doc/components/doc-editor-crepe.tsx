@@ -16,6 +16,7 @@ import { useEffect, useRef } from "react";
 import { useCoreI18n } from "../../../i18n";
 import { DocContentSkeleton } from "../../dashboard/components/skeletons";
 import { createDocCodeTheme } from "./doc-code-theme";
+import { createDocMermaidPreview } from "./doc-mermaid-preview";
 import { docVideoLinkPlugin, docVideoPlugin } from "./doc-video";
 import "./doc-editor.css";
 
@@ -54,6 +55,7 @@ function DocEditorInner({
   const onOutlineChangeRef = useRef(onOutlineChange);
   onOutlineChangeRef.current = onOutlineChange;
   const crepeRef = useRef<Crepe | null>(null);
+  const mermaidPreviewRef = useRef<ReturnType<typeof createDocMermaidPreview> | null>(null);
 
   const announceOutline = (ctx: Ctx) => {
     onOutlineChangeRef.current?.(
@@ -62,6 +64,8 @@ function DocEditorInner({
   };
 
   const { loading } = useEditor((root) => {
+    const mermaidPreview = createDocMermaidPreview(messages.docEditor);
+    mermaidPreviewRef.current = mermaidPreview;
     const crepe = new Crepe({
       root,
       defaultValue: content,
@@ -102,6 +106,9 @@ function DocEditorInner({
           copyText: messages.docEditor.codeCopy,
           previewLabel: messages.docEditor.codePreviewLabel,
           previewLoading: messages.docEditor.codePreviewLoading,
+          renderPreview: mermaidPreview.renderPreview,
+          previewToggleText: (previewOnlyMode) =>
+            previewOnlyMode ? messages.docEditor.codeShowSource : messages.docEditor.codeHideSource,
         },
         [Crepe.Feature.BlockEdit]: {
           textGroup: {
@@ -152,6 +159,8 @@ function DocEditorInner({
   useEffect(() => {
     crepeRef.current?.setReadonly(!editable);
   }, [editable]);
+
+  useEffect(() => () => mermaidPreviewRef.current?.destroy(), []);
 
   // `useEditor` resolves asynchronously, and until it does `<Milkdown />` is an
   // empty container. Keep it mounted (ProseMirror needs the DOM node) but

@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import type { listRecordsPageInputSchema } from "busabase-contract/domains/base/contract/record-schemas";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { z } from "zod";
 import type { RecordFindState } from "../helpers/record-find-url";
 
 export const RECORD_FIND_DEBOUNCE_MS = 500;
+export type RecordFindInput = NonNullable<z.input<typeof listRecordsPageInputSchema>["find"]>;
 
 export function useRecordFind({
   value,
@@ -29,6 +32,13 @@ export function useRecordFind({
   // An empty find only prepares a field choice; it does not change the collection.
   const isPending =
     draft.composing || query !== value.query || (Boolean(query) && draft.fieldId !== value.fieldId);
+  const input = useMemo<RecordFindInput | undefined>(
+    () =>
+      value.query
+        ? { query: value.query, ...(value.fieldId ? { fieldId: value.fieldId } : {}) }
+        : undefined,
+    [value.query, value.fieldId],
+  );
   useEffect(() => {
     if (!scope || draft.key !== key || !isPending || draft.composing) return;
     timer.current = setTimeout(() => {
@@ -42,6 +52,7 @@ export function useRecordFind({
   }, [draft, isPending, key, onCommit, scope]);
 
   return {
+    input,
     query: draft.query,
     fieldId: draft.fieldId,
     hasQuery: Boolean(value.query),

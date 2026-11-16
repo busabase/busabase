@@ -314,6 +314,10 @@ const PUSHABLE_TEXT_TYPES = new Set([
   "email",
   "phone",
   "code",
+  // The stored id IS what the view filter compares (an app user id, never the
+  // resolved email — see `previewText`), and `records/query`'s owner filter
+  // relies on this to be an exact `eq` on `value_text`.
+  "appUser",
 ]);
 const PUSHABLE_NUMBER_TYPES = new Set(["number", "auto_number"]);
 
@@ -1509,7 +1513,16 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
 // resolves an embed-specific label via `resolveEmbedPreview`, unrelated to the
 // stored text) — pushing either down would silently diverge from the client's
 // number.
-const EXACT_TEXT_TYPES = new Set(["text", "longtext", "markdown", "url", "email", "phone", "code"]);
+const EXACT_TEXT_TYPES = new Set([
+  "text",
+  "longtext",
+  "markdown",
+  "url",
+  "email",
+  "phone",
+  "code",
+  "appUser",
+]);
 
 // Escapes LIKE/ILIKE metacharacters so a filter value containing a literal
 // `%`, `_`, or `\` can't be misread as a wildcard. The superset pushdown above

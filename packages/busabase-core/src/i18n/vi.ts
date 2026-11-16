@@ -3,6 +3,7 @@ import type { CoreI18nMessages } from "./messages";
 export const dashboardVi: CoreI18nMessages = {
   lookup: lookupVi,
   reverseRelation: reverseRelationVi,
+  appUserField: appUserFieldVi,
   spaceInstructions: {
     navLabel: "Chỉ dẫn",
     title: "Hướng dẫn chung của không gian",
@@ -424,6 +425,9 @@ export const dashboardVi: CoreI18nMessages = {
     codeCopy: "Sao chép",
     codePreviewLabel: "Xem trước",
     codePreviewLoading: "Đang tải…",
+    codeShowSource: "Xem mã nguồn",
+    codeHideSource: "Ẩn mã nguồn",
+    codePreviewError: "Không thể hiển thị sơ đồ Mermaid. Hãy kiểm tra cú pháp và thử lại.",
     imageUploadButton: "Tải lên",
     imageUploadPlaceholder: "hoặc dán liên kết",
     imageConfirmButton: "Xác nhận",
@@ -702,7 +706,7 @@ export const dashboardVi: CoreI18nMessages = {
     statusReady: "Đang chạy",
     statusError: "Thất bại",
     previewTitle: "Xem trước AirApp",
-    previewEmpty: "AirApp này khởi động tự động — bản xem trước trực tiếp sẽ hiển thị ở đây.",
+    previewEmpty: "Chạy AirApp này để xem bản xem trước trực tiếp tại đây.",
     previewPending: "Bản xem trước trực tiếp sẽ sớm hiển thị ở đây.",
     previewFailed: "AirApp không khởi động được. Hãy kiểm tra nhật ký bên dưới.",
     logsEmpty: "Kết quả cài đặt và khởi động sẽ hiển thị trực tiếp ở đây khi AirApp chạy.",
@@ -759,7 +763,55 @@ export const dashboardVi: CoreI18nMessages = {
     swUnsupportedCopyLink: "Sao chép liên kết",
     swUnsupportedLinkCopied: "Đã sao chép liên kết",
     swUnsupportedCopyFailed: "Không thể sao chép liên kết. Hãy chọn và sao chép thủ công:",
+    previewTools: {
+      viewport: "Kích thước xem trước",
+      desktop: "Máy tính",
+      mobile: "Điện thoại",
+      newWindow: "Mở bản xem trước trong cửa sổ mới",
+      phone: "Xem trước trên điện thoại",
+      signIn:
+        "Quét để mở bản xem trước riêng tư. Đăng nhập cùng tài khoản trên điện thoại. Đây không phải Site đã xuất bản.",
+      browserOnly:
+        "Bản xem trước này chạy trong trình duyệt hiện tại. Tạo bản xem trước Site qua «Xuất bản Site» để mở trên điện thoại.",
+      loopback:
+        "Điện thoại không thể truy cập địa chỉ cục bộ này. Hãy dùng địa chỉ triển khai có thể truy cập.",
+      loadingQr: "Đang tạo mã QR…",
+      link: "Liên kết xem trước",
+      copyLink: "Sao chép liên kết",
+      openLink: "Mở bản xem trước",
+    },
     site: {
+      publishUpdate: "Xuất bản bản cập nhật",
+      releases: {
+        busy: "Đang áp dụng thao tác xuất bản. Danh sách sẽ tự động làm mới.",
+        manage: "Quản lý xuất bản",
+        versions: "Phiên bản",
+        history: "Lịch sử xuất bản",
+        current: "Hiện tại",
+        retention: "Giữ phiên bản hiện tại và tối đa 5 phiên bản trước.",
+        rollback: "Khôi phục",
+        rollbackVersion: "Khôi phục {version}",
+        confirmTitle: "Khôi phục {version}?",
+        confirmBody:
+          "Khách truy cập sẽ thấy phiên bản này tại cùng địa chỉ. Bản nháp, bản xem trước và dữ liệu nghiệp vụ trong không gian không thay đổi.",
+        confirm: "Xác nhận khôi phục",
+        rollbackDone: "Phiên bản đã chọn hiện đã được xuất bản.",
+        loading: "Đang tải lịch sử xuất bản…",
+        loadFailed: "Không tải được lịch sử xuất bản. Vui lòng thử lại.",
+        unavailable: "Bản triển khai này không hỗ trợ lịch sử phiên bản.",
+        legacy: "Được xuất bản trước khi có tính năng lưu bản chụp phiên bản.",
+        empty: "Chưa có phiên bản được xuất bản. Xuất bản Site này để bắt đầu lưu lịch sử.",
+        planLocked:
+          "Nâng cấp gói của không gian để xuất bản hoặc khôi phục. Bạn vẫn có thể ngừng công khai Site.",
+        historyEmpty: "Các lần xuất bản và khôi phục sẽ xuất hiện ở đây.",
+        actionPublish: "Đã xuất bản",
+        actionRollback: "Đã khôi phục về",
+        copyAddress: "Sao chép địa chỉ",
+        copied: "Đã sao chép",
+        copyFailed: "Không sao chép được. Hãy chọn địa chỉ ở trên và sao chép thủ công.",
+        publicQrHint:
+          "Quét để mở Site đã xuất bản. Các thay đổi bản nháp chưa xuất bản không được bao gồm.",
+      },
       publish: {
         previewStale:
           "Các tệp đã thay đổi sau bản xem trước này. Hãy tạo hoặc làm mới bản xem trước website, rồi xuất bản.",
@@ -792,7 +844,7 @@ export const dashboardVi: CoreI18nMessages = {
       statusNotLive: "Chưa xuất bản",
       statusLive: "Đang hoạt động",
       statusLiveWithChanges: "Có thay đổi chưa xuất bản",
-      goLive: "Xuất bản",
+      goLive: "Xuất bản Site",
       goLiveDone: "Trang web đã được xuất bản.",
       previewStale: "Các tệp đã thay đổi sau bản xem trước này. Hãy chạy lại rồi xuất bản.",
       noPreview: "Hãy chạy trước để tạo bản xem trước.",
@@ -1701,6 +1753,7 @@ export const dashboardVi: CoreI18nMessages = {
     tabGeneral: "Chung",
     tabInfo: "Thông tin",
     tabPermissions: "Quyền",
+    tabUserSignIn: "Đăng nhập người dùng",
     changeIcon: "Đổi biểu tượng",
     iconUploadLabel: "Tải ảnh lên",
     iconUploadFormatHint: "PNG, JPG, GIF hoặc WebP, tối đa 2MB",
@@ -2603,6 +2656,7 @@ export const dashboardVi: CoreI18nMessages = {
     multiselect: "Chọn nhiều",
     relation: "Quan hệ",
     member: "Thành viên",
+    appUser: "Người dùng ứng dụng",
     lookup: "Tra cứu",
     attachment: "Tệp",
     drive: "Drive",
@@ -3111,5 +3165,6 @@ export const dashboardVi: CoreI18nMessages = {
   },
 };
 
+import { appUserFieldVi } from "./app-user-field";
 import { lookupVi } from "./lookup";
 import { reverseRelationVi } from "./reverse-relation";

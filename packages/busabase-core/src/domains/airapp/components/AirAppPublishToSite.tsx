@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "kui/dialog";
 import { DropdownMenuItem } from "kui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
 import { ArrowUpCircle, Check, Copy, ExternalLink, Globe, Loader2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
@@ -23,7 +24,13 @@ import { copyAgentPromptSnapshot } from "../../dashboard/helpers/agent-prompt-cl
 import { renderAgentLocator, useNodeLocator } from "../../dashboard/hooks/use-copy-locator";
 import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import { AIRAPP_PREVIEW_IFRAME_SANDBOX } from "../utils/preview-sandbox";
+import {
+  AirAppPreviewFrame,
+  AirAppPreviewTools,
+  type AirAppPreviewViewport,
+} from "./AirAppPreviewTools";
 import { airAppSiteBlockerMessage, canGoLive } from "./AirAppSiteControls";
+import { AirAppSiteReleases } from "./AirAppSiteReleases";
 import {
   useAirAppEngineAvailability,
   useAirAppEnginePlanGate,
@@ -37,11 +44,24 @@ interface AirAppPublishToSiteProps {
 }
 
 interface AirAppPublishToSiteActionsProps extends AirAppPublishToSiteProps {
-  children: (publishAction: ReactNode) => ReactNode;
+  children?: (publishAction: ReactNode) => ReactNode;
+  showButton?: boolean;
+  compact?: boolean;
+  renderButtons?: (
+    publish: ReactNode,
+    releases: ReactNode,
+    publishMenuItem: ReactNode,
+  ) => ReactNode;
 }
 
 /** A deployment alongside the running browser app: never changes its engine or files. */
-export function AirAppPublishToSite({ children, ...props }: AirAppPublishToSiteActionsProps) {
+export function AirAppPublishToSite({
+  children,
+  showButton = false,
+  compact = false,
+  renderButtons,
+  ...props
+}: AirAppPublishToSiteActionsProps) {
   const messages = useCoreI18n();
   const engines = useAirAppEngineAvailability();
   const notConfigured = useAirAppEnginesNotConfigured();
@@ -54,17 +74,70 @@ export function AirAppPublishToSite({ children, ...props }: AirAppPublishToSiteA
     planGate?.lockedEngines.includes("site") ||
     notConfigured.includes("site");
   const canPublish = !isAnonymous && hasApiKeyLevel(permission, "write") && offered;
+  const site = useQuery({
+    ...props.orpc.airapps.siteState.queryOptions({ input: { nodeId: props.nodeId } }),
+    enabled: canPublish && showButton,
+    retry: false,
+  });
+  const label = site.data?.liveVersion
+    ? messages.airapp.site.publishUpdate
+    : messages.airapp.site.goLive;
+  const publishButton =
+    canPublish && showButton ? (
+      <TooltipProvider delayDuration={350}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              aria-label={label}
+              className={
+                compact
+                  ? "h-8 w-8 gap-1.5 px-0 @min-[900px]/airapp-toolbar:w-auto @min-[900px]/airapp-toolbar:px-2.5"
+                  : undefined
+              }
+              data-airapp-publish-to-site=""
+              disabled={site.isPending}
+              onClick={() => setOpen(true)}
+              size="sm"
+              type="button"
+            >
+              {site.isPending ? (
+                <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+              ) : (
+                <Globe
+                  aria-hidden="true"
+                  className={compact ? "size-3.5" : "hidden size-3.5 sm:block"}
+                />
+              )}
+              <span className={compact ? "hidden @min-[900px]/airapp-toolbar:inline" : undefined}>
+                {label}
+              </span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent className="text-xs">{label}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    ) : null;
+  const releasesButton =
+    canPublish && showButton ? <AirAppSiteReleases compact={compact} {...props} /> : null;
+
+  const publishMenuItem = canPublish ? (
+    <DropdownMenuItem data-airapp-publish-to-site="" onSelect={() => setOpen(true)}>
+      <Globe aria-hidden="true" className="mr-2 size-3.5" />
+      {label}
+    </DropdownMenuItem>
+  ) : null;
 
   return (
     <>
-      {children(
-        canPublish ? (
-          <DropdownMenuItem data-airapp-publish-to-site="" onSelect={() => setOpen(true)}>
-            <Globe aria-hidden="true" className="mr-2 size-3.5" />
-            {messages.airapp.site.publish.title}
-          </DropdownMenuItem>
-        ) : null,
+      {renderButtons ? (
+        renderButtons(publishButton, releasesButton, publishMenuItem)
+      ) : (
+        <>
+          {publishButton}
+          {releasesButton}
+        </>
       )}
+      {children?.(publishMenuItem)}
       {/* Menu content unmounts on selection; keep the publishing flow outside it. */}
       {canPublish && open ? <PublishDialog {...props} onClose={() => setOpen(false)} /> : null}
     </>
@@ -91,8 +164,10 @@ function PublishDialog({
   const state = query.data;
   const [error, setError] = useState<string | null>(null);
   const [preparedVersion, setPreparedVersion] = useState<string | null>(null);
+  const [preparedUrl, setPreparedUrl] = useState<string | null>(null);
   const [reviewedVersion, setReviewedVersion] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [viewport, setViewport] = useState<AirAppPreviewViewport>("desktop");
   const locator = useNodeLocator({ nodeId, nodeName, nodeType: "airapp" });
   const actionResult = ({ outcome, state: next }: AirAppSiteActionVO) => {
     client.setQueryData(options.queryKey, next);
@@ -113,7 +188,14 @@ function PublishDialog({
     },
     onSuccess: (result) => {
       actionResult(result);
-      if (result.outcome === "ok") setPreparedVersion(result.state.previewVersion);
+      if (result.outcome === "ok") {
+        setPreparedVersion(result.state.previewVersion);
+        setPreparedUrl(
+          result.state.previewUrl && result.state.previewVersion
+            ? `${result.state.previewUrl}?__busabase_site_version=${encodeURIComponent(result.state.previewVersion)}`
+            : null,
+        );
+      }
     },
     onError: (cause) => {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -123,7 +205,14 @@ function PublishDialog({
   const publish = useMutation({
     mutationFn: () => orpc.airapps.siteGoLive.call({ nodeId }),
     onMutate: () => setError(null),
-    onSuccess: actionResult,
+    onSuccess: (result) => {
+      actionResult(result);
+      if (result.outcome === "ok") {
+        void client.invalidateQueries({
+          queryKey: orpc.airapps.siteReleases.queryOptions({ input: { nodeId } }).queryKey,
+        });
+      }
+    },
     onError: (cause) => {
       setError(cause instanceof Error ? cause.message : String(cause));
       void query.refetch();
@@ -138,6 +227,9 @@ function PublishDialog({
     state?.previewUrl && previewVersion && preparedVersion === previewVersion
       ? `${state.previewUrl}?__busabase_site_version=${encodeURIComponent(previewVersion)}`
       : null;
+  // Keep the address bar and its refresh control in place while a new private
+  // preview is prepared. Publication still waits for the new iframe to load.
+  const toolbarPreviewUrl = previewUrl ?? (preview.isPending ? preparedUrl : null);
   const canPublish =
     state &&
     !query.isError &&
@@ -153,11 +245,11 @@ function PublishDialog({
       }}
       open
     >
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[90dvh] grid-cols-1 overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Globe aria-hidden="true" className="size-4 text-primary" />
-            {copy.title}
+            {state?.liveVersion ? messages.airapp.site.publishUpdate : messages.airapp.site.goLive}
           </DialogTitle>
           <DialogDescription>{copy.description}</DialogDescription>
         </DialogHeader>
@@ -262,57 +354,78 @@ function PublishDialog({
             {state.engine === "available" && blockers.length === 0 ? (
               <div className="space-y-3">
                 <p className="text-muted-foreground text-sm">{copy.previewHint}</p>
-                <Button
-                  className="gap-1.5"
-                  disabled={busy || query.isFetching}
-                  onClick={() => preview.mutate()}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {preview.isPending ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                  {preview.isPending
-                    ? copy.preparingPreview
-                    : previewUrl
-                      ? copy.refreshPreview
-                      : copy.createPreview}
-                </Button>
+                {!toolbarPreviewUrl || state.previewStale ? (
+                  <Button
+                    className="gap-1.5"
+                    disabled={busy || query.isFetching}
+                    onClick={() => preview.mutate()}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {preview.isPending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                    {preview.isPending ? copy.preparingPreview : copy.createPreview}
+                  </Button>
+                ) : null}
                 {state.previewStale && error !== copy.previewStale ? (
                   <p className="text-muted-foreground text-sm" role="status">
                     {copy.previewStale}
                   </p>
                 ) : null}
-                {previewUrl && !state.previewStale ? (
-                  <iframe
-                    className="h-64 w-full rounded-md border border-border bg-background"
-                    key={previewUrl}
-                    onLoad={async () => {
-                      try {
-                        let response = await fetch(previewUrl, {
-                          method: "HEAD",
-                          credentials: "same-origin",
-                          cache: "no-store",
-                          signal: AbortSignal.timeout(15_000),
-                        });
-                        // A valid Worker may serve pages without implementing HEAD.
-                        if (response.status === 405 || response.status === 501) {
-                          response = await fetch(previewUrl, {
-                            credentials: "same-origin",
-                            cache: "no-store",
-                            signal: AbortSignal.timeout(15_000),
-                          });
-                        }
-                        if (!response.ok) throw new Error(copy.previewUnavailable);
-                        setReviewedVersion(previewVersion ?? null);
-                      } catch {
-                        setError(copy.previewUnavailable);
-                        setReviewedVersion(null);
-                      }
-                    }}
-                    sandbox={AIRAPP_PREVIEW_IFRAME_SANDBOX}
-                    src={previewUrl}
-                    title={copy.previewTitle}
-                  />
+                {toolbarPreviewUrl && !state.previewStale ? (
+                  <div className="space-y-2">
+                    <AirAppPreviewTools
+                      kind="site"
+                      onRefresh={() => preview.mutate()}
+                      refreshDisabled={busy || query.isFetching}
+                      refreshLabel={copy.refreshPreview}
+                      refreshing={preview.isPending}
+                      setViewport={setViewport}
+                      url={toolbarPreviewUrl}
+                      viewport={viewport}
+                    />
+                    {previewUrl ? (
+                      <AirAppPreviewFrame className="h-80" viewport={viewport}>
+                        <iframe
+                          className="h-full w-full border-0 bg-background"
+                          key={previewUrl}
+                          onLoad={async () => {
+                            try {
+                              let response = await fetch(previewUrl, {
+                                method: "HEAD",
+                                credentials: "same-origin",
+                                cache: "no-store",
+                                signal: AbortSignal.timeout(15_000),
+                              });
+                              // A valid Worker may serve pages without implementing HEAD.
+                              if (response.status === 405 || response.status === 501) {
+                                response = await fetch(previewUrl, {
+                                  credentials: "same-origin",
+                                  cache: "no-store",
+                                  signal: AbortSignal.timeout(15_000),
+                                });
+                              }
+                              if (!response.ok) throw new Error(copy.previewUnavailable);
+                              setReviewedVersion(previewVersion ?? null);
+                            } catch {
+                              setError(copy.previewUnavailable);
+                              setReviewedVersion(null);
+                            }
+                          }}
+                          sandbox={AIRAPP_PREVIEW_IFRAME_SANDBOX}
+                          src={previewUrl}
+                          title={copy.previewTitle}
+                        />
+                      </AirAppPreviewFrame>
+                    ) : (
+                      <div
+                        className="grid h-80 place-items-center text-muted-foreground text-sm"
+                        role="status"
+                      >
+                        {copy.preparingPreview}
+                      </div>
+                    )}
+                  </div>
                 ) : null}
                 {previewUrl && !state.previewStale ? (
                   <p className="text-muted-foreground text-sm">{copy.publishConsent}</p>
@@ -333,7 +446,9 @@ function PublishDialog({
           {state?.engine === "available" && blockers.length === 0 && !query.isError ? (
             <Button disabled={!canPublish || busy} onClick={() => publish.mutate()} type="button">
               {publish.isPending ? <Loader2 className="size-3.5 animate-spin" /> : null}
-              {messages.airapp.site.goLive}
+              {state?.liveVersion
+                ? messages.airapp.site.publishUpdate
+                : messages.airapp.site.goLive}
             </Button>
           ) : null}
         </DialogFooter>

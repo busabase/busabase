@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type {
   AirAppSiteActionVO,
@@ -9,10 +9,11 @@ import type {
   AirAppSiteStateVO,
 } from "busabase-contract/domains/airapp/contract";
 import { Button } from "kui/button";
+import { DropdownMenuItem } from "kui/dropdown-menu";
 import { Label } from "kui/label";
 import { Switch } from "kui/switch";
 import { ExternalLink, Globe, Loader2, TriangleAlert } from "lucide-react";
-import { useEffect } from "react";
+import { type ReactNode, useEffect, useId } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n } from "../../../i18n";
 import type { AirAppRunStatus } from "../store/airapp-runner-store";
@@ -83,8 +84,8 @@ export function AirAppSiteBlockers({ blockers }: { blockers: readonly AirAppSite
   );
 }
 
-const useSiteState = (orpc: BusabaseQueryUtils, nodeId: string) =>
-  useQuery(orpc.airapps.siteState.queryOptions({ input: { nodeId } }));
+const useSiteState = (orpc: BusabaseQueryUtils, nodeId: string, enabled = true) =>
+  useQuery({ ...orpc.airapps.siteState.queryOptions({ input: { nodeId } }), enabled });
 
 const publicationLabel = (messages: CoreMessages, publication: AirAppSitePublication): string =>
   ({
@@ -116,14 +117,17 @@ export function AirAppSiteGoLive({
   nodeId,
   runStatus,
   filesRevision,
+  renderMenuAction,
 }: {
   orpc: BusabaseQueryUtils;
   nodeId: string;
   runStatus: AirAppRunStatus;
   /** Changes when the app's files do, which is what makes a preview stale. */
   filesRevision: string;
+  renderMenuAction?: (action: ReactNode) => ReactNode;
 }) {
   const messages = useCoreI18n();
+  const client = useQueryClient();
   const { data: state, refetch } = useSiteState(orpc, nodeId);
   const domains = useQuery({
     ...orpc.airapps.siteDomains.queryOptions({ input: { nodeId } }),
@@ -140,7 +144,12 @@ export function AirAppSiteGoLive({
     mutationFn: () => orpc.airapps.siteGoLive.call({ nodeId }),
     onSuccess: async ({ outcome, state: next }: AirAppSiteActionVO) => {
       await refetch();
-      if (outcome === "ok") toast.success(messages.airapp.site.goLiveDone);
+      if (outcome === "ok") {
+        await client.invalidateQueries({
+          queryKey: orpc.airapps.siteReleases.queryOptions({ input: { nodeId } }).queryKey,
+        });
+        toast.success(messages.airapp.site.goLiveDone);
+      }
       if (outcome === "preview-stale") toast.error(messages.airapp.site.previewStale);
       if (outcome === "no-preview") toast.error(messages.airapp.site.noPreview);
       if (outcome === "blocked") {
@@ -151,7 +160,18 @@ export function AirAppSiteGoLive({
     onError: (error) => toast.error(siteErrorMessage(error)),
   });
 
-  if (!state || state.engine === "not-offered") return null;
+  if (!state || state.engine === "not-offered") return renderMenuAction?.(null) ?? null;
+  if (renderMenuAction)
+    return renderMenuAction(
+      <DropdownMenuItem
+        data-airapp-site-go-live=""
+        disabled={!canGoLive(state) || goLive.isPending || runStatus === "starting"}
+        onSelect={() => goLive.mutate()}
+      >
+        {goLive.isPending ? <Loader2 className="animate-spin" /> : <Globe />}
+        {state.liveVersion ? messages.airapp.site.publishUpdate : messages.airapp.site.goLive}
+      </DropdownMenuItem>,
+    );
   const note = goLiveNote(messages, state);
   const address =
     (!domains.isError &&
@@ -160,7 +180,7 @@ export function AirAppSiteGoLive({
 
   return (
     <div
-      className="flex min-w-0 items-center gap-1.5"
+      className="flex min-w-0 flex-wrap items-center gap-1.5"
       data-airapp-site-publication={state.publication}
     >
       {note ? (
@@ -194,7 +214,7 @@ export function AirAppSiteGoLive({
         ) : (
           <Globe className="size-3.5" />
         )}
-        {messages.airapp.site.goLive}
+        {state.liveVersion ? messages.airapp.site.publishUpdate : messages.airapp.site.goLive}
       </Button>
     </div>
   );
@@ -213,10 +233,19 @@ export const showsAirAppSiteSettings = (state: AirAppSiteStateVO): boolean =>
   Boolean(state.address) && !(state.engine === "locked" && state.liveVersion === null);
 
 /** The site's address and public switch, in the AirApp's settings. */
-export function AirAppSiteSettings({ orpc, nodeId }: { orpc: BusabaseQueryUtils; nodeId: string }) {
+export function AirAppSiteSettings({
+  orpc,
+  nodeId,
+  enabled = true,
+}: {
+  orpc: BusabaseQueryUtils;
+  nodeId: string;
+  enabled?: boolean;
+}) {
   const messages = useCoreI18n();
   const copy = messages.airapp.site;
-  const { data: state, refetch } = useSiteState(orpc, nodeId);
+  const publicSwitchId = useId();
+  const { data: state, refetch } = useSiteState(orpc, nodeId, enabled);
 
   const setPublic = useMutation({
     mutationFn: (next: boolean) =>
@@ -258,7 +287,7 @@ export function AirAppSiteSettings({ orpc, nodeId }: { orpc: BusabaseQueryUtils;
       </div>
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-0.5">
-          <Label htmlFor="node-settings-airapp-site-public">{copy.publicLabel}</Label>
+          <Label htmlFor={publicSwitchId}>{copy.publicLabel}</Label>
           <p className="text-muted-foreground text-xs">
             {!hasLiveVersion
               ? copy.publicNotYet
@@ -271,11 +300,11 @@ export function AirAppSiteSettings({ orpc, nodeId }: { orpc: BusabaseQueryUtils;
           checked={state.isPublic}
           data-airapp-site-public=""
           disabled={switchDisabled}
-          id="node-settings-airapp-site-public"
+          id={publicSwitchId}
           onCheckedChange={(next) => setPublic.mutate(next)}
         />
       </div>
-      <AirAppSiteDomains nodeId={nodeId} orpc={orpc} state={state} />
+      <AirAppSiteDomains enabled={enabled} nodeId={nodeId} orpc={orpc} state={state} />
     </div>
   );
 }

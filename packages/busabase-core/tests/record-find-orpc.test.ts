@@ -162,6 +162,50 @@ describe(`current-view record find (${process.env.RECORD_FIND_TEST_POSTGRES_URL 
     expect(result.records[0]?.headCommit.payload.title).toBe("Needle437");
   });
 
+  it("composes a board column with saved OR filters and keyword matching", async () => {
+    const column = (value: string) => [
+      { fieldSlug: "status", fieldType: "select", operator: "equals" as const, value },
+    ];
+    const pending = await find("Needle", undefined, {
+      viewId: orViewId,
+      filters: column("pending"),
+      pageSize: 20,
+    });
+    expect(pending.total).toBe(1);
+    expect(pending.records.map((record) => record.headCommit.payload.title)).toEqual(["Needle437"]);
+    const done = await find("Needle", undefined, {
+      viewId: orViewId,
+      filters: column("done"),
+      pageSize: 20,
+    });
+    expect(done.total).toBe(0);
+    expect(done.records).toEqual([]);
+
+    const first = await find("Delivery", "title", {
+      viewId,
+      filters: column("pending"),
+      pageSize: 20,
+    });
+    const second = await find("Delivery", "title", {
+      viewId,
+      filters: column("pending"),
+      pageSize: 20,
+      page: 2,
+    });
+    expect(first.total).toBe(249);
+    expect(second.total).toBe(249);
+    expect(first.records).toHaveLength(20);
+    expect(second.records).toHaveLength(20);
+    expect(new Set([...first.records, ...second.records].map((record) => record.id)).size).toBe(40);
+  });
+
+  it("returns complete card payloads when searching without compact table mode", async () => {
+    const result = await find("Needle", "title", { viewId, listMode: "full" });
+    expect(result.total).toBe(1);
+    expect(result.records[0].headCommit.payload.notes).toBe(`${"长".repeat(12_000)}尾部关键词`);
+    expect(result.records[0].headCommit.payload.html).toContain("<strong>星</strong>");
+  });
+
   it("matches complete long-text tails and static HTML/Markdown body text", async () => {
     expect((await find("尾部关键词")).total).toBe(1);
     expect((await find("华星", "html")).total).toBe(1);

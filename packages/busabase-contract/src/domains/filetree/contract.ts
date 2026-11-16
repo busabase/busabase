@@ -23,6 +23,13 @@ export const fileTreeFileSchema = z.object({
   mimeType: z.string().nullable(),
   assetId: z.string(),
   displayName: z.string().nullable(),
+  contentHash: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      "Upload/write-time recorded content hash, normalized to `sha256:<hex>`. Direct file-tree writes compute it server-side; S3/R2 direct uploads may record an uploader-supplied hash without server-side byte verification. Null means no stored hash; absent on older servers. Listing does not read file bytes or verify integrity.",
+    ),
 });
 
 /**

@@ -3,6 +3,7 @@ import type { CoreI18nMessages } from "./messages";
 export const dashboardDe: CoreI18nMessages = {
   lookup: lookupDe,
   reverseRelation: reverseRelationDe,
+  appUserField: appUserFieldDe,
   spaceInstructions: {
     navLabel: "Anweisungen",
     title: "Space-Anweisungen",
@@ -438,6 +439,10 @@ export const dashboardDe: CoreI18nMessages = {
     codeCopy: "Kopieren",
     codePreviewLabel: "Vorschau",
     codePreviewLoading: "Wird geladen…",
+    codeShowSource: "Quelltext anzeigen",
+    codeHideSource: "Quelltext ausblenden",
+    codePreviewError:
+      "Das Mermaid-Diagramm konnte nicht angezeigt werden. Prüfe die Syntax und versuche es erneut.",
     imageUploadButton: "Hochladen",
     imageUploadPlaceholder: "oder Link einfügen",
     imageConfirmButton: "Bestätigen",
@@ -721,7 +726,7 @@ export const dashboardDe: CoreI18nMessages = {
     statusReady: "Läuft",
     statusError: "Fehlgeschlagen",
     previewTitle: "AirApp-Vorschau",
-    previewEmpty: "Diese AirApp startet automatisch – die Live-Vorschau erscheint hier.",
+    previewEmpty: "Führe diese AirApp aus, um hier die Live-Vorschau zu sehen.",
     previewPending: "Die Live-Vorschau erscheint in Kürze hier.",
     previewFailed: "Die AirApp konnte nicht gestartet werden. Prüfen Sie die Logs unten.",
     logsEmpty:
@@ -781,7 +786,56 @@ export const dashboardDe: CoreI18nMessages = {
     swUnsupportedLinkCopied: "Link kopiert",
     swUnsupportedCopyFailed:
       "Der Link konnte nicht kopiert werden. Markieren und kopieren Sie ihn manuell:",
+    previewTools: {
+      viewport: "Vorschaugröße",
+      desktop: "Desktop",
+      mobile: "Mobil",
+      newWindow: "Vorschau in neuem Fenster öffnen",
+      phone: "Vorschau auf dem Smartphone",
+      signIn:
+        "Scannen Sie die private Vorschau. Melden Sie sich auf dem Smartphone mit demselben Konto an. Dies ist nicht die veröffentlichte Site.",
+      browserOnly:
+        "Diese Vorschau läuft in diesem Browser. Erstellen Sie über „Site veröffentlichen“ eine Site-Vorschau für Ihr Smartphone.",
+      loopback:
+        "Diese lokale Adresse ist vom Smartphone aus nicht erreichbar. Verwenden Sie eine erreichbare Bereitstellungsadresse.",
+      loadingQr: "QR-Code wird erstellt…",
+      link: "Vorschaulink",
+      copyLink: "Link kopieren",
+      openLink: "Vorschau öffnen",
+    },
     site: {
+      publishUpdate: "Update veröffentlichen",
+      releases: {
+        busy: "Eine Veröffentlichung wird angewendet. Die Liste aktualisiert sich automatisch.",
+        manage: "Veröffentlichungen",
+        versions: "Versionen",
+        history: "Verlauf",
+        current: "Aktuell",
+        retention: "Die aktuelle und bis zu 5 frühere Versionen bleiben erhalten.",
+        rollback: "Wiederherstellen",
+        rollbackVersion: "{version} wiederherstellen",
+        confirmTitle: "{version} wiederherstellen?",
+        confirmBody:
+          "Besucher sehen diese Version unter derselben Adresse. Entwurf, Vorschau und Arbeitsbereichsdaten bleiben erhalten.",
+        confirm: "Wiederherstellen bestätigen",
+        rollbackDone: "Die gewählte Version ist jetzt live.",
+        loading: "Veröffentlichungen werden geladen…",
+        loadFailed: "Veröffentlichungen konnten nicht geladen werden. Erneut versuchen.",
+        unavailable: "Auf dieser Installation ist kein Versionsverlauf verfügbar.",
+        legacy: "Vor Einführung der Versionskopien veröffentlicht.",
+        empty:
+          "Noch keine Version veröffentlicht. Veröffentliche diese Site, um den Verlauf zu starten.",
+        planLocked:
+          "Arbeitsbereich upgraden, um zu veröffentlichen oder wiederherzustellen. Die Site kann weiterhin offline geschaltet werden.",
+        historyEmpty: "Veröffentlichungen und Wiederherstellungen erscheinen hier.",
+        actionPublish: "Veröffentlicht",
+        actionRollback: "Wiederhergestellt auf",
+        copyAddress: "Adresse kopieren",
+        copied: "Kopiert",
+        copyFailed: "Kopieren fehlgeschlagen. Die Adresse oben markieren und manuell kopieren.",
+        publicQrHint:
+          "Scannen, um die veröffentlichte Site zu öffnen. Unveröffentlichte Entwürfe sind nicht enthalten.",
+      },
       publish: {
         previewStale:
           "Die Dateien wurden seit dieser Vorschau geändert. Erstelle oder aktualisiere die Website-Vorschau und veröffentliche sie dann.",
@@ -818,7 +872,7 @@ export const dashboardDe: CoreI18nMessages = {
       statusNotLive: "Nicht online",
       statusLive: "Online",
       statusLiveWithChanges: "Unveröffentlichte Änderungen",
-      goLive: "Online stellen",
+      goLive: "Site veröffentlichen",
       goLiveDone: "Die Website ist online.",
       previewStale:
         "Die Dateien wurden nach dieser Vorschau geändert. Führe sie erneut aus und stelle sie dann online.",
@@ -1744,6 +1798,7 @@ export const dashboardDe: CoreI18nMessages = {
     tabGeneral: "Allgemein",
     tabInfo: "Info",
     tabPermissions: "Berechtigungen",
+    tabUserSignIn: "Benutzeranmeldung",
     changeIcon: "Symbol ändern",
     iconUploadLabel: "Bild hochladen",
     iconUploadFormatHint: "PNG, JPG, GIF oder WebP, bis zu 2 MB",
@@ -2676,6 +2731,7 @@ export const dashboardDe: CoreI18nMessages = {
     multiselect: "Mehrfachauswahl",
     relation: "Relation",
     member: "Mitglied",
+    appUser: "App-Nutzer",
     lookup: "Lookup",
     attachment: "Datei",
     drive: "Drive",
@@ -3189,5 +3245,6 @@ export const dashboardDe: CoreI18nMessages = {
   },
 };
 
+import { appUserFieldDe } from "./app-user-field";
 import { lookupDe } from "./lookup";
 import { reverseRelationDe } from "./reverse-relation";

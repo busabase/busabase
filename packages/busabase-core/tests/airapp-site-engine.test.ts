@@ -2,7 +2,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
-import type { AirAppSiteDomainsVO } from "busabase-contract/domains/airapp/contract";
+import type {
+  AirAppSiteDomainsVO,
+  AirAppSiteReleasesVO,
+} from "busabase-contract/domains/airapp/contract";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { runWithBusabaseContext } from "../src/context";
 import { getLocalPreviewUpstream } from "../src/domains/airapp/logic/local-preview-registry";
@@ -230,6 +233,31 @@ describe("AirApp site engine", () => {
       expect(calls.deployPreview).toHaveLength(1);
     });
 
+    it("refreshes an unchanged legacy preview once, then resumes upload-free refreshes", async () => {
+      const nodeId = await createApp();
+      const { host, calls } = createFakeHost();
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        const first = await client.airapps.siteDeployPreview({ nodeId });
+        calls.deployPreview.length = 0;
+        const read = host.readSite;
+        const deploy = host.deployPreview;
+        let legacy = true;
+        host.readSite = async (id) => {
+          const row = await read(id);
+          return legacy ? { ...row, previewUpstream: null } : row;
+        };
+        host.deployPreview = async (input) => {
+          legacy = false;
+          return deploy(input);
+        };
+        const upgraded = await client.airapps.siteDeployPreview({ nodeId });
+        expect(upgraded.state.previewVersion).toBe(first.state.previewVersion);
+        expect(upgraded.state.currentVersion).toBe(first.state.currentVersion);
+        await client.airapps.siteDeployPreview({ nodeId });
+        expect(calls.deployPreview).toHaveLength(1);
+      });
+    });
+
     it("names what stops the app, and uploads nothing", async () => {
       const nodeId = await createApp([
         { path: "airapp.json", content: SITE_MANIFEST },
@@ -355,6 +383,137 @@ describe("AirApp site engine", () => {
         expect(outcome).toBe("no-preview");
       });
       expect(calls.setPublic).toHaveLength(0);
+    });
+  });
+
+  describe("release management through the real router", () => {
+    const releases: AirAppSiteReleasesVO = {
+      available: true,
+      versions: [
+        {
+          version: "saved-v1",
+          releaseNumber: 1,
+          createdAt: "2026-11-11T00:00:00.000Z",
+          createdBy: "local",
+          isCurrent: false,
+          canRollback: true,
+        },
+      ],
+      history: [],
+      status: "idle",
+      lastError: null,
+    };
+    const releaseHost = () => {
+      const readReleases = vi.fn(async () => releases);
+      const rollback = vi.fn(async () => ({
+        address: "https://site-x.sites.test",
+        liveVersion: "saved-v1",
+        previewVersion: "draft",
+        isPublic: true,
+        previewDeployedAt: null,
+        liveDeployedAt: new Date(),
+        previewUpstream: null,
+      }));
+      return { ...createFakeHost({ readReleases, rollback }), readReleases, rollback };
+    };
+
+    it("keeps older hosts compatible and refuses unsupported rollback", async () => {
+      const nodeId = await createApp();
+      const { host } = createFakeHost();
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        expect(await client.airapps.siteReleases({ nodeId })).toMatchObject({
+          available: false,
+          versions: [],
+        });
+        await expect(
+          client.airapps.siteRollback({ nodeId, version: "saved-v1" }),
+        ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+      });
+    });
+
+    it("keeps history readable for a lapsed plan but refuses rollback", async () => {
+      const nodeId = await createApp();
+      const { host, readReleases, rollback } = releaseHost();
+      await runWithBusabaseContext(
+        {
+          airAppSiteHost: host,
+          resolveAirAppEngineLock: async () => ({ lockedEngines: ["site"], planLabel: "Plus" }),
+        },
+        async () => {
+          expect((await client.airapps.siteReleases({ nodeId })).versions[0]?.canRollback).toBe(
+            false,
+          );
+          await expect(
+            client.airapps.siteRollback({ nodeId, version: "saved-v1" }),
+          ).rejects.toMatchObject({ code: "FORBIDDEN" });
+        },
+      );
+      expect(readReleases).toHaveBeenCalledExactlyOnceWith(nodeId);
+      expect(rollback).not.toHaveBeenCalled();
+    });
+
+    it("denies readers and cross-space release operations before the host is called", async () => {
+      const nodeId = await createApp();
+      const { host, readReleases, rollback } = releaseHost();
+      for (const scope of [
+        { isSpaceManager: false, permissionLevel: "read" as const },
+        { spaceId: "other-space" },
+      ]) {
+        await runWithBusabaseContext({ airAppSiteHost: host, ...scope }, async () => {
+          await expect(client.airapps.siteReleases({ nodeId })).rejects.toBeTruthy();
+          await expect(
+            client.airapps.siteRollback({ nodeId, version: "saved-v1" }),
+          ).rejects.toBeTruthy();
+        });
+      }
+      expect(readReleases).not.toHaveBeenCalled();
+      expect(rollback).not.toHaveBeenCalled();
+    });
+
+    it("rolls back a retained release while current draft syntax is invalid without rewriting files", async () => {
+      const nodeId = await createApp();
+      const { host, rollback } = releaseHost();
+      await editFile(nodeId, "worker.js", "export default {");
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        const result = await client.airapps.siteRollback({ nodeId, version: "saved-v1" });
+        expect(result.outcome).toBe("ok");
+        expect(result.state.liveVersion).toBe("saved-v1");
+        expect(result.state.previewVersion).toBe("draft");
+        expect(result.state.blockers.length).toBeGreaterThan(0);
+        expect(
+          (await client.fileTrees.readFile({ type: "airapp", nodeId, filePath: "worker.js" }))
+            .content,
+        ).toBe("export default {");
+      });
+      expect(rollback).toHaveBeenCalledExactlyOnceWith(nodeId, "saved-v1", "Site app");
+    });
+
+    it("reports successful rollback even when a current draft object can no longer be read", async () => {
+      const { storage } = await import("openlib/storage");
+      const unreadable =
+        "export default { fetch() { return new Response('unreadable-draft-unique'); } };";
+      const nodeId = await createApp(
+        siteFiles().map((file) =>
+          file.path === "worker.js" ? { ...file, content: unreadable } : file,
+        ),
+      );
+      const objects = await storage.listObjects(undefined, 10000);
+      let deleted = false;
+      for (const object of objects.objects) {
+        if ((await storage.getObject(object.key)).toString() === unreadable) {
+          await storage.deleteObject(object.key);
+          deleted = true;
+        }
+      }
+      expect(deleted).toBe(true);
+      const { host } = releaseHost();
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        const result = await client.airapps.siteRollback({ nodeId, version: "saved-v1" });
+        expect(result).toMatchObject({
+          outcome: "ok",
+          state: { liveVersion: "saved-v1", currentVersion: null, isPublic: true },
+        });
+      });
     });
   });
 

@@ -67,18 +67,22 @@ const renderSettings = ({
   locale = "en",
   withToolbar = false,
   domainError,
+  enabled = true,
 }: {
   domains?: AirAppSiteDomainsVO;
   state?: AirAppSiteStateVO;
   locale?: CoreLocale;
   withToolbar?: boolean;
   domainError?: Error;
+  enabled?: boolean;
 } = {}) => {
   const read = vi.fn().mockResolvedValue(domains);
   if (domainError) read.mockRejectedValue(domainError);
   const bind = vi.fn().mockResolvedValue(domainsState([binding()]));
   const unbind = vi.fn().mockResolvedValue(domainsState());
   const setPrimary = vi.fn().mockResolvedValue(domains);
+  const readSite = vi.fn().mockResolvedValue(state);
+  const goLive = vi.fn().mockResolvedValue({ outcome: "ok", state });
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -88,7 +92,7 @@ const renderSettings = ({
       siteState: {
         queryOptions: () => ({
           queryKey: ["airapps", "siteState", "node"],
-          queryFn: () => Promise.resolve(state),
+          queryFn: readSite,
         }),
       },
       siteDomains: {
@@ -102,19 +106,31 @@ const renderSettings = ({
       siteSetPrimaryDomain: { call: setPrimary },
       siteRepublish: { call: vi.fn().mockResolvedValue({}) },
       siteUnpublish: { call: vi.fn().mockResolvedValue({}) },
+      siteGoLive: { call: goLive },
+      siteReleases: { queryOptions: () => ({ queryKey: ["airapps", "siteReleases", "node"] }) },
     },
   } as unknown as BusabaseQueryUtils;
-  render(
+  const tree = (active: boolean) => (
     <CoreI18nProvider locale={locale}>
       <QueryClientProvider client={queryClient}>
         {withToolbar ? (
           <AirAppSiteGoLive filesRevision="v1" nodeId="node" orpc={orpc} runStatus="idle" />
         ) : null}
-        <AirAppSiteSettings nodeId="node" orpc={orpc} />
+        <AirAppSiteSettings enabled={active} nodeId="node" orpc={orpc} />
       </QueryClientProvider>
-    </CoreI18nProvider>,
+    </CoreI18nProvider>
   );
-  return { read, bind, unbind, setPrimary, queryClient };
+  const view = render(tree(enabled));
+  return {
+    read,
+    readSite,
+    goLive,
+    bind,
+    unbind,
+    setPrimary,
+    queryClient,
+    rerenderEnabled: (active: boolean) => view.rerender(tree(active)),
+  };
 };
 
 const toolbarAddress = () =>
@@ -279,6 +295,40 @@ describe("website custom domain setup guide", () => {
 });
 
 describe("website custom domain settings", () => {
+  it("refreshes domain settings on activation while retaining the typed hostname when inactive", async () => {
+    const { read, readSite, rerenderEnabled, queryClient } = renderSettings({ enabled: false });
+    expect(readSite).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    rerenderEnabled(true);
+    const input = await screen.findByRole("textbox", { name: "Domain name" });
+    fireEvent.change(input, { target: { value: "draft.company.com" } });
+    rerenderEnabled(false);
+    const inactive = read.mock.calls.length;
+    await queryClient.invalidateQueries({ queryKey: ["airapps", "siteDomains", "node"] });
+    expect(read).toHaveBeenCalledTimes(inactive);
+    expect(screen.getByRole("textbox", { name: "Domain name" })).toBe(input);
+    expect(input).toHaveProperty("value", "draft.company.com");
+    rerenderEnabled(true);
+    await waitFor(() => expect(read.mock.calls.length).toBeGreaterThan(inactive));
+    expect(input).toHaveProperty("value", "draft.company.com");
+  });
+
+  it("invalidates a retained release history after publishing from the Site-engine toolbar", async () => {
+    const { goLive, queryClient } = renderSettings({
+      withToolbar: true,
+      state: siteState({ previewVersion: "v2", currentVersion: "v2" }),
+    });
+    queryClient.setQueryData(["airapps", "siteReleases", "node"], { history: [] });
+    const action = await screen.findByRole("button", { name: "Publish update" });
+    fireEvent.click(action);
+    await waitFor(() => expect(goLive).toHaveBeenCalledExactlyOnceWith({ nodeId: "node" }));
+    await waitFor(() =>
+      expect(queryClient.getQueryState(["airapps", "siteReleases", "node"])?.isInvalidated).toBe(
+        true,
+      ),
+    );
+  });
+
   it("keeps connected setup records behind a native disclosure", async () => {
     renderSettings({
       domains: domainsState([

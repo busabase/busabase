@@ -3,6 +3,7 @@ import type { CoreI18nMessages } from "./messages";
 export const dashboardPt: CoreI18nMessages = {
   lookup: lookupPt,
   reverseRelation: reverseRelationPt,
+  appUserField: appUserFieldPt,
   spaceInstructions: {
     navLabel: "Instruções",
     title: "Instruções do espaço",
@@ -431,6 +432,10 @@ export const dashboardPt: CoreI18nMessages = {
     codeCopy: "Copiar",
     codePreviewLabel: "Pré-visualização",
     codePreviewLoading: "Carregando…",
+    codeShowSource: "Ver código",
+    codeHideSource: "Ocultar código",
+    codePreviewError:
+      "Não foi possível mostrar o diagrama Mermaid. Verifique a sintaxe e tente novamente.",
     imageUploadButton: "Enviar",
     imageUploadPlaceholder: "ou cole um link",
     imageConfirmButton: "Confirmar",
@@ -710,7 +715,7 @@ export const dashboardPt: CoreI18nMessages = {
     statusReady: "Em execução",
     statusError: "Falhou",
     previewTitle: "Pré-visualização do AirApp",
-    previewEmpty: "Este AirApp inicia automaticamente — a pré-visualização ao vivo aparece aqui.",
+    previewEmpty: "Execute este AirApp para ver a pré-visualização ao vivo aqui.",
     previewPending: "A pré-visualização ao vivo aparecerá aqui em instantes.",
     previewFailed: "O AirApp não conseguiu iniciar. Confira os logs abaixo.",
     logsEmpty:
@@ -769,7 +774,55 @@ export const dashboardPt: CoreI18nMessages = {
     swUnsupportedCopyLink: "Copiar link",
     swUnsupportedLinkCopied: "Link copiado",
     swUnsupportedCopyFailed: "Não foi possível copiar o link. Selecione e copie manualmente:",
+    previewTools: {
+      viewport: "Tamanho da prévia",
+      desktop: "Computador",
+      mobile: "Celular",
+      newWindow: "Abrir prévia em nova janela",
+      phone: "Prévia no celular",
+      signIn:
+        "Leia o código para abrir esta prévia privada. Entre com a mesma conta no celular. Não é o Site publicado.",
+      browserOnly:
+        "Esta prévia é executada neste navegador. Prepare uma prévia de Site em «Publicar Site» para abrir no celular.",
+      loopback:
+        "Este endereço local não pode ser acessado pelo celular. Use um endereço de implantação acessível.",
+      loadingQr: "Gerando código QR…",
+      link: "Link da prévia",
+      copyLink: "Copiar link",
+      openLink: "Abrir prévia",
+    },
     site: {
+      publishUpdate: "Publicar atualização",
+      releases: {
+        busy: "Uma publicação está sendo aplicada. A lista será atualizada automaticamente.",
+        manage: "Gerenciar publicações",
+        versions: "Versões",
+        history: "Histórico de publicações",
+        current: "Atual",
+        retention: "A versão atual e até 5 versões anteriores são mantidas.",
+        rollback: "Restaurar",
+        rollbackVersion: "Restaurar {version}",
+        confirmTitle: "Restaurar {version}?",
+        confirmBody:
+          "Os visitantes verão esta versão no mesmo endereço. O rascunho, a prévia e os dados do espaço não serão alterados.",
+        confirm: "Confirmar restauração",
+        rollbackDone: "A versão selecionada está publicada.",
+        loading: "Carregando publicações…",
+        loadFailed: "Não foi possível carregar as publicações. Tente novamente.",
+        unavailable: "O histórico de versões não está disponível nesta instalação.",
+        legacy: "Publicada antes da disponibilidade das cópias de versões.",
+        empty: "Ainda não há versões publicadas. Publique este Site para iniciar o histórico.",
+        planLocked:
+          "Atualize o plano do espaço para publicar ou restaurar. Você ainda pode tirar o Site do ar.",
+        historyEmpty: "Publicações e restaurações aparecerão aqui.",
+        actionPublish: "Publicada",
+        actionRollback: "Restaurada para",
+        copyAddress: "Copiar endereço",
+        copied: "Copiado",
+        copyFailed: "Não foi possível copiar. Selecione o endereço acima e copie manualmente.",
+        publicQrHint:
+          "Escaneie para abrir o Site publicado. Alterações não publicadas do rascunho não estão incluídas.",
+      },
       publish: {
         previewStale:
           "Os arquivos mudaram após esta prévia. Crie ou atualize a prévia do site antes de publicar.",
@@ -803,7 +856,7 @@ export const dashboardPt: CoreI18nMessages = {
       statusNotLive: "Não publicado",
       statusLive: "Publicado",
       statusLiveWithChanges: "Alterações não publicadas",
-      goLive: "Publicar",
+      goLive: "Publicar Site",
       goLiveDone: "O site está publicado.",
       previewStale: "Os arquivos mudaram depois desta prévia. Execute de novo e depois publique.",
       noPreview: "Execute primeiro para criar uma prévia.",
@@ -1717,6 +1770,7 @@ export const dashboardPt: CoreI18nMessages = {
     tabGeneral: "Geral",
     tabInfo: "Informações",
     tabPermissions: "Permissões",
+    tabUserSignIn: "Login de usuários",
     changeIcon: "Alterar ícone",
     iconUploadLabel: "Enviar imagem",
     iconUploadFormatHint: "PNG, JPG, GIF ou WebP, até 2 MB",
@@ -2639,6 +2693,7 @@ export const dashboardPt: CoreI18nMessages = {
     multiselect: "Seleção múltipla",
     relation: "Relação",
     member: "Membro",
+    appUser: "Usuário de app",
     lookup: "Consulta",
     attachment: "Arquivo",
     drive: "Drive",
@@ -3145,5 +3200,6 @@ export const dashboardPt: CoreI18nMessages = {
   },
 };
 
+import { appUserFieldPt } from "./app-user-field";
 import { lookupPt } from "./lookup";
 import { reverseRelationPt } from "./reverse-relation";

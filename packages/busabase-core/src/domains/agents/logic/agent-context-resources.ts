@@ -130,9 +130,17 @@ async function snapshotNode(
           }),
         ),
       }));
+      // An `appUser` value is an opaque id; say what it names so an agent does
+      // not mistake it for a member id or invent one.
+      const appUserNote = base.fields.some((field) => field.type === "appUser")
+        ? [
+            "`appUser` fields hold one app user id (`apu_…`): an end user who signed in to one of this space's apps (e.g. a shop buyer), not a workspace member. Copy ids as-is; never invent one.",
+          ]
+        : [];
       sections.push(
         `Base ID: ${base.id}`,
         `## Fields\n${json(fields)}`,
+        ...appUserNote,
         `## Example records\nA sample of at most 20 records from the whole Base. This sample does not represent the current view's filters, sorting, or selected rows.\n${json(records)}`,
       );
       partial = page.nextCursor !== null;

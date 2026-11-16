@@ -104,10 +104,12 @@ export function AirAppSiteDomains({
   orpc,
   nodeId,
   state,
+  enabled = true,
 }: {
   orpc: BusabaseQueryUtils;
   nodeId: string;
   state: AirAppSiteStateVO;
+  enabled?: boolean;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -115,7 +117,7 @@ export function AirAppSiteDomains({
   const id = useId();
   const queryClient = useQueryClient();
   const queryOptions = orpc.airapps.siteDomains.queryOptions({ input: { nodeId } });
-  const domains = useQuery(queryOptions);
+  const domains = useQuery({ ...queryOptions, enabled, staleTime: 0 });
   const [hostname, setHostname] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [removeConfirmation, setRemoveConfirmation] = useState<string | null>(null);
