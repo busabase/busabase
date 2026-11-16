@@ -3,6 +3,7 @@ import type { FieldType } from "busabase-contract/types";
 const labelByFieldType: Record<FieldType, string> = {
   ai_summary: "AI summary",
   ai_tags: "AI tags",
+  appUser: "App user",
   attachment: "Attachment",
   auto_number: "Auto number",
   checkbox: "Checkbox",
