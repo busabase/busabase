@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -293,6 +293,14 @@
       "types": "./src/domains/dashboard/components/node-settings-permissions-slot.tsx",
       "default": "./src/domains/dashboard/components/node-settings-permissions-slot.tsx"
     },
+    "./dashboard/node-settings-app-sign-in-slot": {
+      "types": "./src/domains/dashboard/components/node-settings-app-sign-in-slot.tsx",
+      "default": "./src/domains/dashboard/components/node-settings-app-sign-in-slot.tsx"
+    },
+    "./dashboard/app-user-field-slot": {
+      "types": "./src/domains/dashboard/components/app-user-field-slot.tsx",
+      "default": "./src/domains/dashboard/components/app-user-field-slot.tsx"
+    },
     "./dashboard/search-spaces-slot": {
       "types": "./src/domains/dashboard/components/search-spaces-slot.tsx",
       "default": "./src/domains/dashboard/components/search-spaces-slot.tsx"
@@ -540,6 +548,10 @@
     "./dashboard/previewfile-host-viewer": {
       "types": "./src/domains/dashboard/components/previewfile-host-viewer.tsx",
       "default": "./src/domains/dashboard/components/previewfile-host-viewer.tsx"
+    },
+    "./domains/airapp/site-bundle": {
+      "types": "./src/domains/airapp/utils/site-bundle.ts",
+      "default": "./src/domains/airapp/utils/site-bundle.ts"
     }
   },
   "dependencies": {
@@ -585,6 +597,7 @@
     "ignore": "^7.0.5",
     "kui": "workspace:*",
     "lucide-react": "^1.34.0",
+    "mermaid": "^11.12.2",
     "micromark": "^4.0.2",
     "open-domains": "workspace:*",
     "openlib": "workspace:*",
