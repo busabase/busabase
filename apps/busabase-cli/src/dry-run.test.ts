@@ -63,13 +63,16 @@ describe("dryRunFetch", () => {
 });
 
 describe("renderDryRunPlan", () => {
-  it("says nothing was sent, and shows the request", () => {
+  it("says no write was sent or server validation performed, and shows the first request", () => {
     const rendered = renderDryRunPlan({
       method: "POST",
       url: "https://busabase.test/api/v1/nodes",
       body: { slug: "x" },
     });
-    expect(rendered).toContain("nothing was sent");
+    expect(rendered).toContain("no write was sent");
+    expect(rendered).toContain("first suppressed request");
+    expect(rendered).toContain("Server validation was not run");
+    expect(rendered).toContain("Later steps");
     expect(rendered).toContain("POST https://busabase.test/api/v1/nodes");
     expect(rendered).toContain('"slug": "x"');
   });
@@ -90,9 +93,64 @@ describe("observeRequests", () => {
 
     expect(inner).toHaveBeenCalledTimes(2);
     expect(seen).toEqual([
-      { method: "GET", pathname: "/api/v1/bases" },
-      { method: "POST", pathname: "/api/v1/nodes/nod_1/move" },
+      { method: "GET", pathname: "/api/v1/bases", status: 200 },
+      { method: "POST", pathname: "/api/v1/nodes/nod_1/move", status: 200 },
     ]);
+  });
+
+  it("captures only the current response request ID without inventing one", async () => {
+    const seen: Array<{ method: string; requestId?: string; status?: number }> = [];
+    let call = 0;
+    const wrapped = observeRequests(
+      async () =>
+        new Response("{}", {
+          status: 422,
+          headers: call++ === 0 ? { "x-request-id": "scanner-request" } : {},
+        }),
+      (request) => seen.push(request),
+    );
+    await wrapped("https://busabase.test/first", { method: "POST" });
+    await wrapped("https://busabase.test/second", { method: "POST" });
+    expect(seen[0]).toMatchObject({ status: 422, requestId: "scanner-request" });
+    expect(seen[1]).toMatchObject({ status: 422 });
+    expect(seen[1]).not.toHaveProperty("requestId");
+  });
+
+  it("remembers successful writes when a later read fails", async () => {
+    const seen: Array<{ method: string; priorWrite?: boolean }> = [];
+    let call = 0;
+    const wrapped = observeRequests(
+      async () => {
+        if (call++ === 0) return ok();
+        throw new TypeError("fetch failed");
+      },
+      (request) => seen.push(request),
+    );
+    await wrapped("https://busabase.test/write", { method: "POST" });
+    await expect(wrapped("https://busabase.test/read")).rejects.toThrow("fetch failed");
+    expect(seen).toMatchObject([{ method: "POST" }, { method: "GET", priorWrite: true }]);
+  });
+
+  it("keeps attribution ambiguous after overlapping requests with the same status", async () => {
+    const pending: Array<(response: Response) => void> = [];
+    const seen: Array<{ ambiguous?: boolean; status?: number; requestId?: string }> = [];
+    const wrapped = observeRequests(
+      () => new Promise<Response>((resolve) => pending.push(resolve)),
+      (request) => seen.push(request),
+    );
+    const first = wrapped("https://busabase.test/first", { method: "POST" });
+    const second = wrapped("https://busabase.test/second", { method: "POST" });
+    pending[1](new Response("{}", { status: 503, headers: { "x-request-id": "second" } }));
+    pending[0](new Response("{}", { status: 503, headers: { "x-request-id": "first" } }));
+    await Promise.all([first, second]);
+    expect(seen).toEqual([
+      expect.objectContaining({ ambiguous: true, status: 503, requestId: "first" }),
+      expect.objectContaining({ ambiguous: true, status: 503, requestId: "second" }),
+    ]);
+    const cleanup = wrapped("https://busabase.test/cleanup", { method: "DELETE" });
+    pending[2](ok());
+    await cleanup;
+    expect(seen[2].ambiguous).toBe(true);
   });
 
   it("does not fail the request when the URL is not absolute", async () => {

@@ -207,7 +207,7 @@ Import `busabase-sdk/airapp-gate.css` for the default look; every colour, radius
 
 ## Data client entry points
 
-**`Busabase` class** — an ergonomic wrapper with namespaced methods (`bb.bases`, `bb.records`, `bb.changeRequests`, `bb.nodes`, `bb.views`, `bb.assets`, `bb.fileTrees`, `bb.files`, `bb.docs`, `bb.comments`, `bb.auditEvents`, `bb.agent`, `bb.agentTasks`, `bb.embedLinks`, `bb.search()`, `bb.grep()`, `bb.health()`, `bb.me()`). Drop to `bb.client` for the raw oRPC client (e.g. `bb.client.system.meta()`).
+**`Busabase` class** — an ergonomic wrapper with namespaced methods (`bb.bases`, `bb.records`, `bb.changeRequests`, `bb.nodes`, `bb.views`, `bb.assets`, `bb.fileTrees`, `bb.files`, `bb.docs`, `bb.comments`, `bb.auditEvents`, `bb.agent`, `bb.agentTasks`, `bb.embedLinks`, `bb.appUsers`, `bb.search()`, `bb.grep()`, `bb.health()`, `bb.me()`). Drop to `bb.client` for the raw oRPC client (e.g. `bb.client.system.meta()`).
 
 Reading or listing nodes goes through `bb.nodes`, whatever the node's type:
 
@@ -227,6 +227,38 @@ import { createBusabaseClient } from "busabase-sdk";
 const client = createBusabaseClient({ apiKey: "…" });
 await client.records.search({ fieldSlug: "email", valueText: "a@b.com" });
 ```
+
+## App users (Busabase Cloud)
+
+Let the end users of your app (a shop's buyers) sign in with an emailed 6-digit code and read only their own rows. Everything runs on the app's **server** with its API key; the browser only talks to your own routes, and the session token lives in an HttpOnly cookie on your domain. Turn sign-in on first with `bb.appUsers.putSettings({ appId, enabled: true, appName: "My Shop" })` (`manage` on the AirApp node). Settings are only on/off and the name used in sign-in emails: which rows belong to whom is your server's choice, made per query with `ownerField` — an App user (`appUser`) column, or a plain text column (e.g. `customer-account`), where you store the app user's id when writing the row. An App user column shows each id as the person's email in Busabase; with a text column, keep a separate column for the human-readable email.
+
+```ts
+import { Busabase, appUserSessionCookie, clearAppUserSessionCookie, getAppUserSessionToken } from "busabase-sdk";
+
+const bb = new Busabase({ apiKey: env.BUSABASE_API_KEY, spaceId: env.BUSABASE_SPACE_ID });
+const cookie = { cookieName: "busa_shop_session" };
+
+await bb.appUsers.sendCode({
+  appId,
+  email,
+  locale: "de",                                         // email language; unsupported → English
+  ip: request.headers.get("CF-Connecting-IP") ?? undefined, // the END USER's IP → per-IP limits
+});                                                     // 429 RATE_LIMITED, 403 APP_LOGIN_DISABLED
+const { sessionToken } = await bb.appUsers.verify({ appId, email, code }); // 400 INVALID_CODE { attemptsLeft }, 410 CODE_EXPIRED
+response.headers.append("set-cookie", appUserSessionCookie(sessionToken, cookie));
+
+const token = getAppUserSessionToken(request, cookie);
+const user = await bb.appUsers.getUser({ appId, sessionToken: token }); // null when signed out
+const { records } = await bb.appUsers.queryRecords({ appId, sessionToken: token!, baseId: ordersBaseNodeId, ownerField: "customer-account" });
+// Busabase fills in the verified session's user id and forces `customer-account = user.id`: other users' rows and ownerless (guest) rows never come back.
+
+await bb.appUsers.signOut({ appId, sessionToken: token });
+response.headers.append("set-cookie", clearAppUserSessionCookie(cookie));
+```
+
+A thrown error carries the API's `code` (`APP_USERS_ERROR_CODES`) and its extra fields on `error.data` (`attemptsLeft`, `retryAfterSeconds`, `reason`). An `ownerField` that is missing or neither an App user nor a text field throws `INVALID_OWNER_FIELD` (400). Admins also get `bb.appUsers.list / disable / enable / delete`.
+
+`sendCode` limits, checked in this order (`reason` on the 429): `cooldown` (one code per email per 60 s), `ip_hourly_limit` (5 per IP per app per hour) and `ip_daily_limit` (20 per day) — only when you pass `ip`, sent as the `x-busabase-app-user-ip` header and stored only as a keyed hash — then `email_daily_limit` (10 per email per day) and `space_daily_limit` (1000 per space per day, counted only for addresses that are not app users yet, so returning customers are never locked out by it). The email is written in `locale` when it is one of `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `vi` (regional variants such as `pt-BR` or `zh-HK` map to the nearest), else English.
 
 ## Types
 

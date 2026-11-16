@@ -1932,9 +1932,84 @@ describe("busabase-cli commands", () => {
 
     expect(exitCode).toBe(EXIT_CODES.SERVER_ERROR);
     // `api` goes through rawFetch (outside the typed contract) — its
-    // `formatRawErrorBody` extracts the server's `error` field instead of
+    // `CliHttpError` extracts the server's `error` field instead of
     // dumping the raw `{"error":"..."}` JSON verbatim.
     expect(error.mock.calls.join("\n")).toContain("HTTP 500 : storage missing");
+  });
+
+  it("sends the raw PATCH metadata HTTP body unchanged", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(request.method).toBe("PATCH");
+      expect(request.url).toBe("http://localhost:15419/api/v1/nodes/nod_1/metadata");
+      expect(await request.json()).toEqual({ metadata: { automaticSync: false } });
+      return jsonResponse({ id: "nod_1" });
+    }) as typeof fetch;
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "api",
+      "--method",
+      "patch",
+      "--path",
+      "/nodes/nod_1/metadata",
+      "--body-json",
+      '{"metadata":{"automaticSync":false}}',
+    ]);
+    expect(exitCode).toBe(0);
+    expect(global.fetch).toHaveBeenCalledOnce();
+  });
+
+  it("reports raw PATCH dry-run as unvalidated without sending a write", async () => {
+    const output = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    global.fetch = vi.fn() as unknown as typeof fetch;
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "api",
+      "--method",
+      "patch",
+      "--path",
+      "/nodes/nod_1/metadata",
+      "--body-json",
+      '{"automaticSync":false}',
+      "--dry-run",
+    ]);
+    expect(exitCode).toBe(0);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({
+      dryRun: true,
+      serverValidated: false,
+      wouldSend: { method: "PATCH", body: { automaticSync: false } },
+    });
+  });
+
+  it("marks invalid raw PATCH JSON as not sent", async () => {
+    const output = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    global.fetch = vi.fn() as unknown as typeof fetch;
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "api",
+      "--method",
+      "patch",
+      "--path",
+      "/nodes/nod_1/metadata",
+      "--body-json",
+      "{invalid",
+    ]);
+    expect(exitCode).not.toBe(0);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(JSON.parse(String(output.mock.calls[0][0]))).toMatchObject({
+      safeToRetry: false,
+      writeOutcome: "not_sent",
+    });
   });
 
   // ── Drive Grep Retrieval: assets put-text / grep / read-lines ────────────────

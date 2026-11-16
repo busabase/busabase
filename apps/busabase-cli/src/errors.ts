@@ -12,6 +12,8 @@
  * and a distinct process exit code per class.
  */
 
+import { shouldRetry } from "./retry.js";
+
 /** Stable, machine-readable class for a failure. Never localized, never reworded. */
 export type CliErrorCode =
   | "USAGE"
@@ -58,18 +60,40 @@ export interface CliErrorIssue {
   message: string;
 }
 
+export interface CliErrorFinding {
+  path: string;
+  ruleName: string;
+}
+
+export interface ErrorRequestContext {
+  request?: {
+    method: string;
+    status?: number;
+    requestId?: string;
+    priorWrite?: boolean;
+    ambiguous?: boolean;
+  };
+  intendedMethod?: string;
+}
+
 export interface ClassifiedError {
   code: CliErrorCode;
   /** HTTP status when the failure came from the server; absent for transport errors. */
   status?: number;
   message: string;
   issues?: CliErrorIssue[];
+  serverCode?: string;
+  findings?: CliErrorFinding[];
+  requestId?: string;
   /**
    * Whether repeating the identical request could plausibly succeed. `429`, `5xx`
    * and transport failures are; a `404` or a schema refusal is not, and retrying
    * one is just a slower way to fail.
    */
   retryable: boolean;
+  /** Whether replaying this request is safe AND could help; unlike retryable, method-aware. */
+  safeToRetry: boolean;
+  writeOutcome?: "not_sent" | "rejected" | "unknown";
   exitCode: number;
   /**
    * Agent-facing recovery: the exact next command to run, fully assembled for
@@ -87,11 +111,130 @@ export interface CliErrorEnvelope {
   status?: number;
   message: string;
   issues?: CliErrorIssue[];
+  serverCode?: string;
+  findings?: CliErrorFinding[];
+  requestId?: string;
   retryable: boolean;
+  safeToRetry: boolean;
+  writeOutcome?: "not_sent" | "rejected" | "unknown";
   hint?: string;
 }
 
 const RETRYABLE: ReadonlySet<CliErrorCode> = new Set(["RATE_LIMITED", "SERVER_ERROR", "NETWORK"]);
+const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+const serverCode = (value: unknown): string | undefined =>
+  typeof value === "string" && /^[A-Z][A-Z0-9_]{0,95}$/.test(value) ? value : undefined;
+
+export function toFindings(raw: unknown): CliErrorFinding[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const findings = raw.flatMap((item): CliErrorFinding[] => {
+    if (!item || typeof item !== "object") return [];
+    const { path, ruleName } = item as { path?: unknown; ruleName?: unknown };
+    if (
+      typeof path !== "string" ||
+      !path ||
+      typeof ruleName !== "string" ||
+      !/^[a-zA-Z0-9_-]{1,120}$/.test(ruleName)
+    ) {
+      return [];
+    }
+    return [
+      {
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: remove terminal and bidirectional controls from diagnostic paths.
+        path: path.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, ""),
+        ruleName,
+      },
+    ];
+  });
+  return findings.length ? findings : undefined;
+}
+
+/** Share the same allowlist with the raw transport and the typed SDK's errors. */
+function safeErrorDetails(error: unknown, httpStatus?: number) {
+  const value = error as {
+    status?: unknown;
+    code?: unknown;
+    data?: { findings?: unknown; issues?: unknown };
+  };
+  const code =
+    httpStatus !== undefined || typeof value?.status === "number"
+      ? serverCode(value?.code)
+      : undefined;
+  const findings = toFindings(value?.data?.findings);
+  const issues = code === "SECRET_DETECTED" ? undefined : toIssues(value?.data?.issues);
+  return {
+    ...(code ? { serverCode: code } : {}),
+    ...(findings ? { findings } : {}),
+    ...(issues ? { issues } : {}),
+  };
+}
+
+/** Longest raw error body kept in a message; the full text is rarely more useful. */
+const RAW_BODY_LIMIT = 500;
+
+/** A raw HTTP failure retains only diagnostic fields safe for CLI output. */
+export class CliHttpError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly data?: { issues?: CliErrorIssue[]; findings?: CliErrorFinding[] };
+
+  constructor(status: number, statusText: string, text: string) {
+    let body: { error?: unknown; code?: unknown; data?: unknown } | undefined;
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object") body = parsed;
+    } catch {
+      // A proxy may return plain text instead of the Busabase error envelope.
+    }
+    const details = safeErrorDetails(body, status);
+    // Scanner findings can sit beside source excerpts, so a body carrying them is
+    // never echoed. Any other body (a gateway's `{"message": …}`, a plain-text
+    // page) is the only clue to what failed, so it is kept, bounded.
+    const carriesFindings =
+      (body?.data as { findings?: unknown } | null | undefined)?.findings !== undefined;
+    const message =
+      details.serverCode === "SECRET_DETECTED"
+        ? secretMessage(details.findings)
+        : typeof body?.error === "string"
+          ? body.error
+          : carriesFindings
+            ? "Request failed"
+            : text.length > RAW_BODY_LIMIT
+              ? `${text.slice(0, RAW_BODY_LIMIT)}…`
+              : text;
+    super(`HTTP ${status} ${statusText}: ${message}`);
+    this.name = "CliHttpError";
+    this.status = status;
+    this.code = details.serverCode;
+    this.data = {
+      ...(details.issues ? { issues: details.issues } : {}),
+      ...(details.findings ? { findings: details.findings } : {}),
+    };
+  }
+}
+
+const secretMessage = (findings?: CliErrorFinding[]): string =>
+  `Upload rejected: ${findings?.length ?? "one or more"} file/rule finding(s) detected. Remove the suspected credentials and retry; matched values are never shown.`;
+
+/** Never render arbitrary server error data, including scanner source excerpts. */
+export function formatErrorMessage(error: unknown): string {
+  const details = safeErrorDetails(error);
+  let message =
+    details.serverCode === "SECRET_DETECTED"
+      ? secretMessage(details.findings)
+      : error instanceof Error
+        ? error.message
+        : String(error);
+  const issueDetail = details.issues
+    ?.map(({ path, message }) => (path ? `${path}: ${message}` : message))
+    .join("; ");
+  if (issueDetail && !message.includes(issueDetail)) message += ` — ${issueDetail}`;
+  if (details.findings) {
+    message += `\n${details.findings.map(({ path, ruleName }) => `  ${path}: ${ruleName}`).join("\n")}`;
+  }
+  return message;
+}
 
 /** `data.issues` as the server sends it, flattened. Shared with `explainError`'s prose rendering. */
 export function toIssues(raw: unknown): CliErrorIssue[] | undefined {
@@ -119,7 +262,7 @@ const codeForStatus = (status: number): CliErrorCode => {
 };
 
 /**
- * A transport failure never reaches the server, so it has no status to read.
+ * A transport failure produces no response; a write may already have reached the server.
  * Node reports every one of them as a bare `TypeError: fetch failed` with the
  * real reason on `.cause`, which is why this matches on text rather than type.
  */
@@ -129,9 +272,7 @@ const isNetworkFailure = (message: string): boolean =>
   );
 
 /**
- * `rawFetch` (health / openapi / `api` passthrough) throws a plain `Error`
- * carrying `HTTP <status> <statusText>: …` rather than an `ORPCError`, so the
- * status has to be read back out of the message for those paths.
+ * Compatibility with older callers that kept the status only in an Error message.
  */
 const statusFromMessage = (message: string): number | undefined => {
   const match = /\bHTTP (\d{3})\b/.exec(message);
@@ -139,14 +280,27 @@ const statusFromMessage = (message: string): number | undefined => {
 };
 
 /** Classify any thrown value into the stable shape above. Never throws. */
-export function classifyError(error: unknown): ClassifiedError {
-  const message = error instanceof Error ? error.message : String(error);
+export function classifyError(error: unknown, context: ErrorRequestContext = {}): ClassifiedError {
+  const message = formatErrorMessage(error);
   const outcome = (error as { cliCode?: unknown })?.cliCode;
   if (typeof outcome === "string" && outcome in EXIT_CODES) {
     const code = outcome as CliErrorCode;
-    return { code, message, retryable: RETRYABLE.has(code), exitCode: EXIT_CODES[code] };
+    return {
+      code,
+      message,
+      retryable: RETRYABLE.has(code),
+      safeToRetry: false,
+      ...(code !== "TIMEOUT" &&
+      code !== "REVIEW_REJECTED" &&
+      !context.request &&
+      context.intendedMethod &&
+      !READ_METHODS.has(context.intendedMethod.toUpperCase())
+        ? { writeOutcome: "not_sent" as const }
+        : {}),
+      exitCode: EXIT_CODES[code],
+    };
   }
-  const issues = toIssues((error as { data?: { issues?: unknown } })?.data?.issues);
+  const details = safeErrorDetails(error);
   const status =
     typeof (error as { status?: unknown })?.status === "number"
       ? (error as { status: number }).status
@@ -175,12 +329,40 @@ export function classifyError(error: unknown): ClassifiedError {
     else if (orpcCode === "TOO_MANY_REQUESTS") code = "RATE_LIMITED";
   }
 
+  const method = context.request?.ambiguous
+    ? undefined
+    : (context.request?.method ?? context.intendedMethod);
+  const retryable = RETRYABLE.has(code);
+  const failedResponse =
+    status !== undefined &&
+    (status < 200 || status >= 300) &&
+    !context.request?.ambiguous &&
+    context.request?.status === status;
+  const writeOutcome =
+    method && !READ_METHODS.has(method.toUpperCase())
+      ? !context.request
+        ? ("not_sent" as const)
+        : status !== undefined && status >= 400 && status < 500 && status !== 408
+          ? ("rejected" as const)
+          : ("unknown" as const)
+      : undefined;
   return {
     code,
     ...(status !== undefined ? { status } : {}),
     message,
-    ...(issues ? { issues } : {}),
-    retryable: RETRYABLE.has(code),
+    ...details,
+    ...(failedResponse && context.request?.requestId
+      ? { requestId: context.request.requestId }
+      : {}),
+    retryable,
+    safeToRetry: Boolean(
+      retryable &&
+        context.request &&
+        !context.request.priorWrite &&
+        method &&
+        shouldRetry(method, status),
+    ),
+    ...(writeOutcome ? { writeOutcome } : {}),
     exitCode: EXIT_CODES[code],
   };
 }
@@ -223,7 +405,12 @@ export function errorEnvelope(classified: ClassifiedError): CliErrorEnvelope {
     ...(classified.status !== undefined ? { status: classified.status } : {}),
     message: classified.message,
     ...(classified.issues ? { issues: classified.issues } : {}),
+    ...(classified.serverCode ? { serverCode: classified.serverCode } : {}),
+    ...(classified.findings ? { findings: classified.findings } : {}),
+    ...(classified.requestId ? { requestId: classified.requestId } : {}),
     retryable: classified.retryable,
+    safeToRetry: classified.safeToRetry,
+    ...(classified.writeOutcome ? { writeOutcome: classified.writeOutcome } : {}),
     ...(classified.hint ? { hint: classified.hint } : {}),
   };
 }
