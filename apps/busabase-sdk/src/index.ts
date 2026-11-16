@@ -1,5 +1,6 @@
 import { nodeWebUrl } from "busabase-contract/node-web-url";
 import type { ChangeRequestVO, RecordVO, ViewVO } from "busabase-contract/types";
+import { type BusabaseAppUsersClient, createAppUsersClient } from "./app-users.js";
 import { type BusabaseAssetsClient, grepAssets } from "./asset-grep.js";
 import {
   type BusabaseUploadedAsset,
@@ -55,6 +56,24 @@ export { type NodeWebUrlInput, nodeWebUrl } from "busabase-contract/node-web-url
 // against Busabase objects (BaseVO, RecordVO, ChangeRequestVO, …) without
 // depending on the internal workspace `busabase-contract` package.
 export type * from "busabase-contract/types";
+export {
+  APP_USER_SESSION_HEADER,
+  APP_USER_SESSION_MAX_AGE_SECONDS,
+  APP_USERS_ERROR_CODES,
+  type AppUserRecordVO,
+  type AppUserRefVO,
+  type AppUsersSettingsVO,
+  type AppUserVO,
+  appUserSessionCookie,
+  type BusabaseAppUsersClient,
+  clearAppUserSessionCookie,
+  createAppUsersClient,
+  DEFAULT_APP_USER_SESSION_COOKIE,
+  getAppUserSessionToken,
+  type QueryAppUserRecordsResult,
+  type SendAppUserCodeResult,
+  type VerifyAppUserCodeResult,
+} from "./app-users.js";
 export {
   type BusabaseAssetsClient,
   grepAssets,
@@ -240,6 +259,16 @@ export class Busabase {
   }
   get embedLinks(): BusabaseClient["embedLinks"] {
     return this.client.embedLinks;
+  }
+  /**
+   * App users — the end users of an app built on Busabase (a shop's buyers):
+   * email-code sign-in, sessions, and the signed-in user's own records (cloud
+   * only). For the app's SERVER: pair it with `getAppUserSessionToken(request)`
+   * and `appUserSessionCookie(token)` to keep the session in a cookie on the
+   * app's own domain.
+   */
+  get appUsers(): BusabaseAppUsersClient {
+    return createAppUsersClient(this.client);
   }
   /**
    * Playbooks — the skills and custom node prompts this space already defines

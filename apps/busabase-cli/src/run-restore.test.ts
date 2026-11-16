@@ -89,6 +89,34 @@ describe("restore --dry-run through the CLI", () => {
     },
   );
 
+  it("preserves typed rejection diagnostics for a positional restore command", async () => {
+    const transport = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(request.method).toBe("POST");
+      expect(new URL(request.url).pathname).toBe("/api/v1/dump/import/begin");
+      return new Response(JSON.stringify({ error: "Target is not empty", code: "CONFLICT" }), {
+        status: 409,
+        headers: { "content-type": "application/json", "x-request-id": "restore-rejection" },
+      });
+    });
+    vi.stubGlobal("fetch", transport);
+    const output = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const diagnostics = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const requested = args(archivePath, configPath).filter((argument) => argument !== "--dry-run");
+    expect(await runCli(requested)).toBe(6);
+    expect(transport).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(output.mock.calls.at(-1)?.[0]))).toMatchObject({
+      code: "CONFLICT",
+      status: 409,
+      serverCode: "CONFLICT",
+      requestId: "restore-rejection",
+      writeOutcome: "rejected",
+      retryable: false,
+      safeToRetry: false,
+    });
+    expect(diagnostics.mock.calls.flat().join("\n")).toContain("Request ID: restore-rejection");
+  });
+
   it.each([{ dryRun: true }, { dryRun: false }])(
     "rejects a checksum-valid future table before any HTTP request (dryRun=$dryRun)",
     async ({ dryRun }) => {

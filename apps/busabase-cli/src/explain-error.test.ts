@@ -71,6 +71,26 @@ describe("explainError", () => {
   it("stringifies non-Error throws instead of printing [object Object]", () => {
     expect(explainError("kaboom", config())).toContain("kaboom");
   });
+
+  it("does not treat diagnostic file names as authentication or network failures", () => {
+    const error = Object.assign(new Error("Upload rejected"), {
+      status: 422,
+      code: "SECRET_DETECTED",
+      data: {
+        findings: [
+          {
+            path: "tests/401-unauthorized-network.test.ts",
+            ruleName: "generic-api-key-assignment",
+          },
+        ],
+      },
+    });
+    const out = explainError(error, config());
+    expect(out).toContain("tests/401-unauthorized-network.test.ts");
+    expect(out).toContain("generic-api-key-assignment");
+    expect(out).not.toContain("Unauthorized (401)");
+    expect(out).not.toContain("Could not reach");
+  });
 });
 
 describe("runCli surfaces explained errors", () => {

@@ -164,7 +164,13 @@ const decodeBusabaseError = (
       .join("; ");
     message = `${message} — ${details}`;
   }
-  return new ORPCError(code, { status: response.status, message, data: body.data });
+  // Some errors carry their detail at the top level of the body instead of in
+  // `data` (app users: `{ code, error, attemptsLeft }`, `{ code, error,
+  // retryAfterSeconds, reason }`). Keep those fields as `data` so a caller can
+  // read them; an error that has a real `data` is unchanged.
+  const { error: _error, code: _code, data: _data, ...rest } = body as Record<string, unknown>;
+  const data = body.data !== undefined ? body.data : Object.keys(rest).length ? rest : undefined;
+  return new ORPCError(code, { status: response.status, message, data });
 };
 
 /**

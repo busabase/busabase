@@ -79,14 +79,18 @@ import {
   DRY_RUN_NO_WRITE_NOTE,
   DryRunInterception,
   dryRunFetch,
+  type ObservedRequest,
   observeRequests,
   renderDryRunPlan,
 } from "./dry-run.js";
 import {
+  type ClassifiedError,
+  CliHttpError,
   CliOutcomeError,
   classifyError,
   EXIT_CODES,
   errorEnvelope,
+  formatErrorMessage,
   isRouteMissing,
   toIssues,
 } from "./errors.js";
@@ -466,14 +470,6 @@ function parseJsonValue(raw: string, flagName: string): unknown {
 }
 
 /**
- * Format a non-OK raw-fetch response body into a readable error message. The
- * server's JSON error shape is `{ error, code, data }` (see `encodeOpenApiError`
- * in apps/busabase/src/app/api/v1/[[...rest]]/route.ts) — when the body parses
- * as that shape, surface `error` (and, if present, each `data.issues` entry as
- * `path: message`) instead of the raw JSON blob. Falls back to the raw text for
- * any non-JSON / unrecognized body so nothing is ever silently dropped.
- */
-/**
  * Render a validation error's per-issue detail as `path: message`.
  *
  * Load-bearing, not cosmetic: a schema that refuses a field explains WHY in the
@@ -486,20 +482,6 @@ function formatIssues(issues: unknown): string | undefined {
   const parsed = toIssues(issues);
   if (!parsed) return undefined;
   return parsed.map(({ path, message }) => (path ? `${path}: ${message}` : message)).join("; ");
-}
-
-function formatRawErrorBody(status: number, statusText: string, text: string): string {
-  try {
-    const parsed = JSON.parse(text) as { error?: unknown; data?: unknown };
-    if (typeof parsed.error === "string") {
-      const details = formatIssues((parsed.data as { issues?: unknown } | undefined)?.issues);
-      const message = details ? `${parsed.error} — ${details}` : parsed.error;
-      return `HTTP ${status} ${statusText}: ${message}`;
-    }
-  } catch {
-    // Not JSON (or not the expected shape) — fall through to the raw text below.
-  }
-  return `HTTP ${status} ${statusText}: ${text}`;
 }
 
 /** Raw fetch for endpoints outside the typed contract (health / openapi / api passthrough). */
@@ -524,7 +506,7 @@ async function rawFetch(
   });
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(formatRawErrorBody(res.status, res.statusText, text));
+    throw new CliHttpError(res.status, res.statusText, text);
   }
   if (!text) return null;
   try {
@@ -660,7 +642,8 @@ interface CliState {
    */
   procedureId?: string;
   /** Method + path of the last request sent — resolves the endpoint behind a task command. */
-  lastRequest?: { method: string; pathname: string };
+  lastRequest?: ObservedRequest;
+  intendedMethod?: string;
   /** The first-time space index notice already went out ahead of this command. */
   spaceIndexAnnounced?: boolean;
 }
@@ -672,9 +655,10 @@ type Handler = (
 ) => Promise<unknown>;
 
 /** Wrap a leaf-command handler: resolve config, build the client, render the result. */
-function runAction(state: CliState, handler: Handler) {
+function runAction(state: CliState, handler: Handler, intendedMethod?: string) {
   return async (_opts: OptionValues, cmd: Command): Promise<void> => {
     const opts = cmd.optsWithGlobals();
+    state.intendedMethod = intendedMethod ?? (opts.method as string | undefined);
     const config = resolveConfig(opts);
     const refreshedToken = await maybeAutoRefresh(config.baseUrl, config.apiKey);
     if (refreshedToken) config.apiKey = refreshedToken;
@@ -704,7 +688,7 @@ function runAction(state: CliState, handler: Handler) {
       // code stays 0 so a script can branch on the real thing failing.
       console.log(
         config.output === "json"
-          ? render({ dryRun: true, wouldSend: error.plan }, config.output)
+          ? render({ dryRun: true, serverValidated: false, wouldSend: error.plan }, config.output)
           : renderDryRunPlan(error.plan),
       );
     }
@@ -805,6 +789,9 @@ function runArgAction(state: CliState, handler: ArgHandler) {
     if (refreshedToken) config.apiKey = refreshedToken;
     state.config = config;
     assertCredentialNotExpired(config.apiKey);
+    config.fetch = observeRequests(config.fetch ?? fetch, (seen) => {
+      state.lastRequest = seen;
+    });
     const client = createBusabaseClient(config);
     const result = await handler(arg, client, opts, config);
     console.log(render(opts.slim ? slim(result) : result, config.output));
@@ -1155,6 +1142,9 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
       }
       if (f.kind === "boolean") {
         leaf.option(flag, `${f.key} (boolean)`);
+        // Without a negative form a boolean could only ever be sent as true
+        // (e.g. `app-users put-settings` could not turn sign-in off).
+        leaf.option(`--no-${flag.slice(2)}`, `send ${f.key}: false`);
       } else if (f.kind === "json") {
         const jsonFlag = `${flag}-json <json|@file>`;
         const desc = `${f.key} as JSON${f.required ? "" : " (optional)"}`;
@@ -1187,45 +1177,55 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
       "after",
       `\nOpenAPI: ${route.method} ${route.path}\nRequires API key level: ${requiredLevelFor(procedureId).level}`,
     );
+    if (procedureId === "nodes.updateMetadata") {
+      leaf.addHelpText(
+        "after",
+        '\nExample: busabase-cli nodes update-metadata --node-id nod_123 --metadata-json \'{"sourceSnapshotSha256":"<snapshot>","automaticSync":false}\'\nThe metadata JSON is a flat field object; do not wrap it in {"metadata": ...}.',
+      );
+    }
     leaf.action(
-      runAction(state, (client, opts) => {
-        // Recorded before the call so a 403 can name this endpoint's required level.
-        state.procedureId = procedureId;
-        let input: unknown = {};
-        for (const f of fields) {
-          if (f.pinned !== undefined) {
-            (input as Record<string, unknown>)[f.key] = f.pinned;
-            continue;
-          }
-          if (GLOBAL_LONG_FLAGS.has(`--${kebab(f.key)}`)) continue;
-          const optKey = optionKey(f);
-          const value = (opts as Record<string, unknown>)[optKey];
-          if (f.nullable) {
-            const clearFlag = `--clear-${kebab(f.key)}`;
-            const clearKey = `clear${f.key[0].toUpperCase()}${f.key.slice(1)}`;
-            const clear = Boolean((opts as Record<string, unknown>)[clearKey]);
-            if (clear === (value !== undefined)) {
-              throw new CliOutcomeError(
-                "USAGE",
-                `Pass exactly one of --${kebab(f.key)} <value> or ${clearFlag}.`,
-              );
+      runAction(
+        state,
+        (client, opts) => {
+          // Recorded before the call so a 403 can name this endpoint's required level.
+          state.procedureId = procedureId;
+          let input: unknown = {};
+          for (const f of fields) {
+            if (f.pinned !== undefined) {
+              (input as Record<string, unknown>)[f.key] = f.pinned;
+              continue;
             }
-            (input as Record<string, unknown>)[f.key] = clear ? null : value;
-            continue;
+            if (GLOBAL_LONG_FLAGS.has(`--${kebab(f.key)}`)) continue;
+            const optKey = optionKey(f);
+            const value = (opts as Record<string, unknown>)[optKey];
+            if (f.nullable) {
+              const clearFlag = `--clear-${kebab(f.key)}`;
+              const clearKey = `clear${f.key[0].toUpperCase()}${f.key.slice(1)}`;
+              const clear = Boolean((opts as Record<string, unknown>)[clearKey]);
+              if (clear === (value !== undefined)) {
+                throw new CliOutcomeError(
+                  "USAGE",
+                  `Pass exactly one of --${kebab(f.key)} <value> or ${clearFlag}.`,
+                );
+              }
+              (input as Record<string, unknown>)[f.key] = clear ? null : value;
+              continue;
+            }
+            if (value === undefined) continue;
+            const parsed =
+              f.kind === "json" ? parseJsonValue(value as string, `${kebab(f.key)}-json`) : value;
+            if (f.root) input = parsed;
+            else (input as Record<string, unknown>)[f.key] = parsed;
           }
-          if (value === undefined) continue;
-          const parsed =
-            f.kind === "json" ? parseJsonValue(value as string, `${kebab(f.key)}-json`) : value;
-          if (f.root) input = parsed;
-          else (input as Record<string, unknown>)[f.key] = parsed;
-        }
-        // The oRPC client is a Proxy: `.call`/`.bind` are intercepted as route
-        // segments, so the method must be invoked directly (target[procKey](input)).
-        // Dynamic navigation of the typed client requires `any`.
-        let target: any = client;
-        for (const segment of navPath) target = target[segment];
-        return fields.length > 0 ? target[procKey](input) : target[procKey]();
-      }),
+          // The oRPC client is a Proxy: `.call`/`.bind` are intercepted as route
+          // segments, so the method must be invoked directly (target[procKey](input)).
+          // Dynamic navigation of the typed client requires `any`.
+          let target: any = client;
+          for (const segment of navPath) target = target[segment];
+          return fields.length > 0 ? target[procKey](input) : target[procKey]();
+        },
+        route.method,
+      ),
     );
   };
 
@@ -3562,8 +3562,8 @@ To copy a still-live space's current content into another space, use
   addGlobalFlags(program.command("api"))
     .description("Raw request to any /api/v1 endpoint")
     .addOption(
-      new Option("--method <get|post|put|delete>", "HTTP method")
-        .choices(["get", "post", "put", "delete"])
+      new Option("--method <get|post|put|patch|delete>", "HTTP method")
+        .choices(["get", "post", "put", "patch", "delete"])
         .makeOptionMandatory(),
     )
     .requiredOption("--path <p>", "path under /api/v1 (e.g. /bases) or full /api/v1 path")
@@ -3745,7 +3745,13 @@ export async function runCli(argv: string[]): Promise<number> {
       if (json) {
         console.log(
           JSON.stringify(
-            { ok: false, code: "USAGE", message: error.message, retryable: false },
+            {
+              ok: false,
+              code: "USAGE",
+              message: error.message,
+              retryable: false,
+              safeToRetry: false,
+            },
             null,
             2,
           ),
@@ -3753,7 +3759,10 @@ export async function runCli(argv: string[]): Promise<number> {
       }
       return EXIT_CODES.USAGE;
     }
-    const classified = classifyError(error);
+    const classified = classifyError(error, {
+      request: state.lastRequest,
+      intendedMethod: state.intendedMethod,
+    });
     const unsupported = explainUnsupportedCommand(state, error);
     if (unsupported) {
       classified.message = unsupported.message;
@@ -3785,7 +3794,7 @@ export async function runCli(argv: string[]): Promise<number> {
     if (json) console.log(JSON.stringify(errorEnvelope(classified), null, 2));
     console.error(
       unsupported?.prose ??
-        explainError(error, state.config ?? resolveConfig({}, { strict: false })),
+        explainError(error, state.config ?? resolveConfig({}, { strict: false }), classified),
     );
     return classified.exitCode;
   }
@@ -3873,26 +3882,21 @@ export const HELP_ALL = renderedHelp({ showAll: true });
  * concrete next step (set a key for Cloud, point at a local server, or check connectivity), and a
  * link to the troubleshooting docs.
  */
-export function explainError(error: unknown, config: ResolvedConfig): string {
+export function explainError(
+  error: unknown,
+  config: ResolvedConfig,
+  classified?: ClassifiedError,
+): string {
   const base = config.baseUrl;
-  const rawMessage = error instanceof Error ? error.message : String(error);
-  // A thrown ORPCError carries its validation detail on `.data.issues`, which the
-  // raw-fetch path already renders. Do it here too — otherwise a schema refusal
-  // reaches the user as the bare envelope ("Input validation failed") and the
-  // reason it went to the trouble of explaining is dropped on the floor.
-  const issueDetail = formatIssues((error as { data?: { issues?: unknown } }).data?.issues);
-  // The server already folds the issue detail into `message` for a schema refusal
-  // ("Input validation failed — limit: Too big…"), so appending unconditionally
-  // printed the same sentence twice.
-  const msg =
-    issueDetail && !rawMessage.includes(issueDetail)
-      ? `${rawMessage} — ${issueDetail}`
-      : rawMessage;
-  const status = (error as { status?: number }).status;
+  const msg = classified?.message ?? formatErrorMessage(error);
+  const status = classified?.status ?? (error as { status?: number }).status;
   const lower = msg.toLowerCase();
 
   let body: string;
-  if (status === 401 || lower.includes("401") || lower.includes("unauthorized")) {
+  if (
+    status === 401 ||
+    (status === undefined && (lower.includes("401") || lower.includes("unauthorized")))
+  ) {
     body = [
       `Unauthorized (401) from ${base}.`,
       config.apiKey
@@ -3901,11 +3905,12 @@ export function explainError(error: unknown, config: ResolvedConfig): string {
       "  Meant to hit a local server? Add --base-url http://localhost:15419 (or export BUSABASE_BASE_URL=…).",
     ].join("\n");
   } else if (
-    lower.includes("fetch failed") ||
-    lower.includes("econnrefused") ||
-    lower.includes("enotfound") ||
-    lower.includes("getaddrinfo") ||
-    lower.includes("network")
+    status === undefined &&
+    (lower.includes("fetch failed") ||
+      lower.includes("econnrefused") ||
+      lower.includes("enotfound") ||
+      lower.includes("getaddrinfo") ||
+      lower.includes("network"))
   ) {
     body = [
       `Could not reach ${base}.`,
@@ -3915,6 +3920,14 @@ export function explainError(error: unknown, config: ResolvedConfig): string {
     ].join("\n");
   } else {
     body = `${msg}\n  (base URL: ${base}${config.apiKey ? ", with API key" : ", no API key"})`;
+  }
+  if (classified?.requestId) body += `\n  Request ID: ${classified.requestId}`;
+  if (classified?.writeOutcome === "unknown") {
+    body +=
+      "\n  Write outcome unknown. Check the node and Change Request history before retrying; no matching history entry does not prove the write failed.";
+  } else if (classified?.writeOutcome === "rejected") {
+    body +=
+      "\n  The server rejected this write. Correct the input or resolve the reported condition before retrying.";
   }
   return `${body}\n  → Docs: ${DOCS_TROUBLESHOOTING}`;
 }

@@ -35,6 +35,82 @@ The default host is the always-on Cloud, which needs credentials. For a local
 server, pass `--base-url http://localhost:15419` (or set `BUSABASE_BASE_URL`); the
 open-source server needs no auth.
 
+## Write failures and dry-run
+
+With `--output json`, a failed command writes an error object to **stdout** and
+human-readable guidance to **stderr**, then exits nonzero. Read stdout in the
+failure branch too. For example, in a Node script:
+
+```js
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
+async function invokeBusabase(args) {
+  try {
+    const { stdout, stderr } = await execFileAsync("busabase-cli", [
+      ...args, "--output", "json",
+    ]);
+    return { exitCode: 0, result: JSON.parse(stdout), stderr };
+  } catch (error) {
+    let result;
+    try {
+      result = JSON.parse(error.stdout);
+    } catch {
+      throw error; // No CLI receipt: keep the original process failure.
+    }
+    if (result?.ok !== false) throw error;
+    return { exitCode: error.code, result, stderr: error.stderr };
+  }
+}
+```
+
+The error's `code` is the stable CLI category; `serverCode` identifies a more
+specific server refusal, such as `SECRET_DETECTED`. Upload findings contain
+only file paths and rule names. `requestId` is reported when an `x-request-id`
+response header can be associated with the failure. It is omitted when concurrent
+requests make that association uncertain.
+
+`retryable` describes whether the failure might be temporary. **It does not
+mean a POST is safe to repeat.** Check `safeToRetry` and, for writes,
+`writeOutcome`:
+
+- `rejected`: the request was explicitly refused. A 422 scan or input failure
+  requires correcting the input; repeating it unchanged will not help.
+- `unknown`: a connection failure or server error left the result uncertain.
+  Reconcile the node and its change requests before another write. An empty or
+  incomplete history page is not proof that the first write did not land.
+- `not_sent`: the CLI failed before sending this write.
+
+The CLI does not automatically repeat writes after a connection failure or a
+5xx response. Recovery must preserve a pending `in_review` proposal; it must
+not approve it to make the caller's job appear complete.
+
+`--dry-run` suppresses the first attempted write and prints its request. JSON
+output includes `serverValidated:false`: the server did not check permissions,
+upload safety, or concurrent changes. Earlier reads may have run, and the
+printed request is not validation of every step of a multi-step command.
+
+For file comparisons, `nodes files --kind skill --node-id <id> --output json`
+includes stored `contentHash` values when the server supports them. Use
+`sha256:<64 lowercase hex characters>` as the `baseContentHash` of an update or
+delete. A missing or null hash means unknown, so read that file if a baseline
+is needed. Listing files never downloads their bodies to calculate hashes.
+
+The typed metadata flag accepts a flat field object. Raw PATCH sends the HTTP
+body directly, which requires a `metadata` wrapper:
+
+```bash
+busabase-cli api --method patch --path /nodes/<id>/metadata \
+  --body-json '{"metadata":{"sourceSnapshotSha256":"<snapshot>","automaticSync":false}}'
+busabase-cli nodes update-metadata --node-id <id> \
+  --metadata-json '{"sourceSnapshotSha256":"<snapshot>","automaticSync":false}'
+```
+
+For the typed command, do not wrap those fields in another `{"metadata": ...}`
+object.
+
 ## Several accounts, several spaces
 
 Two different things, handled separately:
