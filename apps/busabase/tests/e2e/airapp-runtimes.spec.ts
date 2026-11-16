@@ -213,10 +213,21 @@ test.describe("AirApp run lifecycle", () => {
     await page.goto(`/dashboard/local/airapp/${app.slug}`);
     await expect(preview(page)).toBeVisible({ timeout: RUN_READY_TIMEOUT });
 
-    // Stop is the explicit end. Afterwards the Run control is offered again,
-    // which is how the panel says "nothing is running here".
-    await page.getByRole("button", { name: "Stop" }).click();
-    await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0, { timeout: 30_000 });
+    // Stop is the explicit end. It lives in the toolbar's Sites menu (next to
+    // the other preview tools), not as a standalone toolbar button.
+    const sitesMenu = page.getByRole("button", { name: "Sites" });
+    await sitesMenu.click();
+    await page.getByRole("menuitem", { name: "Stop" }).click();
     await expect(preview(page)).toHaveCount(0, { timeout: 30_000 });
+
+    // Once stopped, the menu no longer offers Stop — that is how the panel
+    // says "nothing is running here".
+    await sitesMenu.click();
+    await expect(page.getByRole("menu")).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Stop" })).toHaveCount(0, {
+      timeout: 30_000,
+    });
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toHaveCount(0);
   });
 });
