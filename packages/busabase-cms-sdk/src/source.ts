@@ -9,6 +9,7 @@ export type BusabaseCmsFieldType =
   | "drive"
   | "relation"
   | "member"
+  | "appUser"
   | "number"
   | "date"
   | "checkbox"
