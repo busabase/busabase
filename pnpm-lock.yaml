@@ -873,6 +873,9 @@ importers:
       lucide-react:
         specifier: ^1.34.0
         version: 1.34.0(react@19.2.7)
+      mermaid:
+        specifier: ^11.12.2
+        version: 11.12.2
       micromark:
         specifier: ^4.0.2
         version: 4.0.2
