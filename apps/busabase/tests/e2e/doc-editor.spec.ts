@@ -80,6 +80,57 @@ const createDoc = async (request: APIRequestContext, namePrefix: string, body = 
 const getDocBody = async (request: APIRequestContext, slug: string) =>
   (await json<DocNodeDetailVO>(await request.get(`/api/v1/nodes/${slug}?type=doc`))).body;
 
+test("Mermaid diagrams render, recover from invalid source, and save as Markdown", async ({
+  page,
+  request,
+}) => {
+  const source = 'flowchart LR\n  A["同事的电脑"] --> B["公司海外出口"]';
+  const ordinaryCode = 'const message = "Keep ordinary code";';
+  const { slug } = await createDoc(
+    request,
+    "E2E doc Mermaid",
+    `# Network guide\n\n\`\`\`mermaid\n${source}\n\`\`\`\n\n\`\`\`typescript\n${ordinaryCode}\n\`\`\``,
+  );
+  await page.goto(`/dashboard/local/doc/${slug}`);
+  const preview = page.locator(".doc-mermaid-preview");
+  const code = page.locator(".cm-content").first();
+  await expect(preview.locator("svg")).toBeVisible();
+  await expect(preview).toContainText("公司海外出口");
+  await expect(code).toBeHidden();
+  await expect(page.locator(".cm-content").nth(1)).toHaveText(ordinaryCode);
+  await expect(page.locator(".cm-content").nth(1)).toBeVisible();
+
+  await preview.hover();
+  await page.getByRole("button", { name: "Show source" }).click();
+  await expect(code).toBeVisible();
+  await expect(code).toContainText("flowchart LR");
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Save Now" })).toBeVisible();
+  await expect(code).toHaveAttribute("contenteditable", "true");
+  const replaceSource = async (value: string) => {
+    await code.click();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.insertText(value);
+  };
+  await replaceSource("flowchart LR\nA[unfinished");
+  await expect(page.locator(".doc-mermaid-error")).toContainText("Check its syntax");
+  await expect(code).toBeVisible();
+  const fixed = source.replace("公司海外出口", "已验证出口");
+  await replaceSource(fixed);
+  await expect(preview.locator("svg")).toBeVisible();
+  await expect(preview).toContainText("已验证出口");
+  await saveAndExitEditMode(page);
+  await expect(preview).toContainText("已验证出口");
+  const body = await getDocBody(request, slug);
+  expect(body).toContain(`\`\`\`mermaid\n${fixed}\n\`\`\``);
+  expect(body).toContain(ordinaryCode);
+  expect(body).not.toContain("<svg");
+  await page.reload();
+  await expect(preview.locator("svg")).toBeVisible();
+  await expect(preview).toContainText("已验证出口");
+  await expect(page.locator(".doc-mermaid-staging")).toHaveCount(0);
+});
+
 test("headings H1-H6 and inline marks (bold/italic/strikethrough)", async ({ page, request }) => {
   const { slug } = await createDoc(request, "E2E doc headings");
   await page.goto(`/dashboard/local/doc/${slug}`);
