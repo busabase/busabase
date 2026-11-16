@@ -23,6 +23,8 @@ import {
   PACKAGE_COMPUTED_FIELD_TYPES,
   PACKAGE_FILE_FIELD_TYPES,
   PACKAGE_FORMAT,
+  PACKAGE_SPACE_BOUND_FIELD_TYPES,
+  PACKAGE_VALUELESS_FIELD_TYPES,
   type PackageBaseField,
   type PackageFieldOptions,
   type PackageManifest,
@@ -696,6 +698,7 @@ const collectRecords = async (
   );
   const records: PackageRecordLine[] = [];
   let droppedAttachments = 0;
+  const droppedSpaceBound = new Map<string, number>();
   let cursor: string | undefined;
 
   do {
@@ -712,6 +715,17 @@ const collectRecords = async (
           if (value !== null && value !== undefined) droppedAttachments++;
           continue;
         }
+        // App user ids and members name people in THIS space only — see
+        // PACKAGE_SPACE_BOUND_FIELD_TYPES. In another space they dangle.
+        if (PACKAGE_SPACE_BOUND_FIELD_TYPES.includes(type)) {
+          const empty =
+            value === null ||
+            value === undefined ||
+            value === "" ||
+            (Array.isArray(value) && value.length === 0);
+          if (!empty) droppedSpaceBound.set(type, (droppedSpaceBound.get(type) ?? 0) + 1);
+          continue;
+        }
         if (value === null || value === undefined) continue;
         values[slug] = value;
       }
@@ -725,6 +739,18 @@ const collectRecords = async (
   if (droppedAttachments > 0) {
     options.warn(
       `Dropped ${droppedAttachments} attachment value(s) from this Base — attachment values are not carried by ${PACKAGE_FORMAT} (the field definitions are kept).`,
+    );
+  }
+  const droppedAppUsers = droppedSpaceBound.get("appUser") ?? 0;
+  if (droppedAppUsers > 0) {
+    options.warn(
+      `Dropped ${droppedAppUsers} app user value(s) from this Base — an app user id belongs to this space's app users and would point at nobody in another space (the field definitions are kept).`,
+    );
+  }
+  const droppedMembers = droppedSpaceBound.get("member") ?? 0;
+  if (droppedMembers > 0) {
+    options.warn(
+      `Dropped ${droppedMembers} member value(s) from this Base — members are people in this space; the space that installs the template has its own members (the field definitions are kept).`,
     );
   }
   return records.sort((a, b) => a.key.localeCompare(b.key, "en"));
@@ -884,11 +910,14 @@ export const assertSelfContained = (tree: PackageTree, options: CollectOptions):
     // `Invalid field value: 文件 is required`. Unlike the relation case below,
     // this needs no per-record check: there is no value that could survive.
     for (const field of node.base.fields) {
-      if (!PACKAGE_FILE_FIELD_TYPES.includes(field.type) || !field.required) continue;
+      if (!PACKAGE_VALUELESS_FIELD_TYPES.includes(field.type) || !field.required) continue;
       field.required = false;
+      const what = PACKAGE_FILE_FIELD_TYPES.includes(field.type)
+        ? "attachment values"
+        : "app user values (they belong to the source space)";
       options.warn(
         `Base "${node.slug}": ${field.type} field "${field.slug}" is required in the source, but ` +
-          `${PACKAGE_FORMAT} never carries attachment values — the field would be empty in every ` +
+          `${PACKAGE_FORMAT} never carries ${what} — the field would be empty in every ` +
           "installed record and the install would fail. It is marked NOT required in this package.",
       );
     }

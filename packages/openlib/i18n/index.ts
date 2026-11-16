@@ -23,6 +23,7 @@ export {
 } from "./locale";
 export * from "./middleware";
 export * from "./page-metadata";
+export * from "./public-locale-bootstrap";
 export type {
   Locale,
   Locale as LocaleFromTypes,

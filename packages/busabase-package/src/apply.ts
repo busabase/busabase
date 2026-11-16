@@ -42,6 +42,8 @@ import {
   PACKAGE_COMPUTED_FIELD_TYPES,
   PACKAGE_DEFERRED_FIELD_TYPES,
   PACKAGE_FILE_FIELD_TYPES,
+  PACKAGE_SPACE_BOUND_FIELD_TYPES,
+  PACKAGE_VALUELESS_FIELD_TYPES,
   type PackageBaseField,
   type PackageFieldOptions,
 } from "busabase-contract/domains/package/types";
@@ -1271,6 +1273,9 @@ const toCreatableFields = (
     if (PACKAGE_COMPUTED_FIELD_TYPES.includes(field.type)) continue;
     // §6.4: file values (attachment, drive) are not exported in v1.
     if (PACKAGE_FILE_FIELD_TYPES.includes(field.type)) continue;
+    // App user ids and members belong to the space they came from; a
+    // hand-authored package that carries one would install a dangling id.
+    if (PACKAGE_SPACE_BOUND_FIELD_TYPES.includes(field.type)) continue;
     result[slug] = value;
   }
   return result;
@@ -1313,7 +1318,7 @@ const assertRecordRequestSizes = (tree: PackageTree, options: ApplyOptions): voi
         if (
           !field ||
           PACKAGE_COMPUTED_FIELD_TYPES.includes(field.type) ||
-          PACKAGE_FILE_FIELD_TYPES.includes(field.type) ||
+          PACKAGE_VALUELESS_FIELD_TYPES.includes(field.type) ||
           (field.type === "relation" && !field.required)
         )
           continue;
