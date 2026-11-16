@@ -5,6 +5,7 @@ import type {
   AirAppSiteActionVO,
   AirAppSiteDomainsVO,
   AirAppSitePublication,
+  AirAppSiteReleasesVO,
   AirAppSiteStateVO,
 } from "busabase-contract/domains/airapp/contract";
 import { and, eq } from "drizzle-orm";
@@ -352,4 +353,44 @@ export const unpublishSite = async (nodeId: string): Promise<AirAppSiteActionVO>
   const engine = await resolveEngineStatus(host);
   const next = await host.setPublic(nodeId, false);
   return { outcome: "ok", state: toState(nodeId, engine, next, await loadSite(nodeId)) };
+};
+
+/** History remains inspectable after a plan lapses; mutations still require entitlement. */
+export const getSiteReleases = async (nodeId: string): Promise<AirAppSiteReleasesVO> => {
+  await assertNodePermission(nodeId, "write");
+  const host = getContextAirAppSiteHost();
+  if (!host?.readReleases) {
+    return { available: false, versions: [], history: [], status: "idle", lastError: null };
+  }
+  const releases = await host.readReleases(nodeId);
+  const usable = (await resolveEngineStatus(host)) === "available";
+  return {
+    ...releases,
+    versions: releases.versions.map((release) => ({
+      ...release,
+      canRollback: release.canRollback && usable,
+    })),
+  };
+};
+
+/** Restores saved production bytes. Current files may be invalid and are never rebuilt. */
+export const rollbackSite = async (
+  nodeId: string,
+  version: string,
+): Promise<AirAppSiteActionVO> => {
+  await assertNodePermission(nodeId, "write");
+  const host = await requireUsableHost();
+  if (!host.rollback) {
+    throw new ORPCError("PRECONDITION_FAILED", {
+      message: "Release rollback is not available on this deployment.",
+    });
+  }
+  const next = await host.rollback(nodeId, version, await readAppName(nodeId));
+  let loaded: LoadedSite = { bundle: null, version: null, blockers: [] };
+  try {
+    loaded = await loadSite(nodeId);
+  } catch (error) {
+    console.error("[busabase] Could not read the draft after successful Site rollback", error);
+  }
+  return { outcome: "ok", state: toState(nodeId, "available", next, loaded) };
 };

@@ -479,3 +479,37 @@ describe("attachment ⇄ drive", () => {
     expect(convertFieldValue(null, "drive", "attachment")).toBeNull();
   });
 });
+
+describe("text ⇄ appUser", () => {
+  it("is the only conversion an App user column allows, in both directions", () => {
+    expect(canConvertFieldType("text", "appUser")).toBe(true);
+    expect(canConvertFieldType("appUser", "text")).toBe(true);
+    for (const other of [
+      "longtext",
+      "email",
+      "number",
+      "select",
+      "member",
+      "relation",
+      "attachment",
+      "created_by",
+    ] as FieldType[]) {
+      expect(canConvertFieldType(other, "appUser")).toBe(false);
+      expect(canConvertFieldType("appUser", other)).toBe(false);
+    }
+  });
+
+  it("keeps every id as-is, and an empty text cell stays empty", () => {
+    expect(convertFieldValue("apu_7f3c", "text", "appUser")).toBe("apu_7f3c");
+    expect(convertFieldValue("apu_7f3c", "appUser", "text")).toBe("apu_7f3c");
+    // Not trimmed, not validated: the column keeps exactly what the app wrote.
+    expect(convertFieldValue(" apu_x ", "text", "appUser")).toBe(" apu_x ");
+    expect(convertFieldValue("", "text", "appUser")).toBeNull();
+    expect(convertFieldValue(null, "text", "appUser")).toBeNull();
+  });
+
+  it("a pasted id lands as-is (paste goes through fromText)", () => {
+    expect(fromText("apu_1", "appUser")).toBe("apu_1");
+    expect(toText("apu_1", "appUser")).toBe("apu_1");
+  });
+});

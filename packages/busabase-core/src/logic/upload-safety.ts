@@ -243,7 +243,7 @@ export const scanForSecrets = (entries: readonly UploadSafetyEntry[]): void => {
   if (findings.length > 0) {
     throw new ORPCError("SECRET_DETECTED", {
       status: 422,
-      message: `Upload rejected: ${findings.length} likely secret(s) detected in file content. Remove them and retry — matched values are never echoed back.`,
+      message: `Upload rejected: ${findings.length} file/rule match(es) for likely secrets in file content. Remove the flagged content and retry — matched values are never echoed back.`,
       data: { findings },
     });
   }

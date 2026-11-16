@@ -59,6 +59,7 @@ const STAND_IN_TYPES: ReadonlyMap<string, { numbers: boolean; booleans: boolean 
   ["email", { numbers: true, booleans: true }],
   ["phone", { numbers: true, booleans: true }],
   ["code", { numbers: true, booleans: true }],
+  ["appUser", { numbers: true, booleans: true }],
   ["number", { numbers: true, booleans: false }],
   ["auto_number", { numbers: true, booleans: true }],
   ["checkbox", { numbers: true, booleans: true }],

@@ -566,6 +566,7 @@ const toDemoFileTreeFile = (
   mimeType: getDemoMimeType(file.path),
   assetId: demoFileAssetId(nodeId, file.path),
   displayName: null,
+  contentHash: demoContentHash(file.content),
 });
 
 const getDemoEntryFile = (type: "skill" | "drive" | "airapp", paths: string[]) => {

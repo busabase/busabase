@@ -5,9 +5,11 @@ import {
   bindSiteDomain,
   deploySitePreview,
   getSiteDomains,
+  getSiteReleases,
   getSiteState,
   goLiveWithSite,
   republishSite,
+  rollbackSite,
   setSitePrimaryDomain,
   unbindSiteDomain,
   unpublishSite,
@@ -24,6 +26,10 @@ export const airappRouter = {
   runLocal: os.airapps.runLocal.handler(({ input, signal }) => runOrAttachSession(input, signal)),
   stopLocal: os.airapps.stopLocal.handler(({ input }) => stopRunSession(input.nodeId)),
   siteState: os.airapps.siteState.handler(({ input }) => getSiteState(input.nodeId)),
+  siteReleases: os.airapps.siteReleases.handler(({ input }) => getSiteReleases(input.nodeId)),
+  siteRollback: os.airapps.siteRollback.handler(({ input }) =>
+    rollbackSite(input.nodeId, input.version),
+  ),
   siteDomains: os.airapps.siteDomains.handler(({ input }) => getSiteDomains(input.nodeId)),
   siteBindDomain: os.airapps.siteBindDomain.handler(({ input }) =>
     bindSiteDomain(input.nodeId, input.hostname),

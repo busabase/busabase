@@ -3,6 +3,7 @@ import type { CoreI18nMessages } from "./messages";
 export const dashboardEs: CoreI18nMessages = {
   lookup: lookupEs,
   reverseRelation: reverseRelationEs,
+  appUserField: appUserFieldEs,
   spaceInstructions: {
     navLabel: "Instrucciones",
     title: "Instrucciones del espacio",
@@ -432,6 +433,10 @@ export const dashboardEs: CoreI18nMessages = {
     codeCopy: "Copiar",
     codePreviewLabel: "Vista previa",
     codePreviewLoading: "Cargando…",
+    codeShowSource: "Ver código",
+    codeHideSource: "Ocultar código",
+    codePreviewError:
+      "No se pudo mostrar el diagrama Mermaid. Revisa la sintaxis e inténtalo de nuevo.",
     imageUploadButton: "Subir",
     imageUploadPlaceholder: "o pega un enlace",
     imageConfirmButton: "Confirmar",
@@ -712,7 +717,7 @@ export const dashboardEs: CoreI18nMessages = {
     statusReady: "En ejecución",
     statusError: "Error",
     previewTitle: "Vista previa de la AirApp",
-    previewEmpty: "Esta AirApp se inicia automáticamente: la vista previa en vivo aparecerá aquí.",
+    previewEmpty: "Ejecuta esta AirApp para ver aquí la vista previa en vivo.",
     previewPending: "La vista previa en vivo aparecerá aquí en unos instantes.",
     previewFailed: "No se pudo iniciar la AirApp. Revisa los registros de abajo.",
     logsEmpty: "La salida de instalación e inicio aparecerá aquí mientras la AirApp se ejecuta.",
@@ -769,7 +774,55 @@ export const dashboardEs: CoreI18nMessages = {
     swUnsupportedCopyLink: "Copiar enlace",
     swUnsupportedLinkCopied: "Enlace copiado",
     swUnsupportedCopyFailed: "No se pudo copiar el enlace. Selecciónalo y cópialo manualmente:",
+    previewTools: {
+      viewport: "Tamaño de vista previa",
+      desktop: "Escritorio",
+      mobile: "Móvil",
+      newWindow: "Abrir vista previa en otra ventana",
+      phone: "Vista previa en tu teléfono",
+      signIn:
+        "Escanea esta vista previa privada. Inicia sesión con la misma cuenta en el teléfono. No es el Site publicado.",
+      browserOnly:
+        "Esta vista previa se ejecuta en este navegador. Prepara una vista previa de Site con «Publicar Site» para abrirla en el teléfono.",
+      loopback:
+        "Esta dirección local no es accesible desde el teléfono. Usa una dirección de despliegue accesible.",
+      loadingQr: "Generando código QR…",
+      link: "Enlace de vista previa",
+      copyLink: "Copiar enlace",
+      openLink: "Abrir vista previa",
+    },
     site: {
+      publishUpdate: "Publicar actualización",
+      releases: {
+        busy: "Se está aplicando una publicación. La lista se actualizará automáticamente.",
+        manage: "Gestionar publicaciones",
+        versions: "Versiones",
+        history: "Historial de publicaciones",
+        current: "Actual",
+        retention: "Se conservan la versión actual y hasta 5 versiones anteriores.",
+        rollback: "Restaurar",
+        rollbackVersion: "Restaurar {version}",
+        confirmTitle: "¿Restaurar {version}?",
+        confirmBody:
+          "Los visitantes verán esta versión en la misma dirección. El borrador, la vista previa y los datos del espacio no cambiarán.",
+        confirm: "Confirmar restauración",
+        rollbackDone: "La versión seleccionada ya está publicada.",
+        loading: "Cargando publicaciones…",
+        loadFailed: "No se pudieron cargar las publicaciones. Inténtalo de nuevo.",
+        unavailable: "Este despliegue no ofrece historial de versiones.",
+        legacy: "Publicada antes de que estuvieran disponibles las copias de versiones.",
+        empty: "Aún no hay versiones publicadas. Publica este Site para iniciar su historial.",
+        planLocked:
+          "Mejora el plan del espacio para publicar o restaurar. Puedes seguir desconectando el Site.",
+        historyEmpty: "Las publicaciones y restauraciones aparecerán aquí.",
+        actionPublish: "Publicada",
+        actionRollback: "Restaurada a",
+        copyAddress: "Copiar dirección",
+        copied: "Copiada",
+        copyFailed: "No se pudo copiar. Selecciona la dirección anterior y cópiala manualmente.",
+        publicQrHint:
+          "Escanea para abrir el Site publicado. Los cambios del borrador sin publicar no se incluyen.",
+      },
       publish: {
         previewStale:
           "Los archivos cambiaron después de esta vista previa. Crea o actualiza la vista previa web antes de publicar.",
@@ -805,7 +858,7 @@ export const dashboardEs: CoreI18nMessages = {
       statusNotLive: "Sin publicar",
       statusLive: "Publicado",
       statusLiveWithChanges: "Cambios sin publicar",
-      goLive: "Publicar",
+      goLive: "Publicar Site",
       goLiveDone: "El sitio está publicado.",
       previewStale:
         "Los archivos cambiaron después de esta vista previa. Ejecútalo de nuevo y luego publícalo.",
@@ -1724,6 +1777,7 @@ export const dashboardEs: CoreI18nMessages = {
     tabGeneral: "General",
     tabInfo: "Información",
     tabPermissions: "Permisos",
+    tabUserSignIn: "Inicio de sesión de usuarios",
     changeIcon: "Cambiar icono",
     iconUploadLabel: "Subir imagen",
     iconUploadFormatHint: "PNG, JPG, GIF o WebP, hasta 2 MB",
@@ -2652,6 +2706,7 @@ export const dashboardEs: CoreI18nMessages = {
     multiselect: "Selección múltiple",
     relation: "Relación",
     member: "Miembro",
+    appUser: "Usuario de app",
     lookup: "Búsqueda",
     attachment: "Archivo",
     drive: "Drive",
@@ -3162,5 +3217,6 @@ export const dashboardEs: CoreI18nMessages = {
   },
 };
 
+import { appUserFieldEs } from "./app-user-field";
 import { lookupEs } from "./lookup";
 import { reverseRelationEs } from "./reverse-relation";

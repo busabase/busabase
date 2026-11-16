@@ -3,6 +3,7 @@ import type { CoreI18nMessages } from "./messages";
 export const dashboardKo: CoreI18nMessages = {
   lookup: lookupKo,
   reverseRelation: reverseRelationKo,
+  appUserField: appUserFieldKo,
   spaceInstructions: {
     navLabel: "지침",
     title: "스페이스 공통 지침",
@@ -423,6 +424,9 @@ export const dashboardKo: CoreI18nMessages = {
     codeCopy: "복사",
     codePreviewLabel: "미리보기",
     codePreviewLoading: "불러오는 중…",
+    codeShowSource: "소스 보기",
+    codeHideSource: "소스 숨기기",
+    codePreviewError: "Mermaid 다이어그램을 표시할 수 없습니다. 구문을 확인한 후 다시 시도하세요.",
     imageUploadButton: "업로드",
     imageUploadPlaceholder: "또는 링크 붙여넣기",
     imageConfirmButton: "확인",
@@ -695,7 +699,7 @@ export const dashboardKo: CoreI18nMessages = {
     statusReady: "실행 중",
     statusError: "실패",
     previewTitle: "AirApp 미리보기",
-    previewEmpty: "이 AirApp은 자동으로 시작되며, 실시간 미리보기가 여기에 표시됩니다.",
+    previewEmpty: "이 AirApp을 실행하면 여기에 실시간 미리보기가 표시됩니다.",
     previewPending: "실시간 미리보기가 곧 여기에 표시됩니다.",
     previewFailed: "AirApp을 시작하지 못했습니다. 아래 로그를 확인하세요.",
     logsEmpty: "AirApp이 실행되는 동안 설치 및 시작 출력이 여기에 표시됩니다.",
@@ -751,7 +755,54 @@ export const dashboardKo: CoreI18nMessages = {
     swUnsupportedCopyLink: "링크 복사",
     swUnsupportedLinkCopied: "링크가 복사되었습니다",
     swUnsupportedCopyFailed: "링크를 복사하지 못했습니다. 직접 선택해 복사하세요:",
+    previewTools: {
+      viewport: "미리보기 크기",
+      desktop: "데스크톱",
+      mobile: "모바일",
+      newWindow: "새 창에서 미리보기",
+      phone: "휴대폰에서 미리보기",
+      signIn:
+        "비공개 미리보기를 스캔해 여세요. 휴대폰에서도 같은 계정으로 로그인해야 합니다. 게시된 Site와 다릅니다.",
+      browserOnly:
+        "이 미리보기는 현재 브라우저에서 실행됩니다. 휴대폰에서 열려면 «Site 게시»에서 Site 미리보기를 만드세요.",
+      loopback: "휴대폰에서 이 로컬 주소에 접근할 수 없습니다. 접근 가능한 배포 주소를 사용하세요.",
+      loadingQr: "QR 코드 생성 중…",
+      link: "미리보기 링크",
+      copyLink: "링크 복사",
+      openLink: "미리보기 열기",
+    },
     site: {
+      publishUpdate: "업데이트 게시",
+      releases: {
+        busy: "게시 작업을 적용 중입니다. 목록이 자동으로 새로고침됩니다.",
+        manage: "게시 관리",
+        versions: "버전",
+        history: "게시 기록",
+        current: "현재 버전",
+        retention: "현재 버전과 최대 5개의 이전 버전을 보관합니다.",
+        rollback: "롤백",
+        rollbackVersion: "{version}(으)로 롤백",
+        confirmTitle: "{version}(으)로 롤백할까요?",
+        confirmBody:
+          "방문자는 같은 주소에서 이 버전을 보게 됩니다. 초안, 미리보기 및 공간의 업무 데이터는 변경되지 않습니다.",
+        confirm: "롤백 확인",
+        rollbackDone: "선택한 버전이 게시되었습니다.",
+        loading: "게시 기록 로딩 중…",
+        loadFailed: "게시 기록을 불러올 수 없습니다. 다시 시도하세요.",
+        unavailable: "이 배포에서는 버전 기록을 사용할 수 없습니다.",
+        legacy: "버전 스냅샷 기능이 제공되기 전에 게시되었습니다.",
+        empty: "게시된 버전이 없습니다. Site를 게시하면 기록이 시작됩니다.",
+        planLocked:
+          "게시하거나 롤백하려면 공간 요금제를 업그레이드하세요. Site를 비공개로 전환할 수는 있습니다.",
+        historyEmpty: "게시 및 롤백 기록이 여기에 표시됩니다.",
+        actionPublish: "게시됨",
+        actionRollback: "롤백 대상",
+        copyAddress: "주소 복사",
+        copied: "복사됨",
+        copyFailed: "복사하지 못했습니다. 위 주소를 선택하여 직접 복사하세요.",
+        publicQrHint:
+          "스캔하여 게시된 Site를 여세요. 게시하지 않은 초안 변경 사항은 포함되지 않습니다.",
+      },
       publish: {
         previewStale:
           "이 미리보기 이후 파일이 변경되었습니다. 사이트 미리보기를 만들거나 새로고침한 뒤 게시하세요.",
@@ -785,7 +836,7 @@ export const dashboardKo: CoreI18nMessages = {
       statusNotLive: "게시 안 됨",
       statusLive: "게시됨",
       statusLiveWithChanges: "게시되지 않은 변경 있음",
-      goLive: "게시",
+      goLive: "Site 게시",
       goLiveDone: "사이트를 게시했습니다.",
       previewStale: "이 미리보기 이후 파일이 변경되었습니다. 다시 실행한 뒤 게시하세요.",
       noPreview: "먼저 실행해서 미리보기를 만드세요.",
@@ -1689,6 +1740,7 @@ export const dashboardKo: CoreI18nMessages = {
     tabGeneral: "일반",
     tabInfo: "정보",
     tabPermissions: "권한",
+    tabUserSignIn: "사용자 로그인",
     changeIcon: "아이콘 변경",
     iconUploadLabel: "이미지 업로드",
     iconUploadFormatHint: "PNG, JPG, GIF 또는 WebP, 최대 2MB",
@@ -2589,6 +2641,7 @@ export const dashboardKo: CoreI18nMessages = {
     multiselect: "다중 선택",
     relation: "관계",
     member: "멤버",
+    appUser: "앱 사용자",
     lookup: "조회",
     attachment: "파일",
     drive: "드라이브",
@@ -3089,5 +3142,6 @@ export const dashboardKo: CoreI18nMessages = {
   },
 };
 
+import { appUserFieldKo } from "./app-user-field";
 import { lookupKo } from "./lookup";
 import { reverseRelationKo } from "./reverse-relation";

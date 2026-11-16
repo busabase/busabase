@@ -47,6 +47,8 @@ export interface FileTreeFileVO {
   mimeType: string | null;
   assetId: string;
   displayName: string | null;
+  /** Stored hash; null or absent means unknown, not unchanged. */
+  contentHash?: string | null;
 }
 
 export interface FileTreeNodeVO {

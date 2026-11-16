@@ -893,12 +893,17 @@ function BusabaseDashboardContent({
               baseChildParams?.childId !== "new")))),
   );
   const recordPaginationUrl = useMemo(() => readRecordPagination(search), [search]);
-  // Every view reads one page here; no view needs the whole Base. Table and
-  // Gallery render this page. Kanban columns, the Calendar month and the Gantt
-  // rows fetch their own scoped slices, and use this page only for its total.
+  // Table and Gallery render the parent page. Calendar and Gantt read their
+  // own date windows; Kanban owns its bounded column reads and their totals.
+  // No view drains the entire Base.
   // The Table/Grid is a dense preview surface. Gallery, Kanban and Calendar
   // keep full rows because they render covers and cards rather than cells.
   const usesCompactRecordList = selectedBaseView === null || selectedBaseView.type === "table";
+  const supportsRecordFind =
+    usesCompactRecordList ||
+    selectedBaseView?.type === "gallery" ||
+    selectedBaseView?.type === "kanban";
+  const recordsLoadedByView = selectedBaseView?.type === "kanban";
   const setRecordPaginationUrl = useCallback(
     (page: number, pageSize = recordPaginationUrl.pageSize, replace = false) => {
       const nextSearch = writeRecordPagination(search, { page, pageSize });
@@ -933,16 +938,7 @@ function BusabaseDashboardContent({
     scope: collectionScope,
     onCommit: commitRecordFind,
   });
-  const recordFindInput = useMemo(
-    () =>
-      usesCompactRecordList && recordFindValue.query
-        ? {
-            query: recordFindValue.query,
-            ...(recordFindValue.fieldId ? { fieldId: recordFindValue.fieldId } : {}),
-          }
-        : undefined,
-    [usesCompactRecordList, recordFindValue],
-  );
+  const recordFindInput = supportsRecordFind ? recordFind.input : undefined;
   const collectionSearch = useMemo(() => writeRecordPreviewId(search, null), [search]);
   const baseTableViewState = useBaseCollectionState({
     identity: JSON.stringify([cacheSpaceKey, currentUserId ?? "anonymous"]),
@@ -964,7 +960,11 @@ function BusabaseDashboardContent({
         pageSize: recordPaginationUrl.pageSize,
       },
     }),
-    enabled: Boolean(activeBase?.id) && !readOnlyRecordPreview && !isResolvingBaseRoute,
+    enabled:
+      Boolean(activeBase?.id) &&
+      !recordsLoadedByView &&
+      !readOnlyRecordPreview &&
+      !isResolvingBaseRoute,
     retry: recordFindInput ? false : retryRecordRead,
     placeholderData: (previousData, previousQuery) => {
       const previousInput = (
@@ -993,6 +993,7 @@ function BusabaseDashboardContent({
     [recordsPageQuery.data?.records],
   );
   const recordsPagination = useMemo(() => {
+    if (recordsLoadedByView) return undefined;
     const pageData = recordsPageQuery.data;
     const changePage = (page: number) => {
       setRecordPaginationUrl(page);
@@ -1045,6 +1046,7 @@ function BusabaseDashboardContent({
     recordsPageQuery.refetch,
     collectionSearch,
     setRecordPaginationUrl,
+    recordsLoadedByView,
   ]);
   const isBaseViewRoute = Boolean(isBaseChildRoute && selectedBaseView);
   // A record deletion can make the current page disappear. Converge to the new
@@ -3535,8 +3537,11 @@ function BusabaseDashboardContent({
           orpc={orpc}
           pagination={recordsPagination}
           recordFind={
-            usesCompactRecordList && !readOnlyRecordPreview
-              ? { ...recordFind, isFetching: recordsPageQuery.isFetching }
+            supportsRecordFind && !readOnlyRecordPreview
+              ? {
+                  ...recordFind,
+                  isFetching: !recordsLoadedByView && recordsPageQuery.isFetching,
+                }
               : undefined
           }
           base={activeBase}
@@ -3693,7 +3698,8 @@ function BusabaseDashboardContent({
     collectionScope,
     recordFind,
     recordsPageQuery.isFetching,
-    usesCompactRecordList,
+    supportsRecordFind,
+    recordsLoadedByView,
     readOnlyRecordPreview,
     submitDeleteRecords,
     submitUpdateRecords,

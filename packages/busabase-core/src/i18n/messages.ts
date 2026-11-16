@@ -9,6 +9,7 @@
 export const coreMessagesEn = {
   lookup: lookupEn,
   reverseRelation: reverseRelationEn,
+  appUserField: appUserFieldEn,
   spaceInstructions: {
     navLabel: "Instructions",
     title: "Space instructions",
@@ -441,6 +442,9 @@ export const coreMessagesEn = {
     codeCopy: "Copy",
     codePreviewLabel: "Preview",
     codePreviewLoading: "Loading…",
+    codeShowSource: "Show source",
+    codeHideSource: "Hide source",
+    codePreviewError: "Could not render the Mermaid diagram. Check its syntax and try again.",
     imageUploadButton: "Upload",
     imageUploadPlaceholder: "or paste link",
     imageConfirmButton: "Confirm",
@@ -754,7 +758,7 @@ export const coreMessagesEn = {
     statusReady: "Running",
     statusError: "Failed",
     previewTitle: "AirApp preview",
-    previewEmpty: "This AirApp starts automatically — the live preview appears here.",
+    previewEmpty: "Run this AirApp to see its live preview here.",
     previewPending: "The live preview will appear here shortly.",
     previewFailed: "The AirApp failed to start. Check the logs below.",
     logsEmpty: "Install and start output streams here while the AirApp runs.",
@@ -818,7 +822,55 @@ export const coreMessagesEn = {
     swUnsupportedCopyLink: "Copy link",
     swUnsupportedLinkCopied: "Link copied",
     swUnsupportedCopyFailed: "Couldn't copy the link. Select and copy it manually:",
+    previewTools: {
+      viewport: "Preview size",
+      desktop: "Desktop",
+      mobile: "Mobile",
+      newWindow: "Open preview in new window",
+      phone: "Preview on your phone",
+      signIn:
+        "Scan to open this private preview. Sign in with the same account on your phone. This is a preview, not the published Site.",
+      browserOnly:
+        "This preview runs in this browser. To open it on your phone, prepare a Site preview using Publish Site.",
+      loopback:
+        "This address uses localhost. A phone cannot reach this computer through this address. Use an accessible deployment address.",
+      loadingQr: "Generating QR code…",
+      link: "Preview link",
+      copyLink: "Copy link",
+      openLink: "Open preview",
+    },
     site: {
+      publishUpdate: "Publish update",
+      releases: {
+        busy: "A release is being applied. This list will refresh automatically.",
+        manage: "Release management",
+        versions: "Versions",
+        history: "Release history",
+        current: "Current",
+        retention: "Keep the current version and up to 5 historical versions.",
+        rollback: "Roll back",
+        rollbackVersion: "Roll back to {version}",
+        confirmTitle: "Roll back to {version}?",
+        confirmBody:
+          "Visitors will see this version at the same address. Your draft, preview and workspace data stay as they are.",
+        confirm: "Confirm rollback",
+        rollbackDone: "The selected version is now live.",
+        loading: "Loading releases…",
+        loadFailed: "Could not load releases. Try again.",
+        unavailable: "Release history is not available on this deployment.",
+        legacy: "Published before version snapshots were available.",
+        empty: "No published versions yet. Publish this Site to start its history.",
+        planLocked:
+          "Upgrade this space to publish or roll back. You can still take the Site offline.",
+        historyEmpty: "Publish and rollback records will appear here.",
+        actionPublish: "Published",
+        actionRollback: "Rolled back to",
+        copyAddress: "Copy address",
+        copied: "Copied",
+        copyFailed: "Could not copy. Select the address above and copy it manually.",
+        publicQrHint:
+          "Scan to open the published Site. Unpublished draft changes are not included.",
+      },
       publish: {
         previewStale:
           "The files changed after this preview. Create or refresh the website preview, then go live.",
@@ -854,7 +906,7 @@ export const coreMessagesEn = {
       statusNotLive: "Not live",
       statusLive: "Live",
       statusLiveWithChanges: "Unpublished changes",
-      goLive: "Go live",
+      goLive: "Publish Site",
       goLiveDone: "The site is live.",
       previewStale: "The files changed after this preview. Run it again, then go live.",
       noPreview: "Run it first to make a preview.",
@@ -1826,6 +1878,7 @@ export const coreMessagesEn = {
     tabGeneral: "General",
     tabInfo: "Info",
     tabPermissions: "Permissions",
+    tabUserSignIn: "User sign-in",
     changeIcon: "Change icon",
     iconUploadLabel: "Upload image",
     iconUploadFormatHint: "PNG, JPG, GIF, or WebP, up to 2MB",
@@ -2740,6 +2793,7 @@ export const coreMessagesEn = {
     multiselect: "Multi-select",
     relation: "Relation",
     member: "Member",
+    appUser: "App user",
     lookup: "Lookup",
     attachment: "File",
     drive: "Drive",
@@ -3244,5 +3298,6 @@ export const coreMessagesEn = {
 
 export type CoreI18nMessages = typeof coreMessagesEn;
 
+import { appUserFieldEn } from "./app-user-field";
 import { lookupEn } from "./lookup";
 import { reverseRelationEn } from "./reverse-relation";

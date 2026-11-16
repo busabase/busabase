@@ -4,13 +4,16 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppSiteStateVO } from "busabase-contract/domains/airapp/contract";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider, type CoreLocale } from "../../../i18n";
 import { coreMessagesByLocale } from "../../../i18n/catalog";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { SubmitPermissionProvider } from "../../dashboard/components/split-submit-button";
 import { DashboardVisitorProvider } from "../../dashboard/visitor-context";
+import { useAirAppPreviewState } from "../hooks/use-airapp-preview-state";
 import type { AirAppEnginePlanGate } from "../utils/engine-plan-gate";
+import { AirAppPreviewMenu } from "./AirAppPreviewMenu";
 import { AirAppPublishToSite } from "./AirAppPublishToSite";
 import { AirAppEngineAvailabilityProvider } from "./engine-availability-context";
 import type { AirAppRunnerKind } from "./runners/types";
@@ -42,6 +45,17 @@ const stateOf = (override: Partial<AirAppSiteStateVO> = {}): AirAppSiteStateVO =
 });
 
 const clients: QueryClient[] = [];
+function SitesMenu({ publishMenuItem }: { publishMenuItem: ReactNode }) {
+  const previewState = useAirAppPreviewState(null);
+  return (
+    <AirAppPreviewMenu
+      kind="site"
+      previewState={previewState}
+      topItems={publishMenuItem}
+      url={null}
+    />
+  );
+}
 const renderPublish = ({
   state = stateOf(),
   planGate,
@@ -50,6 +64,8 @@ const renderPublish = ({
   permission = "manage",
   anonymous = false,
   locale = "en",
+  showButton = false,
+  menuOnly = false,
 }: {
   state?: AirAppSiteStateVO;
   planGate?: AirAppEnginePlanGate;
@@ -58,6 +74,8 @@ const renderPublish = ({
   permission?: ApiKeyPermissionLevel;
   anonymous?: boolean;
   locale?: CoreLocale;
+  showButton?: boolean;
+  menuOnly?: boolean;
 } = {}) => {
   let current = state;
   const read = vi.fn(async () => current);
@@ -94,6 +112,18 @@ const renderPublish = ({
       },
       siteDeployPreview: { call: deploy },
       siteGoLive: { call: goLive },
+      siteReleases: {
+        queryOptions: () => ({
+          queryKey: ["site-releases", "node"],
+          queryFn: async () => ({
+            available: true,
+            status: "idle",
+            versions: [],
+            history: [],
+            lastError: null,
+          }),
+        }),
+      },
     },
   } as unknown as BusabaseQueryUtils;
   render(
@@ -106,16 +136,33 @@ const renderPublish = ({
               notConfiguredEngines={notConfigured}
               planGate={planGate}
             >
-              <AirAppPublishToSite nodeId="node" nodeName="Lead Engine" orpc={orpc}>
-                {(publishAction) => (
-                  <NodeActionsMenu
-                    extraActions={publishAction}
-                    nodeId="node"
-                    nodeName="Lead Engine"
-                    nodeType="airapp"
-                    orpc={orpc}
-                  />
-                )}
+              <AirAppPublishToSite
+                nodeId="node"
+                nodeName="Lead Engine"
+                orpc={orpc}
+                showButton={showButton}
+                renderButtons={
+                  menuOnly
+                    ? (_publish, releases, publishMenuItem) => (
+                        <>
+                          {releases}
+                          <SitesMenu publishMenuItem={publishMenuItem} />
+                        </>
+                      )
+                    : undefined
+                }
+              >
+                {(publishAction) =>
+                  menuOnly ? null : (
+                    <NodeActionsMenu
+                      extraActions={publishAction}
+                      nodeId="node"
+                      nodeName="Lead Engine"
+                      nodeType="airapp"
+                      orpc={orpc}
+                    />
+                  )
+                }
               </AirAppPublishToSite>
             </AirAppEngineAvailabilityProvider>
           </DashboardVisitorProvider>
@@ -143,7 +190,7 @@ const openMenu = (locale: CoreLocale = "en") =>
 const openPublish = (locale: CoreLocale = "en") => {
   openMenu(locale);
   fireEvent.click(
-    screen.getByRole("menuitem", { name: coreMessagesByLocale[locale].airapp.site.publish.title }),
+    screen.getByRole("menuitem", { name: coreMessagesByLocale[locale].airapp.site.goLive }),
   );
 };
 
@@ -156,14 +203,111 @@ afterEach(() => {
 });
 
 describe("publishing a running AirApp alongside its browser preview", () => {
+  it("keeps release management visible and places the current update action only in the dedicated Sites menu", async () => {
+    const { read } = renderPublish({
+      showButton: true,
+      menuOnly: true,
+      state: stateOf({ liveVersion: "v1" }),
+    });
+    await screen.findByRole("button", { name: "Release management" });
+    await waitFor(() => expect(read).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Publish update" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Sites" })).toHaveLength(1);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Sites" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Publish update" }));
+    await screen.findByRole("heading", { name: "Publish update" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    await screen.findByRole("button", { name: "Create website preview" });
+  });
+
+  it("refreshes from the address bar without losing the control and waits for the new preview review", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    const { deploy, goLive, setState } = renderPublish();
+    openPublish();
+    fireEvent.click(await screen.findByRole("button", { name: "Create website preview" }));
+    const firstFrame = await screen.findByTitle("Private website preview");
+    fireEvent.load(firstFrame);
+    const publish = screen.getByRole("button", { name: "Publish Site" });
+    await waitFor(() => expect(publish).toHaveProperty("disabled", false));
+    fireEvent.click(screen.getByRole("radio", { name: "Mobile" }));
+    let completeRefresh!: (value: { outcome: string; state: AirAppSiteStateVO }) => void;
+    deploy.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          completeRefresh = resolve;
+        }),
+    );
+    const refresh = screen.getByRole("button", { name: "Refresh website preview" });
+    const address = screen.getByRole("textbox", { name: "Preview link" }) as HTMLInputElement;
+    expect(address.value).toContain("__busabase_site_version=v1");
+    fireEvent.click(refresh);
+    await waitFor(() => expect(refresh).toHaveProperty("disabled", true));
+    expect(screen.getByRole("button", { name: "Refresh website preview" })).toBe(refresh);
+    expect(refresh.getAttribute("aria-busy")).toBe("true");
+    expect(screen.queryByRole("button", { name: "Create website preview" })).toBeNull();
+    expect(screen.queryByTitle("Private website preview")).toBeNull();
+    expect(address.value).toContain("__busabase_site_version=v1");
+    expect(publish).toHaveProperty("disabled", true);
+    const next = stateOf({
+      previewUrl: "/api/airapp-preview/node/",
+      previewVersion: "v2",
+      currentVersion: "v2",
+    });
+    setState(next);
+    completeRefresh({ outcome: "ok", state: next });
+    const nextFrame = await screen.findByTitle("Private website preview");
+    expect(nextFrame).not.toBe(firstFrame);
+    expect(nextFrame.getAttribute("src")).toContain("__busabase_site_version=v2");
+    expect(address.value).toContain("__busabase_site_version=v2");
+    expect(document.querySelector('[data-airapp-preview-viewport="mobile"]')).toBeTruthy();
+    expect(publish).toHaveProperty("disabled", true);
+    fireEvent.load(nextFrame);
+    await waitFor(() => expect(publish).toHaveProperty("disabled", false));
+    expect(goLive).not.toHaveBeenCalled();
+  });
+
+  it("shows first publication directly in the topbar in Simplified Chinese", async () => {
+    const { read } = renderPublish({ showButton: true, locale: "zh-CN" });
+    const action = await screen.findByRole("button", { name: "发布 Site" });
+    await waitFor(() => expect(action).toHaveProperty("disabled", false));
+    expect(screen.getByRole("button", { name: "发布管理" })).toBeTruthy();
+    expect(read).toHaveBeenCalled();
+    fireEvent.click(action);
+    await screen.findByRole("button", { name: "创建网站预览" });
+  });
+
+  it("keeps the update label for a previously published Site that is now offline", async () => {
+    renderPublish({
+      showButton: true,
+      locale: "zh-CN",
+      state: stateOf({ liveVersion: "v1", isPublic: false, publication: "not-live" }),
+    });
+    const action = await screen.findByRole("button", { name: "发布更新" });
+    expect(screen.queryByRole("button", { name: "发布 Site" })).toBeNull();
+    fireEvent.click(action);
+    await screen.findByRole("heading", { name: "发布更新" });
+  });
+
+  it("does not query or expose direct publication controls to a read-only visitor", () => {
+    const { read } = renderPublish({ showButton: true, permission: "read" });
+    expect(screen.queryByRole("button", { name: "Publish Site" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Release management" })).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it("opens publishing from More actions, closes the menu, and checks site state only on selection", async () => {
     const { read, deploy, goLive } = renderPublish();
-    expect(screen.queryByRole("button", { name: "Publish to site" })).toBeNull();
-    expect(screen.queryByRole("menuitem", { name: "Publish to site" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Publish Site" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Publish Site" })).toBeNull();
     expect(read).not.toHaveBeenCalled();
     openMenu();
     expect(read).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Publish to site" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Publish Site" }));
     await screen.findByRole("button", { name: "Create website preview" });
     expect(screen.queryByRole("menu")).toBeNull();
     expect(read).toHaveBeenCalledOnce();
@@ -200,13 +344,14 @@ describe("publishing a running AirApp alongside its browser preview", () => {
   it("creates a member preview, checks its HTTP response, and publishes only after the preview loads", async () => {
     const fetchPreview = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchPreview);
-    const { deploy, goLive } = renderPublish();
+    const { deploy, goLive, queryClient } = renderPublish();
+    queryClient.setQueryData(["site-releases", "node"], { history: [] });
     openPublish();
     fireEvent.click(await screen.findByRole("button", { name: "Create website preview" }));
     await waitFor(() => expect(deploy).toHaveBeenCalledExactlyOnceWith({ nodeId: "node" }));
     const iframe = await screen.findByTitle("Private website preview");
     expect(iframe.getAttribute("src")).toBe("/api/airapp-preview/node/?__busabase_site_version=v1");
-    const publish = screen.getByRole("button", { name: "Go live" });
+    const publish = screen.getByRole("button", { name: "Publish Site" });
     expect(publish).toHaveProperty("disabled", true);
     fireEvent.load(iframe);
     await waitFor(() => expect(publish).toHaveProperty("disabled", false));
@@ -215,9 +360,11 @@ describe("publishing a running AirApp alongside its browser preview", () => {
       expect.objectContaining({ method: "HEAD", credentials: "same-origin", cache: "no-store" }),
     );
     expect(goLive).not.toHaveBeenCalled();
+    expect(queryClient.getQueryState(["site-releases", "node"])?.isInvalidated).toBe(false);
     fireEvent.click(publish);
     await screen.findByRole("link", { name: "https://lead-engine.sites.test" });
     expect(goLive).toHaveBeenCalledExactlyOnceWith({ nodeId: "node" });
+    expect(queryClient.getQueryState(["site-releases", "node"])?.isInvalidated).toBe(true);
     expect(screen.getByText("Live")).toBeTruthy();
     expect(publish).toHaveProperty("disabled", true);
   });
@@ -229,7 +376,7 @@ describe("publishing a running AirApp alongside its browser preview", () => {
     openPublish();
     await screen.findByRole("button", { name: "Create website preview" });
     expect(screen.queryByTitle("Private website preview")).toBeNull();
-    expect(screen.getByRole("button", { name: "Go live" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Publish Site" })).toHaveProperty("disabled", true);
   });
 
   it("does not enable Go live for a 404 preview document", async () => {
@@ -242,7 +389,7 @@ describe("publishing a running AirApp alongside its browser preview", () => {
       "textContent",
       coreMessagesByLocale.en.airapp.site.publish.previewUnavailable,
     );
-    expect(screen.getByRole("button", { name: "Go live" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Publish Site" })).toHaveProperty("disabled", true);
     expect(goLive).not.toHaveBeenCalled();
   });
 
@@ -258,7 +405,7 @@ describe("publishing a running AirApp alongside its browser preview", () => {
     openPublish();
     fireEvent.click(await screen.findByRole("button", { name: "Create website preview" }));
     fireEvent.load(await screen.findByTitle("Private website preview"));
-    const publish = screen.getByRole("button", { name: "Go live" });
+    const publish = screen.getByRole("button", { name: "Publish Site" });
     await waitFor(() => expect(publish).toHaveProperty("disabled", false));
     fireEvent.click(publish);
     await waitFor(() => expect(goLive).toHaveBeenCalledOnce());
@@ -281,7 +428,7 @@ describe("publishing a running AirApp alongside its browser preview", () => {
     expect(prompt).toContain("busabase-app-creator");
     expect(prompt).toContain("preserve its existing browser runtime");
     expect(prompt).toContain("site.access read-only");
-    expect(screen.queryByRole("button", { name: "Go live" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Publish Site" })).toBeNull();
     expect(deploy).not.toHaveBeenCalled();
     expect(goLive).not.toHaveBeenCalled();
   });
@@ -318,9 +465,12 @@ describe("publishing a running AirApp alongside its browser preview", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Create website preview" }));
     fireEvent.load(await screen.findByTitle("Private website preview"));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Go live" })).toHaveProperty("disabled", false),
+      expect(screen.getByRole("button", { name: "Publish Site" })).toHaveProperty(
+        "disabled",
+        false,
+      ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Go live" }));
+    fireEvent.click(screen.getByRole("button", { name: "Publish Site" }));
     expect(await screen.findByRole("alert")).toHaveProperty(
       "textContent",
       coreMessagesByLocale.en.airapp.site.publish.previewStale,
@@ -329,7 +479,7 @@ describe("publishing a running AirApp alongside its browser preview", () => {
       screen.getAllByText(coreMessagesByLocale.en.airapp.site.publish.previewStale),
     ).toHaveLength(1);
     expect(screen.queryByTitle("Private website preview")).toBeNull();
-    expect(screen.getByRole("button", { name: "Go live" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Publish Site" })).toHaveProperty("disabled", true);
     fireEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
     const before = read.mock.calls.length;
     openPublish();
@@ -371,9 +521,9 @@ describe("publishing a running AirApp alongside its browser preview", () => {
     ["browser-only deployment", { engines: ["browser"] as AirAppRunnerKind[] }],
   ])("has no publishing action or state query for a %s", (_reason, overrides) => {
     const { read } = renderPublish(overrides);
-    expect(screen.queryByRole("button", { name: "Publish to site" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Publish Site" })).toBeNull();
     if (!("anonymous" in overrides && overrides.anonymous)) openMenu();
-    expect(screen.queryByRole("menuitem", { name: "Publish to site" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Publish Site" })).toBeNull();
     expect(read).not.toHaveBeenCalled();
   });
 

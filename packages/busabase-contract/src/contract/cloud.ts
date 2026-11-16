@@ -1,5 +1,6 @@
 import { oc } from "@orpc/contract";
 import { z } from "zod";
+import { cloudAppUsersRoutes } from "./app-users";
 import { busabaseContractRoutes } from "./busabase";
 
 /**
@@ -424,6 +425,9 @@ const cloudExtraRoutes = {
   // Cloud only. The open-source and Desktop servers have no members, so these
   // answer their router's 404 there (see busabase-cli's `isRouteMissing`).
   members: cloudMembersRoutes,
+  // Cloud only: an app's end users (shop buyers, member-page members) — see
+  // `./app-users.ts`. Desktop and open source answer 404.
+  appUsers: cloudAppUsersRoutes,
 };
 
 export const cloudContract = oc.prefix("/api/v1").router({

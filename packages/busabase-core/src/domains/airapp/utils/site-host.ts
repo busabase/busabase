@@ -13,7 +13,10 @@
  * implementation along.
  */
 
-import type { AirAppSiteDomainsVO } from "busabase-contract/domains/airapp/contract";
+import type {
+  AirAppSiteDomainsVO,
+  AirAppSiteReleasesVO,
+} from "busabase-contract/domains/airapp/contract";
 import type { SiteBundle } from "./site-bundle";
 
 export interface AirAppSiteRecord {
@@ -49,6 +52,9 @@ export interface AirAppSiteHost {
   goLive(input: AirAppSiteDeployInput): Promise<AirAppSiteRecord>;
   /** Also switches the live script's key: off stops its data access, on restores it. */
   setPublic(nodeId: string, isPublic: boolean): Promise<AirAppSiteRecord>;
+  /** Optional durable release capability: older/local hosts can keep offering sites. */
+  readReleases?(nodeId: string): Promise<AirAppSiteReleasesVO>;
+  rollback?(nodeId: string, version: string, appName: string): Promise<AirAppSiteRecord>;
   /** Optional provider capability; older or local hosts can keep offering sites without domains. */
   readDomains?(nodeId: string): Promise<AirAppSiteDomainsVO>;
   bindDomain?(nodeId: string, hostname: string): Promise<AirAppSiteDomainsVO>;

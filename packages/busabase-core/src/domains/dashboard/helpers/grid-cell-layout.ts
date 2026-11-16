@@ -17,6 +17,7 @@ export const GRID_FIELD_PRESENTATION = {
   drive: "media",
   relation: "collection",
   member: "collection",
+  appUser: "collection",
   lookup: "derived",
   number: "scalar",
   formula: "derived",

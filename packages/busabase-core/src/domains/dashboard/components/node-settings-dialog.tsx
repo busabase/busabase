@@ -1,7 +1,8 @@
 "use client";
 
 // The single, unified "Node Settings" dialog — General (avatar/name/slug/description)
-// / Info (read-only properties) / Permissions (access control, cloud-only).
+// / Info (read-only properties) / Permissions (access control, cloud-only)
+// / User sign-in (AirApps only, cloud-only — `NodeSettingsAppSignInSlotProvider`).
 // Replaces three previously-separate surfaces: `NodeRenameDialog`, the inline
 // "Info" `Popover` that used to live in `node-detail-views.tsx`, and
 // `NodePermissionsDialog` (now split out so this dialog renders whatever the
@@ -20,7 +21,7 @@ import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog
 import { Input } from "kui/input";
 import { Label } from "kui/label";
 import type { LucideIcon } from "lucide-react";
-import { Info, Shield, SlidersHorizontal } from "lucide-react";
+import { Info, KeyRound, Shield, SlidersHorizontal } from "lucide-react";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
@@ -51,10 +52,11 @@ import { toSlugInput } from "../utils/slug-input";
 import { DialogContent } from "./localized-dialog-content";
 import { NodeIconPicker } from "./node-icon-picker";
 import { NodeInfoPanel } from "./node-info-panel";
+import { NodeSettingsAppSignInSlotContext } from "./node-settings-app-sign-in-slot";
 import { NodeSettingsPermissionsSlotContext } from "./node-settings-permissions-slot";
 import { SplitSubmitButton } from "./split-submit-button";
 
-export type NodeSettingsTab = "general" | "info" | "permissions";
+export type NodeSettingsTab = "general" | "info" | "permissions" | "signIn";
 
 export interface NodeSettingsDialogProps {
   orpc: BusabaseQueryUtils;
@@ -87,6 +89,10 @@ export function NodeSettingsDialog({
   const messages = useCoreI18n();
   const t = messages.nodeSettings;
   const renderPermissionsPanel = useContext(NodeSettingsPermissionsSlotContext);
+  const renderAppSignInPanel = useContext(NodeSettingsAppSignInSlotContext);
+  // AirApps only, and only when the host has app users at all — see
+  // `node-settings-app-sign-in-slot.tsx`.
+  const appSignInPanel = nodeType === "airapp" ? renderAppSignInPanel : null;
 
   const [activeTab, setActiveTab] = useState<NodeSettingsTab>(initialTab ?? "general");
   useEffect(() => {
@@ -114,6 +120,7 @@ export function NodeSettingsDialog({
     ...(renderPermissionsPanel
       ? [{ id: "permissions" as const, icon: Shield, label: t.tabPermissions }]
       : []),
+    ...(appSignInPanel ? [{ id: "signIn" as const, icon: KeyRound, label: t.tabUserSignIn }] : []),
   ];
 
   return (
@@ -185,6 +192,9 @@ export function NodeSettingsDialog({
             ) : null}
             {activeTab === "permissions" && renderPermissionsPanel
               ? renderPermissionsPanel(nodeId, nodeName)
+              : null}
+            {activeTab === "signIn" && appSignInPanel
+              ? appSignInPanel({ nodeId, nodeName, closeDialog: () => onOpenChange(false) })
               : null}
           </div>
         </div>

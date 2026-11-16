@@ -76,6 +76,33 @@
   background-color: var(--crepe-color-surface-low);
 }
 
+/* Crepe retains source editing/copying while Mermaid owns only this preview. */
+.milkdown .doc-mermaid-preview {
+  max-width: 100%;
+  overflow-x: auto;
+  color: var(--foreground);
+}
+
+.milkdown .doc-mermaid-preview svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+
+.milkdown .doc-mermaid-error {
+  padding: 0.75rem;
+  color: var(--destructive);
+  white-space: normal;
+}
+
+.doc-mermaid-staging {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  inset-inline-start: 0;
+}
+
 /* Crepe's shipped themes assume the editor owns the page canvas and bakes in
  * a 60px/120px padding for that (see @milkdown/crepe/theme/common/reset.css).
  * DocDetailView already supplies its own page padding, so left unchanged this

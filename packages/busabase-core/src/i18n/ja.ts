@@ -3,6 +3,7 @@ import type { CoreI18nMessages } from "./messages";
 export const dashboardJa: CoreI18nMessages = {
   lookup: lookupJa,
   reverseRelation: reverseRelationJa,
+  appUserField: appUserFieldJa,
   spaceInstructions: {
     navLabel: "指示",
     title: "スペース共通の指示",
@@ -427,6 +428,9 @@ export const dashboardJa: CoreI18nMessages = {
     codeCopy: "コピー",
     codePreviewLabel: "プレビュー",
     codePreviewLoading: "読み込み中…",
+    codeShowSource: "ソースを表示",
+    codeHideSource: "ソースを隠す",
+    codePreviewError: "Mermaid 図を表示できません。構文を確認して再試行してください。",
     imageUploadButton: "アップロード",
     imageUploadPlaceholder: "またはリンクを貼り付け",
     imageConfirmButton: "確定",
@@ -704,7 +708,7 @@ export const dashboardJa: CoreI18nMessages = {
     statusReady: "実行中",
     statusError: "失敗しました",
     previewTitle: "AirApp プレビュー",
-    previewEmpty: "AirApp は自動的に起動し、ライブプレビューがここに表示されます。",
+    previewEmpty: "AirApp を実行すると、ここにライブプレビューが表示されます。",
     previewPending: "プレビューを準備中…",
     previewFailed: "この AirApp の起動に失敗しました。下のログを確認してください。",
     logsEmpty: "AirApp の実行中、インストールと起動の出力がここに表示されます。",
@@ -760,7 +764,54 @@ export const dashboardJa: CoreI18nMessages = {
     swUnsupportedCopyLink: "リンクをコピー",
     swUnsupportedLinkCopied: "リンクをコピーしました",
     swUnsupportedCopyFailed: "リンクをコピーできませんでした。以下を選択してコピーしてください：",
+    previewTools: {
+      viewport: "プレビューサイズ",
+      desktop: "デスクトップ",
+      mobile: "モバイル",
+      newWindow: "新しいウィンドウでプレビュー",
+      phone: "スマートフォンでプレビュー",
+      signIn:
+        "スキャンして非公開プレビューを開きます。スマートフォンでも同じアカウントにログインしてください。公開済み Site とは異なります。",
+      browserOnly:
+        "このプレビューは現在のブラウザーで動作します。「Site を公開」から Site プレビューを作成してスマートフォンで開いてください。",
+      loopback:
+        "このローカルアドレスにはスマートフォンからアクセスできません。アクセス可能なデプロイ先を使用してください。",
+      loadingQr: "QR コードを生成中…",
+      link: "プレビューリンク",
+      copyLink: "リンクをコピー",
+      openLink: "プレビューを開く",
+    },
     site: {
+      publishUpdate: "更新を公開",
+      releases: {
+        busy: "公開操作を適用中です。完了すると自動的に更新されます。",
+        manage: "公開管理",
+        versions: "バージョン",
+        history: "公開履歴",
+        current: "現在のバージョン",
+        retention: "現在のバージョンと過去の最大5バージョンを保持します。",
+        rollback: "ロールバック",
+        rollbackVersion: "{version} に戻す",
+        confirmTitle: "{version} に戻しますか？",
+        confirmBody:
+          "同じアドレスでこのバージョンが表示されます。下書き、プレビュー、スペース内の業務データは変更されません。",
+        confirm: "ロールバックを確認",
+        rollbackDone: "選択したバージョンを公開しました。",
+        loading: "公開履歴を読み込み中…",
+        loadFailed: "公開履歴を読み込めませんでした。もう一度お試しください。",
+        unavailable: "この環境ではバージョン履歴を利用できません。",
+        legacy: "スナップショット機能の導入前に公開されたバージョンです。",
+        empty: "公開されたバージョンはありません。Site を公開すると履歴が残ります。",
+        planLocked:
+          "公開やロールバックにはスペースのプランをアップグレードしてください。Site の公開停止は可能です。",
+        historyEmpty: "公開とロールバックの操作がここに表示されます。",
+        actionPublish: "公開",
+        actionRollback: "復元先",
+        copyAddress: "アドレスをコピー",
+        copied: "コピーしました",
+        copyFailed: "コピーできませんでした。上のアドレスを選択して手動でコピーしてください。",
+        publicQrHint: "スキャンして公開済みの Site を開きます。未公開の下書き変更は含まれません。",
+      },
       publish: {
         previewStale:
           "このプレビュー後にファイルが変更されました。サイトプレビューを作成または更新してから公開してください。",
@@ -794,7 +845,7 @@ export const dashboardJa: CoreI18nMessages = {
       statusNotLive: "未公開",
       statusLive: "公開中",
       statusLiveWithChanges: "未公開の変更あり",
-      goLive: "公開",
+      goLive: "Site を公開",
       goLiveDone: "サイトを公開しました。",
       previewStale:
         "このプレビューの後にファイルが変更されました。もう一度実行してから公開してください。",
@@ -1700,6 +1751,7 @@ export const dashboardJa: CoreI18nMessages = {
     tabGeneral: "一般",
     tabInfo: "詳細",
     tabPermissions: "権限",
+    tabUserSignIn: "ユーザーのサインイン",
     changeIcon: "アイコンを変更",
     iconUploadLabel: "画像をアップロード",
     iconUploadFormatHint: "PNG、JPG、GIF、WebP、最大2MB",
@@ -2606,6 +2658,7 @@ export const dashboardJa: CoreI18nMessages = {
     multiselect: "複数選択",
     relation: "関連レコード",
     member: "メンバー",
+    appUser: "アプリユーザー",
     lookup: "参照",
     attachment: "ファイル",
     drive: "ドライブ",
@@ -3112,5 +3165,6 @@ export const dashboardJa: CoreI18nMessages = {
   },
 };
 
+import { appUserFieldJa } from "./app-user-field";
 import { lookupJa } from "./lookup";
 import { reverseRelationJa } from "./reverse-relation";

@@ -35,6 +35,7 @@ import { mergeSearchIntoHref } from "../helpers/link-search";
 import { lookupDisplayField, lookupItemValue } from "../helpers/lookup";
 import type { FieldChip } from "../helpers/view-types";
 import { isListPayloadOmitted } from "../utils/list-payload-preview";
+import { AppUserFieldValue } from "./app-user-field";
 import { AttachmentValuePreview } from "./attachment-value-preview";
 import { DateFieldValue } from "./date-field";
 import { FormulaValue } from "./formula-value";
@@ -508,6 +509,10 @@ export function FieldValuePreview({
 
   if (kind === "member") {
     return <MemberChips className={className} users={fieldUsers} value={value} />;
+  }
+
+  if (kind === "appUser" && field) {
+    return <AppUserFieldValue className={className} field={field} value={value} />;
   }
 
   const chips = field ? getFieldChipEntries(field, value) : [];

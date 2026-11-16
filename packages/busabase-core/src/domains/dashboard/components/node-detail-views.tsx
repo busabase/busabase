@@ -45,7 +45,9 @@ import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { AirAppDetailView } from "../../airapp/components/AirAppDetailView";
+import { AirAppSiteReleasesPanel } from "../../airapp/components/AirAppSiteReleases";
 import { AirAppSidePanelPreview } from "../../airapp/components/RunPanel";
+import { AIRAPP_SITE_RELEASES_TAB_TYPE } from "../../airapp/utils/site-release-panel";
 import { buildAssetDownloadUrl } from "../../assets/utils/asset-content-url";
 import {
   areDocOutlinesEqual,
@@ -1979,6 +1981,7 @@ registerNodeDetail("skill", SkillDetailView);
 registerNodeDetail("drive", DriveDetailView);
 registerNodeDetail("airapp", AirAppDetailView);
 registerSidePanelTab("airapp-preview", AirAppSidePanelPreview);
+registerSidePanelTab(AIRAPP_SITE_RELEASES_TAB_TYPE, AirAppSiteReleasesPanel);
 
 function SkillSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
   const { nodeId } = payload as { nodeId: string };

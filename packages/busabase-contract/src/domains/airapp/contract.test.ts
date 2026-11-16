@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { resolveProcedurePermissionPolicy } from "../../access-control/api-key-level";
-import { airAppSiteDomainInputSchema, airAppSitePrimaryDomainInputSchema } from "./contract";
+import {
+  airAppSiteDomainInputSchema,
+  airAppSitePrimaryDomainInputSchema,
+  airAppSiteReleasesSchema,
+  airAppSiteRollbackInputSchema,
+} from "./contract";
 
 describe("custom website domain inputs", () => {
   it("normalizes the hostname without accepting URLs or other routing syntax", () => {
@@ -51,5 +56,43 @@ describe("custom website domain inputs", () => {
         scope: "node",
       });
     }
+  });
+});
+
+describe("Site release boundary", () => {
+  it("requires node write permission for history and rollback", () => {
+    for (const name of ["siteReleases", "siteRollback"]) {
+      expect(resolveProcedurePermissionPolicy(["airapps", name])).toEqual({
+        level: "write",
+        scope: "node",
+      });
+    }
+  });
+  it("requires a bounded explicit rollback version and strips server-only release fields", () => {
+    for (const version of ["", "v".repeat(65)]) {
+      expect(airAppSiteRollbackInputSchema.safeParse({ nodeId: "app", version }).success).toBe(
+        false,
+      );
+    }
+    const result = airAppSiteReleasesSchema.parse({
+      available: true,
+      versions: [
+        {
+          version: "v1",
+          releaseNumber: 1,
+          createdAt: "2026-11-11T00:00:00.000Z",
+          createdBy: "user",
+          isCurrent: true,
+          canRollback: false,
+          artifactKey: "private",
+          previewToken: "secret",
+        },
+      ],
+      history: [],
+      status: "idle",
+      lastError: null,
+    });
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(JSON.stringify(result)).not.toContain("secret");
   });
 });

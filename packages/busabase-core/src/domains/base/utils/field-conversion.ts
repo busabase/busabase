@@ -53,8 +53,20 @@ export const isUnconvertibleFieldType = (type: FieldType): boolean => UNCONVERTI
 export const canConvertFieldType = (fromType: FieldType, toType: FieldType): boolean => {
   if (isSystemFieldType(fromType) || isSystemFieldType(toType)) return false;
   if (fromType !== toType && isFileFieldType(fromType) && isFileFieldType(toType)) return true;
+  if (fromType === "appUser" || toType === "appUser") return isAppUserTextPair(fromType, toType);
   return !UNCONVERTIBLE_FROM.has(fromType) && !UNCONVERTIBLE_FROM.has(toType);
 };
+
+/**
+ * `appUser` ⇄ `text`, and nothing else. An app user id is stored as plain text,
+ * so a text column an app's server has been writing ids into becomes an App
+ * user column with every value kept as-is (and back). Any other source would
+ * turn a number, an email or a label into a bogus id, and turning an id into
+ * anything but text would lose what it names — the reasoning that keeps
+ * `member` unconvertible.
+ */
+const isAppUserTextPair = (fromType: FieldType, toType: FieldType): boolean =>
+  (fromType === "appUser" && toType === "text") || (fromType === "text" && toType === "appUser");
 
 /** attachment ⇄ drive: same refs, with or without a path. Non-ref items are dropped. */
 const convertFileRefs = (value: unknown, toType: FieldType): unknown[] => {
@@ -99,6 +111,7 @@ export function toText(
     case "embed":
     case "phone":
     case "ai_summary":
+    case "appUser":
       return typeof value === "string" ? value : String(value);
 
     // Structured scene + rendered snapshot, not prose — surface a short
@@ -174,6 +187,12 @@ export function fromText(
     case "yaml":
     case "ai_summary":
       return text;
+
+    // The id as typed or pasted — kept as-is, the way text keeps it. Only
+    // `text` may convert into this type (see `isAppUserTextPair`); a paste
+    // goes through here too.
+    case "appUser":
+      return text.trim() === "" ? null : text;
 
     // Can't meaningfully reconstruct a scene from plain text (e.g. CSV
     // import) — degrade to a safe empty scene + blank preview rather than

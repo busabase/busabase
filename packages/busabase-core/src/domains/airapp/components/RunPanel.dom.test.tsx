@@ -119,6 +119,62 @@ describe("AirAppServiceWorkerUnsupported", () => {
   );
 });
 
+describe("preview viewport continuity", () => {
+  it("keeps one toolbar and the iframe when switching viewports from Sites, then refreshes only the web view", () => {
+    const runner = {
+      status: "ready",
+      logLines: [],
+      previewUrl: "/api/airapp-preview/app/",
+      error: null,
+      errorCode: null,
+      engineLock: null,
+      siteBlockers: null,
+      runnerKind: "site",
+      orpc: {} as never,
+      run: vi.fn(),
+      stop: vi.fn(),
+      isBusy: false,
+      isLive: true,
+    } satisfies AirAppRunnerState;
+    render(
+      <CoreI18nProvider locale="en">
+        <AirAppRunPreview airapp={null} runner={runner} />
+      </CoreI18nProvider>,
+    );
+    const frame = screen.getByTitle("AirApp preview") as HTMLIFrameElement;
+    frame.dataset.inPageState = "unsaved input";
+    expect(document.querySelectorAll("[data-airapp-run-toolbar]")).toHaveLength(1);
+    expect(document.querySelector("[data-airapp-preview-tools]")).toBeNull();
+    const openMenu = () =>
+      fireEvent.pointerDown(screen.getByRole("button", { name: "Sites" }), {
+        button: 0,
+        ctrlKey: false,
+        pointerType: "mouse",
+      });
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Mobile" }));
+    expect(document.querySelector('[data-airapp-preview-viewport="mobile"]')).toBeTruthy();
+    expect(screen.getByTitle("AirApp preview")).toBe(frame);
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Desktop" }));
+    expect(screen.getByTitle("AirApp preview")).toBe(frame);
+    expect(frame.dataset.inPageState).toBe("unsaved input");
+    const navigate = vi.spyOn(frame, "src", "set");
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Refresh website preview" }));
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(runner.previewUrl);
+    expect(runner.run).not.toHaveBeenCalled();
+    expect(runner.stop).not.toHaveBeenCalled();
+    fireEvent.load(frame);
+    openMenu();
+    expect(
+      screen
+        .getByRole("menuitem", { name: "Refresh website preview" })
+        .getAttribute("data-disabled"),
+    ).toBeNull();
+  });
+});
+
 /**
  * Regression cover for the reload trap: `?fullscreen=1` restores the
  * full-viewport overlay immediately, but the runner restarts from `idle`, so
@@ -233,9 +289,7 @@ describe("AirApp browser-translation boundaries", () => {
       </CoreI18nProvider>,
     );
     expect(
-      translationBoundary(
-        screen.getByText("This AirApp starts automatically — the live preview appears here."),
-      ),
+      translationBoundary(screen.getByText("Run this AirApp to see its live preview here.")),
     ).toBeTruthy();
 
     view.rerender(
@@ -389,7 +443,7 @@ describe("AirAppEnginePlanLocked", () => {
       </CoreI18nProvider>,
     );
 
-    expect(screen.getByText("Upgrade required")).toBeTruthy();
+    expect(screen.queryByText("Upgrade required")).toBeNull();
     expect(screen.queryByText("Failed")).toBeNull();
     expect(screen.queryByRole("button", { name: "Restart" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Run" })).toBeNull();

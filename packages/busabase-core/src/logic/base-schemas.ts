@@ -21,6 +21,7 @@ const fieldTypeSchema = z.enum([
   "drive",
   "relation",
   "member",
+  "appUser",
   "number",
   "date",
   "checkbox",

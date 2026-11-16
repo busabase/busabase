@@ -34,10 +34,12 @@ import { useRegisterTopbarNodeInfo } from "../../dashboard/hooks/use-register-to
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
+import { useAirAppPreviewState } from "../hooks/use-airapp-preview-state";
 import { disposeDeletedAirAppSession } from "../store/airapp-session-cleanup";
 import { useAirAppKeepAliveActive, useAirAppKeepAliveScope } from "./AirAppKeepAliveHost";
 import { AirAppPublishToSite } from "./AirAppPublishToSite";
 import {
+  AirAppPinButton,
   AirAppRunControls,
   AirAppRunLogs,
   AirAppRunPreview,
@@ -52,9 +54,9 @@ const TAB_CONTENT_CLASS =
   "mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden data-[state=inactive]:pointer-events-none";
 
 /**
- * AirApp node detail: a single compact toolbar (identity + tab switcher + run
- * controls) over a tabbed layout, so the AirApp content — especially the live
- * preview — gets maximum vertical space. "App" (default) is the live run
+ * AirApp node detail: the shared topbar owns identity, Agent prompts, Pin and node settings;
+ * one local toolbar owns Files/App/Logs and the preview actions. The live
+ * preview gets every remaining vertical pixel. "App" (default) is the live run
  * preview iframe, since the primary thing a user wants when opening an AirApp
  * is to see it working; the Run button lives in the toolbar. "Files" is the
  * file-tree browser with reviewable uploads. "Logs" is the streaming install/start console.
@@ -159,6 +161,7 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
   // Always called (before the early-return below) so hook order stays stable
   // across renders; the hook itself is a no-op while `airapp` is null.
   const runner = useAirAppRunner({ orpc, airapp });
+  const previewState = useAirAppPreviewState(runner.previewUrl);
 
   // `enabled: isKeepAliveActive` matters here specifically because
   // `AirAppKeepAliveHost` keeps every visited AirApp's detail view mounted
@@ -168,37 +171,27 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
   useRegisterTopbarNodeActions(
     airapp ? (
       <>
-        <AirAppRunControls airapp={airapp} fullscreenState={fullscreenState} runner={runner} />
         <NodeAgentPromptsButton
           orpc={orpc}
           nodeId={airapp.node.id}
           nodeName={airapp.node.name}
           nodeType="airapp"
         />
-        <AirAppPublishToSite
-          key={airapp.node.id}
+        <AirAppPinButton airapp={airapp} />
+        <NodeActionsMenu
           nodeId={airapp.node.id}
           nodeName={airapp.node.name}
+          nodeSlug={airapp.node.slug}
+          nodeType="airapp"
+          onDeleted={() =>
+            disposeDeletedAirAppSession({
+              keepAliveScopeKey,
+              nodeId: airapp.node.id,
+              routeSlug: slug ?? airapp.node.slug,
+            })
+          }
           orpc={orpc}
-        >
-          {(publishAction) => (
-            <NodeActionsMenu
-              extraActions={publishAction}
-              nodeId={airapp.node.id}
-              nodeName={airapp.node.name}
-              nodeSlug={airapp.node.slug}
-              nodeType="airapp"
-              onDeleted={() =>
-                disposeDeletedAirAppSession({
-                  keepAliveScopeKey,
-                  nodeId: airapp.node.id,
-                  routeSlug: slug ?? airapp.node.slug,
-                })
-              }
-              orpc={orpc}
-            />
-          )}
-        </AirAppPublishToSite>
+        />
       </>
     ) : null,
     isKeepAliveActive,
@@ -235,7 +228,7 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
   const fileCount = airapp.files.length;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
+    <div className="@container/airapp-toolbar flex h-full min-h-0 w-full flex-col bg-background">
       {/* Node identity (name, description, Info dialog) lives in the shared
           topbar; this header carries only the local view switcher. */}
       {/* Controlled so entering fullscreen can force the "App" panel active:
@@ -246,21 +239,62 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
         onValueChange={setSelectedTab}
         value={fullscreenState.fullscreen ? "app" : selectedTab}
       >
-        <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-border/60 border-b px-4 py-2 md:px-6">
+        <header
+          className="flex h-12 min-w-0 shrink-0 items-center justify-between gap-1 border-border/60 border-b px-2 @min-[600px]/airapp-toolbar:px-4"
+          data-airapp-detail-toolbar=""
+        >
           <TabsList className={PREVIEW_DETAIL_TAB_LIST_CLASS}>
-            <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="app">
-              <MonitorPlay className="size-3.5" />
-              {messages.airapp.tabPreview}
-            </TabsTrigger>
-            <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="files">
+            <TabsTrigger
+              aria-label={messages.airapp.tabFiles}
+              className={`${PREVIEW_DETAIL_TAB_TRIGGER_CLASS} w-8 px-0 @min-[500px]/airapp-toolbar:w-auto @min-[500px]/airapp-toolbar:px-2.5`}
+              value="files"
+            >
               <Files className="size-3.5" />
-              {messages.airapp.tabFiles}
+              <span className="hidden @min-[500px]/airapp-toolbar:inline">
+                {messages.airapp.tabFiles}
+              </span>
             </TabsTrigger>
-            <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="logs">
+            <TabsTrigger
+              aria-label={messages.airapp.tabPreview}
+              className={`${PREVIEW_DETAIL_TAB_TRIGGER_CLASS} w-8 px-0 @min-[500px]/airapp-toolbar:w-auto @min-[500px]/airapp-toolbar:px-2.5`}
+              value="app"
+            >
+              <MonitorPlay className="size-3.5" />
+              <span className="hidden @min-[500px]/airapp-toolbar:inline">
+                {messages.airapp.tabPreview}
+              </span>
+            </TabsTrigger>
+            <TabsTrigger
+              aria-label={messages.airapp.tabLogs}
+              className={`${PREVIEW_DETAIL_TAB_TRIGGER_CLASS} w-8 px-0 @min-[500px]/airapp-toolbar:w-auto @min-[500px]/airapp-toolbar:px-2.5`}
+              value="logs"
+            >
               <Terminal className="size-3.5" />
-              {messages.airapp.tabLogs}
+              <span className="hidden @min-[500px]/airapp-toolbar:inline">
+                {messages.airapp.tabLogs}
+              </span>
             </TabsTrigger>
           </TabsList>
+          <AirAppPublishToSite
+            compact
+            key={airapp.node.id}
+            nodeId={airapp.node.id}
+            nodeName={airapp.node.name}
+            orpc={orpc}
+            showButton
+            renderButtons={(_publish, releases, publishMenuItem) => (
+              <AirAppRunControls
+                airapp={airapp}
+                fullscreenState={fullscreenState}
+                previewState={previewState}
+                releasesAction={releases}
+                siteActionItems={publishMenuItem}
+                runner={runner}
+                showPinToSidePanel={false}
+                showSitePublish={false}
+              />
+            )}
+          />
         </header>
 
         <TabsContent className={TAB_CONTENT_CLASS} forceMount value="app">
@@ -268,6 +302,7 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
             airapp={airapp}
             fullscreenState={fullscreenState}
             runner={runner}
+            previewState={previewState}
             showToolbar={false}
           />
         </TabsContent>

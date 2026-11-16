@@ -6,6 +6,7 @@ import {
 } from "../src/domains/airapp/store/airapp-keepalive-store";
 import { useAirAppRunnerStore } from "../src/domains/airapp/store/airapp-runner-store";
 import { disposeDeletedAirAppSession } from "../src/domains/airapp/store/airapp-session-cleanup";
+import { airAppSiteReleasesTabId } from "../src/domains/airapp/utils/site-release-panel";
 import { useSidePanelStore } from "../src/domains/dashboard/store/side-panel-store";
 
 describe("AirApp keepalive store", () => {
@@ -93,6 +94,24 @@ describe("AirApp keepalive store", () => {
       title: "AirApp A",
       type: "airapp-preview",
     });
+    useSidePanelStore.getState().openTab({
+      id: airAppSiteReleasesTabId("node-a"),
+      payload: { nodeId: "node-a", nodeName: "AirApp A" },
+      title: "AirApp A releases",
+      type: "airapp-site-releases",
+    });
+    useSidePanelStore.getState().openTab({
+      id: airAppSiteReleasesTabId("node-b"),
+      payload: { nodeId: "node-b", nodeName: "AirApp B" },
+      title: "AirApp B releases",
+      type: "airapp-site-releases",
+    });
+    useSidePanelStore.getState().openTab({
+      id: "agent-research",
+      payload: { agentSlug: "research" },
+      title: "Research",
+      type: "agent-chat",
+    });
 
     disposeDeletedAirAppSession({
       keepAliveScopeKey: "space-a:user-a",
@@ -105,6 +124,9 @@ describe("AirApp keepalive store", () => {
     expect(useAirAppKeepAliveStore.getState().scopes).toEqual({
       "space-b:user-b": ["shared-slug"],
     });
-    expect(useSidePanelStore.getState().tabs).toEqual([]);
+    expect(useSidePanelStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      airAppSiteReleasesTabId("node-b"),
+      "agent-research",
+    ]);
   });
 });

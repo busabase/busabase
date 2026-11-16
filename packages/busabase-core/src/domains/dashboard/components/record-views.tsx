@@ -89,6 +89,7 @@ import { useDashboardOrpc } from "../orpc-context";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { dashboardNodeShareUrl } from "../utils/share-url";
 import { useIsAnonymousVisitor } from "../visitor-context";
+import { AppUserFieldEditor } from "./app-user-field";
 import { ChoiceFieldEditor } from "./choice-field";
 import { renderMentionedText } from "./comments";
 import { CopyLocatorText } from "./copy-locator-button";
@@ -1335,6 +1336,15 @@ export function RecordFieldInput({
             </p>
           ) : null}
         </div>
+      ) : kind === "appUser" ? (
+        <AppUserFieldEditor
+          ariaDescribedBy={helpId}
+          field={field}
+          fieldName={fieldName}
+          inputId={inputId}
+          onChange={onChange}
+          value={value}
+        />
       ) : kind === "member" ? (
         <MemberFieldEditor
           ariaDescribedBy={helpId}
