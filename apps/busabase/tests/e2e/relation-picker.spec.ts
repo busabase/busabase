@@ -213,7 +213,7 @@ test("selected relations survive searching, saving, list navigation and reload",
   ).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("selected-relations.png"), fullPage: true });
   await page.getByRole("button", { name: "Update Now", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`${basePath}/${student.id}$`));
+  await expect(page).toHaveURL(new RegExp(`${basePath}/${student.id}(?:\\?.*)?$`));
   await expect(page.getByRole("link", { name: "Mathematics", exact: true }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Biology", exact: true }).first()).toBeVisible();
   const saved = await json<RecordVO>(
@@ -221,7 +221,11 @@ test("selected relations survive searching, saving, list navigation and reload",
   );
   expect(saved.headCommit.payload.subjects).toEqual(targets.map((record) => record.id));
   expect(saved.headCommit.payload.primary_subject).toEqual([targets[1]!.id]);
-  await page.locator(`a[href="${basePath}"]`).first().click();
+  // The Base crumb returns to the view the record was opened from, not the bare route.
+  await page
+    .getByRole("navigation", { name: "Breadcrumb" })
+    .getByRole("link", { name: "Students" })
+    .click();
   await expect(row.getByRole("link", { name: "Mathematics", exact: true })).toBeVisible();
   await expect(row.getByRole("link", { name: "Biology", exact: true }).first()).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("saved-relations-list.png"), fullPage: true });
