@@ -3,7 +3,7 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
 import type { NodeType } from "busabase-contract/domains";
-import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { getContextSpaceId, isAnonymousVisitor, isEmbedVisitor, resolveUserRefs } from "../context";
 import { getDb } from "../db";
 import {
@@ -21,6 +21,7 @@ import { denyAnonymousNodeType, isAnonymousReadableNodeType } from "./anonymous-
 // the one barrel (rather than hand-listing domains here) is deliberate — see
 // that module for the silent-fallback bug hand-listing caused.
 import "./builtin-node-runtimes";
+import { buildNodeVisibilityCondition } from "./node-acl";
 import { resolveVisibleNode } from "./node-resolve";
 import { getNodeRuntime } from "./node-runtime";
 import { ensureReady } from "./seed";
@@ -148,12 +149,18 @@ const withAttribution = async (detail: NodeDetailVO, node: NodePO): Promise<Node
  *
  * Resolution and ACL go through `resolveVisibleNode`, exactly as
  * `getNodeDetail` does, so a slug in the URL works and an invisible node is a
- * 404 rather than a leaked chain of ancestor ids.
+ * 404 rather than a leaked chain of ancestor ids. `ancestors` repeats that
+ * chain with the name, slug and type a breadcrumb needs, and drops any row
+ * this caller cannot see — the id can stay in `ancestorIds` so the sidebar
+ * still tries to expand it.
  */
 export const listNodeAncestorIds = async (
   nodeIdOrSlug: string,
   typeHint?: NodeType,
-): Promise<{ ancestorIds: string[] }> => {
+): Promise<{
+  ancestorIds: string[];
+  ancestors: Array<{ id: string; name: string; slug: string; type: NodeType }>;
+}> => {
   await ensureReady();
   const node = await resolveVisibleNode(nodeIdOrSlug, typeHint);
   const db = await getDb();
@@ -170,7 +177,31 @@ export const listNodeAncestorIds = async (
       .limit(1);
     return row?.parentId;
   });
-  return { ancestorIds };
+  if (ancestorIds.length === 0) return { ancestorIds, ancestors: [] };
+
+  const rows = await db
+    .select({
+      id: busabaseNodes.id,
+      name: busabaseNodes.name,
+      slug: busabaseNodes.slug,
+      type: busabaseNodes.type,
+    })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        inArray(busabaseNodes.id, ancestorIds),
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
+        buildNodeVisibilityCondition(db),
+      ),
+    );
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const ancestors = ancestorIds.flatMap((id) => {
+    const row = byId.get(id);
+    return row ? [row] : [];
+  });
+  return { ancestorIds, ancestors };
 };
 
 export const getNodeDetail = async (

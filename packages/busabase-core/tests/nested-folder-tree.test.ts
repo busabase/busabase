@@ -121,6 +121,26 @@ describe("nodes.ancestors — what the sidebar needs on a cold deep load", () =>
       NESTED_LAUNCH_FOLDER_NODE_ID,
       NESTED_LAUNCH_ASSETS_FOLDER_NODE_ID,
     ]);
+    expect(deep.ancestors).toEqual([
+      {
+        id: NESTED_PRODUCT_OPS_FOLDER_NODE_ID,
+        name: "Product Ops",
+        slug: "product-ops",
+        type: "folder",
+      },
+      {
+        id: NESTED_LAUNCH_FOLDER_NODE_ID,
+        name: "2026 Launch",
+        slug: "launch-2026",
+        type: "folder",
+      },
+      {
+        id: NESTED_LAUNCH_ASSETS_FOLDER_NODE_ID,
+        name: "Launch Assets",
+        slug: "launch-assets",
+        type: "folder",
+      },
+    ]);
 
     // A slug is what actually appears in the url the sidebar reads, so the
     // slug path must resolve identically to the id path.
@@ -147,5 +167,6 @@ describe("nodes.ancestors — what the sidebar needs on a cold deep load", () =>
     // sidebar strips — so there is nothing for it to expand.
     const top = await raw.nodes.ancestors({ nodeId: NESTED_PRODUCT_OPS_FOLDER_NODE_ID });
     expect(top.ancestorIds).toEqual([]);
+    expect(top.ancestors).toEqual([]);
   });
 });

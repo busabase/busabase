@@ -8,8 +8,9 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "kui/breadcrumb";
+import { Fragment } from "react";
 import { useAddDemoParam } from "./demo-client";
-import type { BreadcrumbState } from "./hooks/useSPABreadcrumb";
+import type { BreadcrumbCrumb, BreadcrumbState } from "./hooks/useSPABreadcrumb";
 
 interface SPABreadcrumbProps {
   /** Root link href, e.g., "/dashboard", "/agents", "/systemadmin" */
@@ -29,8 +30,19 @@ interface SPABreadcrumbProps {
  * The crumbs are plain anchors (full page loads), so they carry `?demo`
  * explicitly — otherwise clicking "Dashboard" in demo mode lands an anonymous
  * visitor on the sign-in page.
+ *
+ * When `breadcrumb.crumbs` is set it is the whole trail (Workspace, ancestor
+ * folders, the open node). Otherwise the older parent / intermediate / title
+ * shape is used for routes that are not a node, such as Search and Home.
  */
-export function SPABreadcrumb({
+export function SPABreadcrumb(props: SPABreadcrumbProps) {
+  if (props.breadcrumb.crumbs && props.breadcrumb.crumbs.length > 0) {
+    return <CrumbTrail crumbs={props.breadcrumb.crumbs} />;
+  }
+  return <LegacySPABreadcrumb {...props} />;
+}
+
+function LegacySPABreadcrumb({
   rootHref,
   rootLabel,
   breadcrumb,
@@ -59,8 +71,13 @@ export function SPABreadcrumb({
             <BreadcrumbSeparator className="hidden md:block" />
           </>
         )}
-        <BreadcrumbItem>
-          <BreadcrumbPage>{breadcrumb.title}</BreadcrumbPage>
+        <BreadcrumbItem className="min-w-0">
+          <BreadcrumbPage
+            className="block max-w-[12rem] truncate sm:max-w-xs"
+            title={breadcrumb.title}
+          >
+            {breadcrumb.title}
+          </BreadcrumbPage>
         </BreadcrumbItem>
       </BreadcrumbList>
     </Breadcrumb>
@@ -71,6 +88,13 @@ export function SPABreadcrumb({
  * Breadcrumb for admin/systemadmin pages with parent based on route
  */
 export function SystemAdminBreadcrumb({ breadcrumb }: { breadcrumb: BreadcrumbState }) {
+  if (breadcrumb.crumbs && breadcrumb.crumbs.length > 0) {
+    return <CrumbTrail crumbs={breadcrumb.crumbs} />;
+  }
+  return <LegacySystemAdminBreadcrumb breadcrumb={breadcrumb} />;
+}
+
+function LegacySystemAdminBreadcrumb({ breadcrumb }: { breadcrumb: BreadcrumbState }) {
   const addDemoParam = useAddDemoParam();
   return (
     <Breadcrumb>
@@ -95,9 +119,55 @@ export function SystemAdminBreadcrumb({ breadcrumb }: { breadcrumb: BreadcrumbSt
             <BreadcrumbSeparator className="hidden md:block" />
           </>
         )}
-        <BreadcrumbItem>
-          <BreadcrumbPage>{breadcrumb.title}</BreadcrumbPage>
+        <BreadcrumbItem className="min-w-0">
+          <BreadcrumbPage
+            className="block max-w-[12rem] truncate sm:max-w-xs"
+            title={breadcrumb.title}
+          >
+            {breadcrumb.title}
+          </BreadcrumbPage>
         </BreadcrumbItem>
+      </BreadcrumbList>
+    </Breadcrumb>
+  );
+}
+
+/**
+ * Ordered trail. The last crumb is the current page; earlier crumbs with an
+ * href are links. Each name is left whole — the visible text ellipsizes, and
+ * `title` still has the full name.
+ */
+function CrumbTrail({ crumbs }: { crumbs: BreadcrumbCrumb[] }) {
+  const addDemoParam = useAddDemoParam();
+  return (
+    <Breadcrumb>
+      <BreadcrumbList className="flex-nowrap overflow-hidden">
+        {crumbs.map((crumb, index) => {
+          const isLast = index === crumbs.length - 1;
+          return (
+            <Fragment key={`${crumb.label}-${index}`}>
+              {index > 0 ? <BreadcrumbSeparator /> : null}
+              <BreadcrumbItem className="min-w-0">
+                {!isLast && crumb.href ? (
+                  <BreadcrumbLink
+                    className="block max-w-[9rem] truncate sm:max-w-xs"
+                    href={addDemoParam(crumb.href)}
+                    title={crumb.label}
+                  >
+                    {crumb.label}
+                  </BreadcrumbLink>
+                ) : (
+                  <BreadcrumbPage
+                    className="block max-w-[9rem] truncate sm:max-w-xs"
+                    title={crumb.label}
+                  >
+                    {crumb.label}
+                  </BreadcrumbPage>
+                )}
+              </BreadcrumbItem>
+            </Fragment>
+          );
+        })}
       </BreadcrumbList>
     </Breadcrumb>
   );

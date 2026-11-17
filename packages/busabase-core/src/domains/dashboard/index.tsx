@@ -112,7 +112,11 @@ import {
 } from "./components/split-submit-button";
 import { BusabaseTopbar, TopbarNodeActionsSlot } from "./components/topbar";
 import { type AgentEntryContextState, nextAgentEntryContext } from "./helpers/agent-entry-context";
-import { getNodeDetailBreadcrumbItems } from "./helpers/breadcrumbs";
+import {
+  ancestorFoldersFromTree,
+  getNodeDetailBreadcrumbItems,
+  withAncestorFolders,
+} from "./helpers/breadcrumbs";
 import { shouldQueryGlobalChangeRequests } from "./helpers/change-request-data-source";
 import { createChangeRequestQueryKeys } from "./helpers/change-request-query-keys";
 import {
@@ -725,6 +729,27 @@ function BusabaseDashboardContent({
   const nodeRouteState = nodeRouteStateQuery.isError
     ? ({ status: "unavailable" } as const)
     : nodeRouteStateQuery.data;
+  // Same query the sidebar uses to expand a deep node. The response also
+  // carries each visible ancestor's name and slug, which the depth-bounded
+  // tree does not have yet on a cold load. Anonymous visitors are not on
+  // that procedure's allowlist; they get the path from the shared tree only.
+  const breadcrumbAncestorsQuery = useQuery(
+    !isAnon &&
+      routeNodeRef &&
+      nodeRouteState?.status !== "archived" &&
+      nodeRouteState?.status !== "unavailable"
+      ? {
+          ...orpc.nodes.ancestors.queryOptions({
+            input: { nodeId: routeNodeRef.slug, type: routeNodeRef.type },
+          }),
+          staleTime: Number.POSITIVE_INFINITY,
+        }
+      : {
+          queryKey: ["busabase-dashboard", "breadcrumb-ancestors-disabled"],
+          queryFn: async () => ({ ancestorIds: [] as string[], ancestors: [] }),
+          enabled: false,
+        },
+  );
   const activeDetailNode = useMemo(() => {
     if (!nodeDetailRoute) return null;
     const treeNode = flattenNodesForCache(nodeTree).find(
@@ -1460,12 +1485,22 @@ function BusabaseDashboardContent({
     document.title = formatDashboardDocumentTitle(currentPageTitle, initialDocumentTitle.current);
   }, [currentPageTitle, isCurrentRouteTitleLoading]);
 
+  const breadcrumbAncestors = useMemo(() => {
+    const fromApi = breadcrumbAncestorsQuery.data?.ancestors;
+    if (fromApi) return fromApi;
+    if (!routeNodeRef) return [];
+    return ancestorFoldersFromTree(nodeTree, routeNodeRef);
+  }, [breadcrumbAncestorsQuery.data, nodeTree, routeNodeRef]);
+
   const breadcrumbItems = useMemo<BusabaseBreadcrumbItem[]>(() => {
+    const withFolders = (items: BusabaseBreadcrumbItem[]): BusabaseBreadcrumbItem[] =>
+      withAncestorFolders(items, breadcrumbAncestors);
+
     if (
       routeNodeRef &&
       (nodeRouteState?.status === "archived" || nodeRouteState?.status === "unavailable")
     ) {
-      return [
+      return withFolders([
         { href: "/home", label: messages.nav.workspace },
         {
           isNode: true,
@@ -1474,7 +1509,7 @@ function BusabaseDashboardContent({
               ? nodeRouteState.name
               : messages.nodeDetail.unavailableTitle,
         },
-      ];
+      ]);
     }
 
     if (isOperationRoute) {
@@ -1574,36 +1609,37 @@ function BusabaseDashboardContent({
       nodeDetailRoute,
       activeDetailNode,
       messages,
+      breadcrumbAncestors,
     );
     if (nodeDetailBreadcrumbItems) return nodeDetailBreadcrumbItems;
 
     if (isBaseSetupRoute) {
-      return [
-        { label: messages.nav.workspace },
+      return withFolders([
+        { href: "/home", label: messages.nav.workspace },
         {
           href: activeBase ? `/base/${activeBase.slug}` : undefined,
           isNode: true,
           label: activeBase?.name ?? messages.nav.base,
         },
         { label: messages.base.designTab },
-      ];
+      ]);
     }
 
     if (isNewRecordRoute) {
-      return [
-        { label: messages.nav.workspace },
+      return withFolders([
+        { href: "/home", label: messages.nav.workspace },
         {
           href: activeBase ? `/base/${activeBase.slug}` : undefined,
           isNode: true,
           label: activeBase?.name ?? messages.nav.base,
         },
         { label: messages.base.newRecord },
-      ];
+      ]);
     }
 
     if (isEditRecordRoute) {
-      return [
-        { label: messages.nav.workspace },
+      return withFolders([
+        { href: "/home", label: messages.nav.workspace },
         {
           href: activeRecord
             ? `/base/${activeRecord.base.slug}`
@@ -1618,12 +1654,12 @@ function BusabaseDashboardContent({
           label: activeRecord ? getRecordTitle(activeRecord, messages) : messages.common.record,
         },
         { label: messages.common.edit },
-      ];
+      ]);
     }
 
     if (isRecordRoute) {
-      return [
-        { label: messages.nav.workspace },
+      return withFolders([
+        { href: "/home", label: messages.nav.workspace },
         {
           href: activeRecord
             ? `/base/${activeRecord.base.slug}`
@@ -1634,26 +1670,26 @@ function BusabaseDashboardContent({
           label: activeBase?.name ?? activeRecord?.base.name ?? messages.nav.base,
         },
         { label: activeRecord ? getRecordTitle(activeRecord, messages) : messages.common.record },
-      ];
+      ]);
     }
 
     if (isBaseViewRoute) {
-      return [
-        { label: messages.nav.workspace },
+      return withFolders([
+        { href: "/home", label: messages.nav.workspace },
         {
           href: activeBase ? `/base/${activeBase.slug}` : undefined,
           isNode: true,
           label: activeBase?.name ?? messages.nav.base,
         },
         { label: selectedBaseView?.name ?? messages.recordView.view },
-      ];
+      ]);
     }
 
     if (locationPath.startsWith("/base/")) {
-      return [
-        { label: messages.nav.workspace },
+      return withFolders([
+        { href: "/home", label: messages.nav.workspace },
         { isNode: true, label: activeBase?.name ?? messages.nav.base },
-      ];
+      ]);
     }
 
     // Catch-all, same reasoning as the page-title fallback above.
@@ -1662,6 +1698,7 @@ function BusabaseDashboardContent({
     activeBase,
     activeDetailNode,
     activeRecord,
+    breadcrumbAncestors,
     agentDetailParams,
     isAgentDetailRoute,
     isArchivedRoute,

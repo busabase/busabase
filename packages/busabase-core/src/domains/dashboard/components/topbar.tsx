@@ -6,12 +6,19 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "kui/breadcrumb";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "kui/dropdown-menu";
 import { SidebarTrigger } from "kui/sidebar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
-import { Info } from "lucide-react";
+import { Info, MoreHorizontal } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment, type ReactNode, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
+import { narrowCollapsedBreadcrumbIndexes } from "../helpers/breadcrumbs";
 import type { BusabaseBreadcrumbItem } from "../helpers/view-types";
 import { useNodeLocator } from "../hooks/use-copy-locator";
 import { useTopbarNodeActionsStore } from "../store/topbar-node-actions-store";
@@ -75,13 +82,19 @@ export function BusabaseTopbarBreadcrumb({
   // topbar is unchanged.
   const markedNodeIndex = visibleItems.findIndex((item) => item.isNode);
   const nodeIndex = markedNodeIndex === -1 ? visibleItems.length - 1 : markedNodeIndex;
+  // Long trails keep the first crumb and the last two on a phone and fold the
+  // folders in between into one menu, so a 360px header stays a single line.
+  // Wider screens show every folder. Four crumbs or fewer never collapse.
+  const collapsedIndexes = new Set(narrowCollapsedBreadcrumbIndexes(visibleItems.length));
+  const collapsedItems = visibleItems.filter((_, index) => collapsedIndexes.has(index));
 
   return (
     <Breadcrumb aria-label={messages.shell.breadcrumb} className="min-w-0 flex-1">
       <BreadcrumbList className="flex-nowrap gap-1.5 overflow-hidden text-xs sm:gap-2">
         {visibleItems.map((item, index) => {
           const isLast = index === visibleItems.length - 1;
-          const hideOnMobile = visibleItems.length > 2 && index > 0 && !isLast;
+          const collapsedOnNarrow = collapsedIndexes.has(index);
+          const narrowHidden = collapsedOnNarrow ? "hidden sm:inline-flex" : "";
           // The node crumb carries the page's visual focus now that node-detail
           // views no longer render a big in-page title: one step up in size,
           // semibold, full-contrast. Every other crumb stays the small muted
@@ -90,23 +103,33 @@ export function BusabaseTopbarBreadcrumb({
           const emphasis = isNodeCrumb
             ? "font-semibold text-foreground text-sm"
             : "font-normal text-muted-foreground";
+          // Cap each name so a long label ellipsizes instead of pushing the
+          // row onto a second line. The `title` carries the uncut name.
+          const truncate = "block max-w-[4.5rem] min-w-0 truncate sm:max-w-48 md:max-w-64";
 
           return (
             <Fragment key={`${item.label}-${index}`}>
+              {index === 1 && collapsedItems.length > 0 ? (
+                <>
+                  <BreadcrumbSeparator className="shrink-0 text-muted-foreground/70 sm:hidden" />
+                  <BreadcrumbItem className="shrink-0 sm:hidden">
+                    <CollapsedBreadcrumbMenu items={collapsedItems} />
+                  </BreadcrumbItem>
+                </>
+              ) : null}
               {index > 0 ? (
                 <BreadcrumbSeparator
-                  className={`shrink-0 text-muted-foreground/70 ${
-                    hideOnMobile ? "hidden sm:inline-flex" : ""
-                  }`}
+                  className={`shrink-0 text-muted-foreground/70 ${narrowHidden}`}
                 />
               ) : null}
               <BreadcrumbItem
-                className={`min-w-0 ${isNodeCrumb ? "group/node-crumb" : ""} ${hideOnMobile ? "hidden sm:inline-flex" : ""}`}
+                className={`min-w-0 ${isNodeCrumb ? "group/node-crumb" : ""} ${narrowHidden}`}
               >
                 {item.href && !isLast ? (
-                  <BreadcrumbLink asChild className={`min-w-0 truncate ${emphasis}`}>
+                  <BreadcrumbLink asChild className={`${truncate} ${emphasis}`}>
                     <Link
                       href={item.href}
+                      title={item.label}
                       /* Stable hook for "which node am I on": this text used to
                          be an in-page <h1> that the e2e suite asserted on. */
                       data-topbar-current-item={isNodeCrumb ? "" : undefined}
@@ -116,8 +139,9 @@ export function BusabaseTopbarBreadcrumb({
                   </BreadcrumbLink>
                 ) : (
                   <BreadcrumbPage
-                    className={`min-w-0 truncate ${isNodeCrumb ? emphasis : "font-normal text-foreground"}`}
+                    className={`${truncate} ${isNodeCrumb ? emphasis : "font-normal text-foreground"}`}
                     data-topbar-current-item={isNodeCrumb ? "" : undefined}
+                    title={item.label}
                   >
                     {item.label}
                   </BreadcrumbPage>
@@ -133,6 +157,37 @@ export function BusabaseTopbarBreadcrumb({
         })}
       </BreadcrumbList>
     </Breadcrumb>
+  );
+}
+
+/** Folders the narrow header hides, listed so each one is still one click away. */
+function CollapsedBreadcrumbMenu({ items }: { items: BusabaseBreadcrumbItem[] }) {
+  const messages = useCoreI18n();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={messages.shell.more}
+        className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        type="button"
+      >
+        <MoreHorizontal aria-hidden="true" className="size-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        {items.map((item, index) =>
+          item.href ? (
+            <DropdownMenuItem asChild key={`${item.label}-${index}`}>
+              <Link href={item.href} title={item.label}>
+                {item.label}
+              </Link>
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem key={`${item.label}-${index}`} title={item.label}>
+              {item.label}
+            </DropdownMenuItem>
+          ),
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
