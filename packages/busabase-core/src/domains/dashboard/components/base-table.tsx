@@ -94,8 +94,10 @@ import { fieldDesignHref } from "../helpers/field-visibility-navigation";
 import { fieldValueToString, formatMemberChipLabel, shortIdentifier } from "../helpers/format";
 import { buildGridCellText, GRID_FIELD_PRESENTATION } from "../helpers/grid-cell-layout";
 import { getInlineCellEditorKind } from "../helpers/inline-cell-edit";
-import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
+import { mergeSearchIntoHref } from "../helpers/link-search";
 import type { RecordCollectionStatus } from "../helpers/record-collection-status";
+import { useRecordHref, useSourceViewSlug } from "../helpers/source-view-context";
+import { withSourceView } from "../helpers/source-view-url";
 import {
   buildTableCellPreview,
   TABLE_CELL_LINK_MAX_CHARS,
@@ -701,9 +703,7 @@ function BusaBaseRecordRow({
   onUploadAttachment?: FieldFileUploader;
 }) {
   const messages = useCoreI18n();
-  const currentRecordHref = useHrefWithCurrentSearch(
-    `/base/${baseSlug ?? record.base.slug}/${record.id}`,
-  );
+  const currentRecordHref = useRecordHref(`/base/${baseSlug ?? record.base.slug}/${record.id}`);
   return (
     <div
       aria-rowindex={rowIndex}
@@ -927,6 +927,7 @@ export function BusaBaseTable({
 }) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
+  const sourceViewSlug = useSourceViewSlug();
   const resolveIString = useIString();
   const locale = useCoreLocale();
   const findMessages = recordFindMessages[locale];
@@ -1281,10 +1282,13 @@ export function BusaBaseTable({
         return;
       }
       navigate(
-        mergeSearchIntoHref(`/base/${base?.slug ?? record.base.slug}/${record.id}`, currentSearch),
+        mergeSearchIntoHref(
+          withSourceView(`/base/${base?.slug ?? record.base.slug}/${record.id}`, sourceViewSlug),
+          currentSearch,
+        ),
       );
     },
-    [base?.slug, currentSearch, navigate, onOpenRecord],
+    [base?.slug, currentSearch, navigate, onOpenRecord, sourceViewSlug],
   );
   const ensureRowVisible = useCallback(
     (rowIndex: number) => {
@@ -1548,7 +1552,10 @@ export function BusaBaseTable({
             {base && canPropose ? (
               <Link
                 className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-foreground px-2.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85"
-                href={mergeSearchIntoHref(`/base/${base.slug}/new`, currentSearch)}
+                href={mergeSearchIntoHref(
+                  withSourceView(`/base/${base.slug}/new`, sourceViewSlug),
+                  currentSearch,
+                )}
               >
                 <Plus size={13} />
                 {messages.base.newRecord}
@@ -2141,7 +2148,10 @@ export function BusaBaseTable({
                       <RecordTableCell
                         client={client}
                         currentRecordHref={mergeSearchIntoHref(
-                          `/base/${base?.slug ?? record.base.slug}/${record.id}`,
+                          withSourceView(
+                            `/base/${base?.slug ?? record.base.slug}/${record.id}`,
+                            sourceViewSlug,
+                          ),
                           currentSearch,
                         )}
                         field={field}
@@ -2974,6 +2984,7 @@ function RecordTableCellContent({
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const currentSearch = useSearch();
+  const sourceViewSlug = useSourceViewSlug();
   const rawValue = record.headCommit.payload[field.slug];
   const chips = getFieldChipEntries(field, rawValue);
   const kind = fieldDisplayKind(field.type);
@@ -3220,7 +3231,10 @@ function RecordTableCellContent({
               <Link
                 className={`${chipClassName} text-primary transition-colors hover:bg-primary/10 hover:underline`}
                 href={mergeSearchIntoHref(
-                  `/base/${linkedRecord.base.slug}/${linkedRecord.id}`,
+                  withSourceView(
+                    `/base/${linkedRecord.base.slug}/${linkedRecord.id}`,
+                    linkedRecord.base.id === record.base.id ? sourceViewSlug : null,
+                  ),
                   currentSearch,
                 )}
                 key={recordId}

@@ -155,6 +155,8 @@ import {
   resolveActiveRecord,
 } from "./helpers/record-snapshots";
 import { isConflictErrorMessage } from "./helpers/search";
+import { SourceViewProvider } from "./helpers/source-view-context";
+import { baseCrumbHref, resolveCarriedViewSlug, withSourceView } from "./helpers/source-view-url";
 import {
   isDefaultViewSettingsSettled,
   resolveDefaultViewPath,
@@ -1481,6 +1483,10 @@ function BusabaseDashboardContent({
     document.title = formatDashboardDocumentTitle(currentPageTitle, initialDocumentTitle.current);
   }, [currentPageTitle, isCurrentRouteTitleLoading]);
 
+  // Record pages carry `fromView` so the Base crumb returns to the view the
+  // record was opened from. A slug that is no longer an active view falls
+  // back to the bare Base, which opens on the default view.
+  const carriedViewSlug = baseViewsSettled ? resolveCarriedViewSlug(search, baseViews) : null;
   const breadcrumbItems = useMemo<BusabaseBreadcrumbItem[]>(() => {
     if (
       routeNodeRef &&
@@ -1614,7 +1620,7 @@ function BusabaseDashboardContent({
       return [
         { label: messages.nav.workspace },
         {
-          href: activeBase ? `/base/${activeBase.slug}` : undefined,
+          href: activeBase ? baseCrumbHref(activeBase.slug, carriedViewSlug) : undefined,
           isNode: true,
           label: activeBase?.name ?? messages.nav.base,
         },
@@ -1627,15 +1633,17 @@ function BusabaseDashboardContent({
         { label: messages.nav.workspace },
         {
           href: activeRecord
-            ? `/base/${activeRecord.base.slug}`
+            ? baseCrumbHref(activeRecord.base.slug, carriedViewSlug)
             : activeBase
-              ? `/base/${activeBase.slug}`
+              ? baseCrumbHref(activeBase.slug, carriedViewSlug)
               : undefined,
           isNode: true,
           label: activeBase?.name ?? activeRecord?.base.name ?? messages.nav.base,
         },
         {
-          href: activeRecord ? `/base/${activeRecord.base.slug}/${activeRecord.id}` : undefined,
+          href: activeRecord
+            ? withSourceView(`/base/${activeRecord.base.slug}/${activeRecord.id}`, carriedViewSlug)
+            : undefined,
           label: activeRecord ? getRecordTitle(activeRecord, messages) : messages.common.record,
         },
         { label: messages.common.edit },
@@ -1647,9 +1655,9 @@ function BusabaseDashboardContent({
         { label: messages.nav.workspace },
         {
           href: activeRecord
-            ? `/base/${activeRecord.base.slug}`
+            ? baseCrumbHref(activeRecord.base.slug, carriedViewSlug)
             : activeBase
-              ? `/base/${activeBase.slug}`
+              ? baseCrumbHref(activeBase.slug, carriedViewSlug)
               : undefined,
           isNode: true,
           label: activeBase?.name ?? activeRecord?.base.name ?? messages.nav.base,
@@ -1683,6 +1691,7 @@ function BusabaseDashboardContent({
     activeBase,
     activeDetailNode,
     activeRecord,
+    carriedViewSlug,
     agentDetailParams,
     isAgentDetailRoute,
     isArchivedRoute,
@@ -2199,13 +2208,13 @@ function BusabaseDashboardContent({
           return;
         }
         await refresh();
-        setLocation(`/base/${record.base.slug}`);
+        setLocation(baseCrumbHref(record.base.slug, resolveCarriedViewSlug(search, baseViews)));
         return;
       }
       setLocation(`/inbox/${result.id}`);
       await refresh();
     },
-    [client, previewRecordId, refresh, setLocation, writeRecordPreviewUrl],
+    [baseViews, client, previewRecordId, refresh, search, setLocation, writeRecordPreviewUrl],
   );
 
   // Bulk delete from the table's multi-select toolbar. There is no batch
@@ -3754,35 +3763,43 @@ function BusabaseDashboardContent({
         scopeKey={airAppKeepAliveScopeKey}
       />
       {previewRecordId ? (
-        <RecordDetailDialog
-          // A pasted `?record=` can name a record from another Base; its own
-          // links (full page, edit, activity) must follow the record.
-          baseSlug={
-            activeRecord?.base.slug ??
-            activeBase?.slug ??
-            activeBase?.nodeId ??
-            activeBase?.id ??
-            ""
-          }
-          client={client}
-          error={
-            fallbackRecordQuery.error
-              ? presentCoreError(
-                  messages,
-                  locale,
-                  fallbackRecordQuery.error,
-                  messages.recordView.recordNotFoundBody,
-                )
+        <SourceViewProvider
+          slug={
+            selectedBaseView && activeRecord?.base.id === activeBase?.id
+              ? selectedBaseView.slug
               : null
           }
-          isLoading={isRecordReadPending}
-          key={previewRecordId}
-          onClose={closeRecordPreview}
-          onDeleteChangeRequest={submitDeleteRecord}
-          record={fallbackRecordQuery.error ? null : activeRecord}
-          records={records}
-          returnFocusTo={recordPreview?.trigger ?? null}
-        />
+        >
+          <RecordDetailDialog
+            // A pasted `?record=` can name a record from another Base; its own
+            // links (full page, edit, activity) must follow the record.
+            baseSlug={
+              activeRecord?.base.slug ??
+              activeBase?.slug ??
+              activeBase?.nodeId ??
+              activeBase?.id ??
+              ""
+            }
+            client={client}
+            error={
+              fallbackRecordQuery.error
+                ? presentCoreError(
+                    messages,
+                    locale,
+                    fallbackRecordQuery.error,
+                    messages.recordView.recordNotFoundBody,
+                  )
+                : null
+            }
+            isLoading={isRecordReadPending}
+            key={previewRecordId}
+            onClose={closeRecordPreview}
+            onDeleteChangeRequest={submitDeleteRecord}
+            record={fallbackRecordQuery.error ? null : activeRecord}
+            records={records}
+            returnFocusTo={recordPreview?.trigger ?? null}
+          />
+        </SourceViewProvider>
       ) : null}
     </>
   );
