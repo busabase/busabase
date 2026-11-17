@@ -81,6 +81,8 @@ import {
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import { fetchRecordsByIds } from "../helpers/linked-records";
 import { emptyLookupValues } from "../helpers/lookup";
+import { useSourceViewSlug } from "../helpers/source-view-context";
+import { baseCrumbHref, readSourceViewSlug, withSourceView } from "../helpers/source-view-url";
 import type { RecordSubmitOptions } from "../helpers/view-types";
 import type { AttachmentUploadOptions } from "../hooks/use-attachment-upload";
 import { useNodeLocator } from "../hooks/use-copy-locator";
@@ -327,6 +329,7 @@ export function RecordDetailView({
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const currentSearch = useSearch();
+  const sourceViewSlug = useSourceViewSlug();
   const isAnon = useIsAnonymousVisitor();
   const orpc = useDashboardOrpc();
   const [, setLocation] = useLocation();
@@ -428,7 +431,10 @@ export function RecordDetailView({
                 className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground text-sm transition-colors hover:bg-accent"
                 onClick={(event) => {
                   setLocation(
-                    mergeSearchIntoHref(`/base/${baseSlug}/${record.id}/activity`, currentSearch),
+                    mergeSearchIntoHref(
+                      withSourceView(`/base/${baseSlug}/${record.id}/activity`, sourceViewSlug),
+                      currentSearch,
+                    ),
                   );
                   event.currentTarget.closest("details")?.removeAttribute("open");
                 }}
@@ -607,7 +613,7 @@ export function RecordDetailView({
                 <Link
                   className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground"
                   href={mergeSearchIntoHref(
-                    `/base/${baseSlug}/${record.id}/activity`,
+                    withSourceView(`/base/${baseSlug}/${record.id}/activity`, sourceViewSlug),
                     currentSearch,
                   )}
                 >
@@ -630,7 +636,7 @@ export function RecordDetailView({
                 <Link
                   className="inline-flex items-center gap-1 text-muted-foreground text-xs hover:text-foreground"
                   href={mergeSearchIntoHref(
-                    `/base/${baseSlug}/${record.id}/activity`,
+                    withSourceView(`/base/${baseSlug}/${record.id}/activity`, sourceViewSlug),
                     currentSearch,
                   )}
                 >
@@ -743,6 +749,7 @@ export function RecordEditorView({
 }) {
   const messages = useCoreI18n();
   const resolveIString = useIString();
+  const currentSearch = useSearch();
   const [fields, setFields] = useState<Record<string, unknown>>(() =>
     Object.fromEntries(
       (base?.fields ?? record?.base.fields ?? []).map((field) => [
@@ -950,8 +957,11 @@ export function RecordEditorView({
             className="rounded-md border border-border/70 bg-card px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent"
             href={
               mode === "edit" && record
-                ? `/base/${record.base.slug}/${record.id}`
-                : `/base/${editorBase.slug}`
+                ? withSourceView(
+                    `/base/${record.base.slug}/${record.id}`,
+                    readSourceViewSlug(currentSearch),
+                  )
+                : baseCrumbHref(editorBase.slug, readSourceViewSlug(currentSearch))
             }
           >
             {messages.common.cancel}
@@ -1949,6 +1959,7 @@ function RecordLinkedFromPanel({ record }: { record: RecordVO }) {
   const messages = useCoreI18n();
   const resolveIString = useIString();
   const currentSearch = useSearch();
+  const sourceViewSlug = useSourceViewSlug();
   const [expanded, setExpanded] = useState(false);
   // Hosts and tests may mount the record page with a partial client; the panel
   // is an extra, so it simply stays hidden when `records` is not available.
@@ -2058,7 +2069,10 @@ function RecordLinkedFromPanel({ record }: { record: RecordVO }) {
                     aria-label={fmt(messages.reverseRelation.openSource, { record: label })}
                     className="max-w-64 truncate rounded-md border bg-card px-2 py-0.5 text-primary text-xs transition-colors hover:border-primary/40 hover:bg-primary/5 hover:underline"
                     href={mergeSearchIntoHref(
-                      `/base/${source.base.slug}/${source.id}`,
+                      withSourceView(
+                        `/base/${source.base.slug}/${source.id}`,
+                        source.base.id === record.base.id ? sourceViewSlug : null,
+                      ),
                       currentSearch,
                     )}
                     key={source.id}

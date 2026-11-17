@@ -19,6 +19,8 @@ import {
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { retryRecordRead } from "../helpers/query-state";
+import { useSourceViewSlug } from "../helpers/source-view-context";
+import { withSourceView } from "../helpers/source-view-url";
 import { useDashboardOrpc } from "../orpc-context";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { DragReviewNotice } from "./base-kanban";
@@ -137,6 +139,7 @@ export function BusaBaseGantt({
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const currentSearch = useSearch();
+  const sourceViewSlug = useSourceViewSlug();
   const isAnon = useIsAnonymousVisitor();
   const permissionLevel = useWorkspacePermissionLevel();
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -571,7 +574,10 @@ export function BusaBaseGantt({
               >
                 <Link
                   className="truncate font-medium text-foreground text-sm hover:underline"
-                  href={mergeSearchIntoHref(`/base/${baseSlug}/${row.record.id}`, currentSearch)}
+                  href={mergeSearchIntoHref(
+                    withSourceView(`/base/${baseSlug}/${row.record.id}`, sourceViewSlug),
+                    currentSearch,
+                  )}
                   title={getRecordTitle(row.record, messages)}
                 >
                   {getRecordTitle(row.record, messages)}
