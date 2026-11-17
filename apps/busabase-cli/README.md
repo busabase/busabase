@@ -4,6 +4,10 @@ Command-line client for the [Busabase](https://busabase.com) OpenAPI REST API. I
 talks to a local or remote `busabase server` over `/api/v1`, with a fully typed
 client generated from the shared oRPC contract.
 
+> **Connecting an AI agent?** Have it read
+> [busabase.com/SETUP_SKILL.md](https://busabase.com/SETUP_SKILL.md): it signs in through a browser
+> link (`busabase-cli login`) and installs the Busabase skills — no API key to paste.
+
 > Want the server too? Install [`busabase`](https://www.npmjs.com/package/busabase)
 > instead — it bundles this CLI **and** adds `busabase server`, so `busabase <cmd>`
 > gives you every command below plus a zero-setup local instance.

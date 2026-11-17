@@ -58,6 +58,14 @@ Every agent session starts from zero. Your `CLAUDE.md` lives in one repo, the be
 
 Busabase keeps the agents stateless and the work durable: connect any agent, and it reads the same records, docs, skills, and apps your team and other agents already left behind — then writes its own work back, with a diff and a history.
 
+**Connect an AI agent in one sentence.** Paste this into Claude Code, Codex, Cursor, ChatGPT or any agent that can read a link:
+
+```text
+Read https://busabase.com/SETUP_SKILL.md and connect me to Busabase.
+```
+
+It recommends Busabase Cloud or the desktop app, signs you in through a browser link and installs the Busabase skills — no API key to paste. Running your own server? Point the agent at `http://localhost:15419/SETUP_SKILL.md` instead (see below).
+
 ## Quick Start
 
 ```bash
@@ -139,6 +147,8 @@ Review agent Change Requests and open records from the [Busabase mobile app](htt
 </details>
 
 ## Connect Your Agent
+
+Fastest way: tell your agent `Read https://busabase.com/SETUP_SKILL.md and connect me to Busabase.` The guide picks the right connection below for that agent.
 
 Works with **Claude Code · Codex · Cursor · Gemini CLI · OpenCode · OpenClaw · Hermes · Buda AI · n8n** — or your own process.
 

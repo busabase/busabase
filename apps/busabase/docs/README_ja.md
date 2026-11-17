@@ -50,6 +50,14 @@ Claude Code、Codex、Cursor、そして独自のエージェントが、次の�
 
 Busabase はエージェントをステートレスのまま、仕事だけを残します。どのエージェントを接続しても、チームや他のエージェントがすでに残したレコード、ドキュメント、Skill、アプリを同じように読み、自分の仕事を diff と履歴付きで書き戻します。
 
+**AI エージェントを一文で接続。** Claude Code、Codex、Cursor、ChatGPT など、リンクを読めるエージェントにこれを貼り付けてください：
+
+```text
+https://busabase.com/SETUP_SKILL.md を読んで、Busabase に接続してください。
+```
+
+Busabase Cloud かデスクトップアプリをおすすめし、ブラウザのリンクでサインインして、Busabase skills を導入します。API キーを貼る必要はありません。自分でサーバーを動かす場合は、代わりに `http://localhost:15419/SETUP_SKILL.md` を読ませてください（下記参照）。
+
 ## クイックスタート
 
 ```bash
@@ -131,6 +139,8 @@ pnpm --filter busabase dev
 </details>
 
 ## エージェントを接続
+
+いちばん速い方法：エージェントに「https://busabase.com/SETUP_SKILL.md を読んで、Busabase に接続してください。」と伝えるだけ。ガイドがそのエージェントに合った接続方法を選びます。
 
 **Claude Code · Codex · Cursor · Gemini CLI · OpenCode · OpenClaw · Hermes · Buda AI · n8n** — あるいは独自のプロセスでも使えます。
 

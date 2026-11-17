@@ -52,6 +52,14 @@
 
 Busabase 让 Agent 保持无状态，让工作留得住：接入任意 Agent，它读到的是团队和其他 Agent 已经留下的同一份记录、文档、Skill 和应用——再把自己的工作写回来，带 diff，留历史。
 
+**一句话接入你的 AI Agent。** 把这句话发给 Claude Code、Codex、Cursor、ChatGPT 或任何能读链接的 Agent：
+
+```text
+请读取 https://busabase.com/SETUP_SKILL.md，帮我连接 Busabase。
+```
+
+它会推荐 Busabase Cloud 或桌面应用，用浏览器链接帮你登录，并装好 Busabase skills——不用粘贴 API key。自己跑服务器？改让 Agent 读 `http://localhost:15419/SETUP_SKILL.md`（见下文）。
+
 ## 快速开始
 
 ```bash
@@ -133,6 +141,8 @@ pnpm --filter busabase dev
 </details>
 
 ## 连接你的 Agent
+
+最快的方式：对你的 Agent 说「请读取 https://busabase.com/SETUP_SKILL.md，帮我连接 Busabase。」指南会为这个 Agent 选好下面合适的接入方式。
 
 支持 **Claude Code · Codex · Cursor · Gemini CLI · OpenCode · OpenClaw · Hermes · Buda AI · n8n**——或者你自己的程序。
 
