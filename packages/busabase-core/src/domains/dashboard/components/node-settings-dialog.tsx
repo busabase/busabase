@@ -271,9 +271,18 @@ function GeneralTabContent({
   const search = useSearch();
 
   const updateSettings = useMutation(orpc.nodes.updateSettings.mutationOptions());
+  // Hosts and tests sometimes hand this dialog a client that only implements
+  // the node writes. The view list is optional in that case: the field stays
+  // on "loading" rather than throwing while the rest of the form still works.
+  const listBaseViews = orpc.bases?.listViews;
   const viewsQuery = useQuery({
-    ...orpc.bases.listViews.queryOptions({ input: { baseId: nodeId } }),
-    enabled: open && nodeType === "base",
+    ...(listBaseViews
+      ? listBaseViews.queryOptions({ input: { baseId: nodeId } })
+      : {
+          queryKey: ["busabase", "node-settings", "views", nodeId],
+          queryFn: async () => [],
+        }),
+    enabled: open && nodeType === "base" && Boolean(listBaseViews),
   });
 
   const savedDefaultViewChoice = (() => {
