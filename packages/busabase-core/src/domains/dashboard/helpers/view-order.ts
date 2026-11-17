@@ -17,23 +17,34 @@ export const sortViewsByPosition = <T extends Pick<ViewVO, "position" | "created
   );
 
 /**
- * Where a bare `/base/<slug>` should land: the Base's leftmost view, keeping
- * the current query string (`?space=…`, `?demo`, …). `null` when the Base has
- * no views — the caller then keeps rendering the plain all-records grid.
+ * Where a bare `/base/<slug>` should land.
+ *
+ * `defaultViewSlug` wins when it names one of `views`. Otherwise the leftmost
+ * view does — tab order stays the default, and the setting is only how a Base
+ * opens somewhere else. A slug that matches nothing is ignored, same as
+ * leaving the setting unset. The current query string (`?space=…`, `?demo`,
+ * …) is kept. `null` when the Base has no views — the caller then keeps
+ * rendering the plain all-records grid.
  */
 export const resolveDefaultViewPath = ({
   baseSlug,
+  defaultViewSlug,
   search = "",
   views,
 }: {
   baseSlug: string;
+  defaultViewSlug?: string | null;
   search?: string;
   views: readonly Pick<ViewVO, "position" | "createdAt" | "id" | "slug">[];
 }): string | null => {
-  const [first] = sortViewsByPosition(views);
-  if (!first || !baseSlug) return null;
+  const ordered = sortViewsByPosition(views);
+  const preferred = defaultViewSlug
+    ? ordered.find((view) => view.slug === defaultViewSlug)
+    : undefined;
+  const target = preferred ?? ordered[0];
+  if (!target || !baseSlug) return null;
   const query = search.replace(/^\?/, "");
-  return `/base/${baseSlug}/${first.slug}${query ? `?${query}` : ""}`;
+  return `/base/${baseSlug}/${target.slug}${query ? `?${query}` : ""}`;
 };
 
 /**

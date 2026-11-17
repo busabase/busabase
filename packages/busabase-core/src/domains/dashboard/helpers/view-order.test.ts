@@ -70,6 +70,34 @@ describe("resolveDefaultViewPath", () => {
       }),
     ).toBeNull();
   });
+
+  it("opens settings.defaultViewSlug when that view is active, ahead of tab order", () => {
+    const views = [
+      view("grid", 0, "2026-01-01T00:00:00.000Z"),
+      view("board", 1, "2026-02-01T00:00:00.000Z"),
+    ];
+    expect(
+      resolveDefaultViewPath({ baseSlug: "tasks", defaultViewSlug: "board-slug", views }),
+    ).toBe("/base/tasks/board-slug");
+    expect(
+      resolveDefaultViewPath({
+        baseSlug: "tasks",
+        defaultViewSlug: "board-slug",
+        search: "space=tnl_1",
+        views,
+      }),
+    ).toBe("/base/tasks/board-slug?space=tnl_1");
+  });
+
+  it("ignores a default that names no active view and opens the leftmost tab", () => {
+    const views = [view("grid", 0, "2026-01-01T00:00:00.000Z")];
+    expect(resolveDefaultViewPath({ baseSlug: "tasks", defaultViewSlug: "missing", views })).toBe(
+      "/base/tasks/grid-slug",
+    );
+    expect(resolveDefaultViewPath({ baseSlug: "tasks", defaultViewSlug: null, views })).toBe(
+      "/base/tasks/grid-slug",
+    );
+  });
 });
 
 describe("applyOptimisticViewReorder", () => {
