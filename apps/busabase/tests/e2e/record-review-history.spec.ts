@@ -70,9 +70,10 @@ test("record review preview stays bounded and opens pageable record activity", a
   });
 
   const more = history.getByRole("link", { name: "See all" });
-  await expect(more).toHaveAttribute("href", `${recordPath}/activity`);
+  // Opened from the grid, so the activity link keeps that view (`fromView`).
+  await expect(more).toHaveAttribute("href", new RegExp(`${recordPath}/activity(?:\\?.*)?$`));
   await more.click();
-  await expect(page).toHaveURL(new RegExp(`${record.id}/activity$`));
+  await expect(page).toHaveURL(new RegExp(`${record.id}/activity(?:\\?.*)?$`));
   const activity = page.locator('[data-dashboard-scroll="activity"]');
   await expect(activity.locator("a")).toHaveCount(50);
   const firstPageHrefs = await activity
