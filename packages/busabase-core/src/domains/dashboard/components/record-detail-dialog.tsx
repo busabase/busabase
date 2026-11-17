@@ -6,6 +6,8 @@ import { useSearch } from "wouter";
 import { useCoreI18n } from "../../../i18n";
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { useSourceViewSlug } from "../helpers/source-view-context";
+import { withSourceView } from "../helpers/source-view-url";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { DialogContent } from "./localized-dialog-content";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
@@ -27,10 +29,14 @@ export function RecordDetailDialog({
 }) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
+  const sourceViewSlug = useSourceViewSlug();
   const isAnon = useIsAnonymousVisitor();
   const { record, baseSlug } = detailProps;
   const recordHref = record
-    ? mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)
+    ? mergeSearchIntoHref(
+        withSourceView(`/base/${baseSlug}/${record.id}`, sourceViewSlug),
+        currentSearch,
+      )
     : null;
 
   return (
@@ -71,7 +77,10 @@ export function RecordDetailDialog({
               {!isAnon ? (
                 <Link
                   className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 font-medium text-muted-foreground text-xs hover:bg-muted/60 hover:text-foreground"
-                  href={mergeSearchIntoHref(`/base/${baseSlug}/${record?.id}/edit`, currentSearch)}
+                  href={mergeSearchIntoHref(
+                    withSourceView(`/base/${baseSlug}/${record?.id}/edit`, sourceViewSlug),
+                    currentSearch,
+                  )}
                 >
                   <Pencil aria-hidden="true" size={14} />
                   {messages.recordView.edit}

@@ -44,6 +44,7 @@ import {
   diffSelectChoices,
   type SelectChoice,
 } from "../helpers/select-choices";
+import { SourceViewProvider } from "../helpers/source-view-context";
 import type {
   BaseTableViewState,
   CreateBaseFieldPayload,
@@ -234,54 +235,56 @@ export function BaseDetailView({
   const showsPagination =
     !activeView || activeView.type === "table" || activeView.type === "gallery";
   return (
-    <section className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
-      <div
-        className="min-h-0 min-w-0 flex-1 overflow-auto"
-        data-base-detail-scroll
-        ref={scrollElementRef}
-      >
-        <BaseTopbarSlots base={base} orpc={orpc} />
-        <div className="px-6 py-5">
-          <SubmitPermissionProvider permissionLevel={basePermissionLevel}>
-            <BusaBaseTable
-              activeView={activeView}
-              viewState={viewState}
-              client={client}
-              archivedViews={baseArchivedViews}
-              archivedRecords={baseArchivedRecords}
-              archivedPagination={archivedPagination}
-              base={base}
-              onCreateView={onCreateView}
-              onDeleteView={onDeleteView}
-              onDeleteRecords={onDeleteRecords}
-              onImportRecords={onImportRecords}
-              onUpdateRecords={onUpdateRecords}
-              onRestoreView={onRestoreView}
-              onRestoreRecord={onRestoreRecord}
-              onMoveRecord={onMoveRecord}
-              onOpenRecord={onOpenRecord}
-              onPatchRecord={onPatchRecord}
-              onReorderView={onReorderView}
-              onUpdateRecordCell={onUpdateRecordCell}
-              onUploadAttachment={onUploadAttachment}
-              onUpdateView={onUpdateView}
-              records={filteredRecords}
-              relationRecords={records}
-              pagination={pagination}
-              recordFind={recordFind}
-              scrollElementRef={scrollElementRef}
-              views={baseViews}
-            />
-          </SubmitPermissionProvider>
+    <SourceViewProvider slug={activeView?.slug}>
+      <section className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
+        <div
+          className="min-h-0 min-w-0 flex-1 overflow-auto"
+          data-base-detail-scroll
+          ref={scrollElementRef}
+        >
+          <BaseTopbarSlots base={base} orpc={orpc} />
+          <div className="px-6 py-5">
+            <SubmitPermissionProvider permissionLevel={basePermissionLevel}>
+              <BusaBaseTable
+                activeView={activeView}
+                viewState={viewState}
+                client={client}
+                archivedViews={baseArchivedViews}
+                archivedRecords={baseArchivedRecords}
+                archivedPagination={archivedPagination}
+                base={base}
+                onCreateView={onCreateView}
+                onDeleteView={onDeleteView}
+                onDeleteRecords={onDeleteRecords}
+                onImportRecords={onImportRecords}
+                onUpdateRecords={onUpdateRecords}
+                onRestoreView={onRestoreView}
+                onRestoreRecord={onRestoreRecord}
+                onMoveRecord={onMoveRecord}
+                onOpenRecord={onOpenRecord}
+                onPatchRecord={onPatchRecord}
+                onReorderView={onReorderView}
+                onUpdateRecordCell={onUpdateRecordCell}
+                onUploadAttachment={onUploadAttachment}
+                onUpdateView={onUpdateView}
+                records={filteredRecords}
+                relationRecords={records}
+                pagination={pagination}
+                recordFind={recordFind}
+                scrollElementRef={scrollElementRef}
+                views={baseViews}
+              />
+            </SubmitPermissionProvider>
+          </div>
         </div>
-      </div>
-      {showsPagination && pagination ? (
-        <RecordsPaginationBar
-          className="mx-3 shrink-0 sm:mx-6 [&_ul]:flex-wrap [&_ul]:justify-end"
-          {...pagination}
-        />
-      ) : null}
-    </section>
+        {showsPagination && pagination ? (
+          <RecordsPaginationBar
+            className="mx-3 shrink-0 sm:mx-6 [&_ul]:flex-wrap [&_ul]:justify-end"
+            {...pagination}
+          />
+        ) : null}
+      </section>
+    </SourceViewProvider>
   );
 }
 

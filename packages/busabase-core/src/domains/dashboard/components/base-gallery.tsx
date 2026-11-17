@@ -18,6 +18,8 @@ import { getRecordTitle } from "../helpers/change-request";
 import { pickCoverMedia } from "../helpers/cover-media";
 import { getFieldPreviewText } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { useSourceViewSlug } from "../helpers/source-view-context";
+import { withSourceView } from "../helpers/source-view-url";
 import type { RecordsPagination } from "../helpers/view-types";
 import type { RecordFindControl } from "../hooks/use-record-find";
 import { CoverVideo } from "./cover-video";
@@ -56,6 +58,7 @@ function GalleryCard({
   const locale = useCoreLocale();
   const resolveIString = useIString();
   const currentSearch = useSearch();
+  const sourceViewSlug = useSourceViewSlug();
   const title = getRecordTitle(record, messages);
   const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null);
   const coverMedia = coverField ? pickCoverMedia(record.headCommit.payload[coverField.slug]) : null;
@@ -106,14 +109,20 @@ function GalleryCard({
     >
       <Link
         className="block aspect-[3/2] w-full overflow-hidden bg-muted/30"
-        href={mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)}
+        href={mergeSearchIntoHref(
+          withSourceView(`/base/${baseSlug}/${record.id}`, sourceViewSlug),
+          currentSearch,
+        )}
       >
         {cover}
       </Link>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5 px-3 py-2.5">
         <Link
           className="truncate font-medium text-foreground text-sm hover:underline"
-          href={mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)}
+          href={mergeSearchIntoHref(
+            withSourceView(`/base/${baseSlug}/${record.id}`, sourceViewSlug),
+            currentSearch,
+          )}
           title={title}
         >
           {title}

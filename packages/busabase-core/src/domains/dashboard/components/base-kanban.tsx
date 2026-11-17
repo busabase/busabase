@@ -31,6 +31,8 @@ import {
   combineRecordCollectionStatus,
   type RecordCollectionStatus,
 } from "../helpers/record-collection-status";
+import { useSourceViewSlug } from "../helpers/source-view-context";
+import { withSourceView } from "../helpers/source-view-url";
 import { useLinkedRecords } from "../hooks/use-linked-records";
 import type { RecordFindControl } from "../hooks/use-record-find";
 import { useDashboardOrpc } from "../orpc-context";
@@ -189,6 +191,7 @@ function KanbanCard({
   const locale = useCoreLocale();
   const resolveIString = useIString();
   const currentSearch = useSearch();
+  const sourceViewSlug = useSourceViewSlug();
   const suppressDragClick = useRef(false);
   const title = getRecordTitle(record, messages);
   const primaryFieldSlug = getPrimaryField(record.base)?.slug;
@@ -268,7 +271,10 @@ function KanbanCard({
       {coverField ? (
         <KanbanCover
           fit={coverFit}
-          href={mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)}
+          href={mergeSearchIntoHref(
+            withSourceView(`/base/${baseSlug}/${record.id}`, sourceViewSlug),
+            currentSearch,
+          )}
           onClick={openRecord}
           value={record.headCommit.payload[coverField.slug]}
         />
@@ -276,7 +282,10 @@ function KanbanCard({
       <Link
         className="block truncate font-medium text-foreground text-sm hover:underline"
         data-kanban-record-title
-        href={mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)}
+        href={mergeSearchIntoHref(
+          withSourceView(`/base/${baseSlug}/${record.id}`, sourceViewSlug),
+          currentSearch,
+        )}
         onClick={openRecord}
         title={title}
       >
