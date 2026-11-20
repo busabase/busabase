@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { describe, expect, it, vi } from "vitest";
 import {
   applyOptimisticViewReorder,
+  isDefaultViewSettingsSettled,
   isOnlyRemainingView,
   resolveDefaultViewPath,
   sortViewsByPosition,
@@ -12,6 +14,49 @@ const view = (id: string, position: number, createdAt: string, baseId = "bse_1")
   id,
   position,
   slug: `${id}-slug`,
+});
+
+describe("default-view settings readiness", () => {
+  it("waits for saved settings when returning to a bare Base with an invalidated cache", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const queryKey = ["nodes", "get", "tasks"];
+    queryClient.setQueryData(queryKey, { defaultViewSlug: null as string | null });
+    let finishFetch!: (settings: { defaultViewSlug: string }) => void;
+    const freshSettings = new Promise<{ defaultViewSlug: string }>((resolve) => {
+      finishFetch = resolve;
+    });
+    const options = { queryKey, queryFn: () => freshSettings, enabled: false };
+    const observer = new QueryObserver(queryClient, options);
+    const unsubscribe = observer.subscribe(() => undefined);
+    try {
+      // The settings query is disabled while a view is open. Save invalidates
+      // it there; navigating to the bare Base enables a background refetch.
+      await queryClient.invalidateQueries({ queryKey });
+      observer.setOptions({ ...options, enabled: true });
+      const loading = observer.getCurrentResult();
+      expect(loading.isFetched).toBe(true);
+      expect(loading.isFetching).toBe(true);
+      expect(isDefaultViewSettingsSettled(loading)).toBe(false);
+
+      finishFetch({ defaultViewSlug: "review-slug" });
+      await vi.waitFor(() => expect(observer.getCurrentResult().isFetching).toBe(false));
+      const ready = observer.getCurrentResult();
+      expect(isDefaultViewSettingsSettled(ready)).toBe(true);
+      expect(
+        resolveDefaultViewPath({
+          baseSlug: "tasks",
+          defaultViewSlug: ready.data?.defaultViewSlug,
+          views: [
+            view("grid", 0, "2026-01-01T00:00:00.000Z"),
+            view("review", 1, "2026-01-01T00:00:00.000Z"),
+          ],
+        }),
+      ).toBe("/base/tasks/review-slug");
+    } finally {
+      unsubscribe();
+      queryClient.clear();
+    }
+  });
 });
 
 describe("sortViewsByPosition", () => {
@@ -69,6 +114,34 @@ describe("resolveDefaultViewPath", () => {
         views: [view("grid", 0, "2026-01-01T00:00:00.000Z")],
       }),
     ).toBeNull();
+  });
+
+  it("opens settings.defaultViewSlug when that view is active, ahead of tab order", () => {
+    const views = [
+      view("grid", 0, "2026-01-01T00:00:00.000Z"),
+      view("board", 1, "2026-02-01T00:00:00.000Z"),
+    ];
+    expect(
+      resolveDefaultViewPath({ baseSlug: "tasks", defaultViewSlug: "board-slug", views }),
+    ).toBe("/base/tasks/board-slug");
+    expect(
+      resolveDefaultViewPath({
+        baseSlug: "tasks",
+        defaultViewSlug: "board-slug",
+        search: "space=tnl_1",
+        views,
+      }),
+    ).toBe("/base/tasks/board-slug?space=tnl_1");
+  });
+
+  it("ignores a default that names no active view and opens the leftmost tab", () => {
+    const views = [view("grid", 0, "2026-01-01T00:00:00.000Z")];
+    expect(resolveDefaultViewPath({ baseSlug: "tasks", defaultViewSlug: "missing", views })).toBe(
+      "/base/tasks/grid-slug",
+    );
+    expect(resolveDefaultViewPath({ baseSlug: "tasks", defaultViewSlug: null, views })).toBe(
+      "/base/tasks/grid-slug",
+    );
   });
 });
 

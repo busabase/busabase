@@ -282,3 +282,58 @@ describe("a Base keeps at least one view", () => {
     expect(remaining).toEqual([{ id: second.id }]);
   });
 });
+
+describe("settings.defaultViewSlug", () => {
+  const readDefaultView = async (raw: RawClient, nodeId: string) => {
+    const detail = await raw.nodes.get({ nodeId, type: "base" });
+    return detail.node.settings?.defaultViewSlug ?? null;
+  };
+
+  it("stores the slug on the node, clears it with null, and drops it when that view is archived", async () => {
+    await seedScenario("default-view-slug");
+    const raw: RawClient = createRouterClient(busabaseRouter);
+    const base = await createBase(raw, "tasks");
+    const board = await createView(raw, base.id, "Board");
+    const later = await createView(raw, base.id, "Later");
+    const [grid] = await raw.bases.listViews({ baseId: base.id });
+
+    expect(await readDefaultView(raw, base.nodeId)).toBeNull();
+    const saved = await raw.nodes.updateSettings({
+      nodeId: base.nodeId,
+      settings: { defaultViewSlug: board.slug },
+    });
+    expect(saved.settings?.defaultViewSlug).toBe(board.slug);
+    expect(await readDefaultView(raw, base.nodeId)).toBe(board.slug);
+
+    await expect(
+      raw.nodes.updateSettings({ nodeId: base.nodeId, settings: { defaultViewSlug: "" } }),
+    ).rejects.toThrow();
+    await expect(
+      raw.nodes.updateSettings({
+        nodeId: base.nodeId,
+        settings: { notASetting: true } as never,
+      }),
+    ).rejects.toThrow();
+    // A rejected write must not have cleared the slug that was already stored.
+    expect(await readDefaultView(raw, base.nodeId)).toBe(board.slug);
+
+    // Archiving some other view leaves the default alone.
+    await raw.views.changeRequest({ operation: "delete", viewId: grid.id, autoMerge: true });
+    expect(await readDefaultView(raw, base.nodeId)).toBe(board.slug);
+
+    // Archiving the named view clears it. The Base then opens on the leftmost tab.
+    await raw.views.changeRequest({ operation: "delete", viewId: board.id, autoMerge: true });
+    expect(await readDefaultView(raw, base.nodeId)).toBeNull();
+
+    await raw.nodes.updateSettings({
+      nodeId: base.nodeId,
+      settings: { defaultViewSlug: later.slug },
+    });
+    const cleared = await raw.nodes.updateSettings({
+      nodeId: base.nodeId,
+      settings: { defaultViewSlug: null },
+    });
+    expect(cleared.settings?.defaultViewSlug ?? null).toBeNull();
+    expect(await readDefaultView(raw, base.nodeId)).toBeNull();
+  });
+});

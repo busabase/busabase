@@ -1888,6 +1888,11 @@ export const coreMessagesEn = {
     iconFileTooLarge: "Image must be under 2MB",
     iconUpdated: "Icon updated",
     iconUploadFailed: "Failed to upload icon",
+    defaultViewLabel: "Default view",
+    defaultViewHint: "The view this Base opens on. Leftmost view follows the tab order.",
+    defaultViewLeftmost: "Leftmost view",
+    defaultViewLoading: "Loading views…",
+    defaultViewLoadFailed: "Could not load this Base's views.",
   },
   base: {
     /** Placeholder for the relation field picker's server-backed search box. */

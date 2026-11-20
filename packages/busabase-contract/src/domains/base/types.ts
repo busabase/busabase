@@ -231,7 +231,7 @@ export interface ViewVO {
   type: ViewType;
   config: ViewConfigVO;
   status: "active" | "archived";
-  /** Shared tab order within the Base; the lowest is the view the Base opens on. */
+  /** Shared tab order within the Base. The lowest opens the Base when `settings.defaultViewSlug` is unset. */
   position: number;
   createdBy: string;
   createdByUser?: UserRefVO | null;

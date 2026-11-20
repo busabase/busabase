@@ -155,7 +155,11 @@ import {
   resolveActiveRecord,
 } from "./helpers/record-snapshots";
 import { isConflictErrorMessage } from "./helpers/search";
-import { resolveDefaultViewPath, sortViewsByPosition } from "./helpers/view-order";
+import {
+  isDefaultViewSettingsSettled,
+  resolveDefaultViewPath,
+  sortViewsByPosition,
+} from "./helpers/view-order";
 import type {
   BusabaseBreadcrumbItem,
   CreateBaseFieldPayload,
@@ -853,12 +857,29 @@ function BusabaseDashboardContent({
     baseViews.length > 0 ||
     viewsQuery.isFetched ||
     viewsQuery.failureCount > 0;
-  // Bare `/base/:slug` opens the Base's leftmost view.
-  // Every link in the app keeps pointing at the bare route; it is resolved
-  // here, once the views are known, with a history replace so Back skips it.
+  // Bare `/base/:slug` opens the Base's default view: the node's
+  // `settings.defaultViewSlug` when that slug is still an active view,
+  // otherwise the leftmost tab. Every link in the app keeps pointing at the
+  // bare route; it is resolved here, once the views and that setting are
+  // known, with a history replace so Back skips it.
+  const bareBaseRoute = Boolean(baseParams?.slug && activeBase);
+  const baseNodeQuery = useQuery({
+    ...orpc.nodes.get.queryOptions({
+      input: { nodeId: activeBase?.nodeId ?? "", type: "base" },
+    }),
+    enabled: bareBaseRoute,
+  });
+  const baseSettingsSettled = !bareBaseRoute || isDefaultViewSettingsSettled(baseNodeQuery);
+  const defaultViewSlug = baseNodeQuery.data?.node.settings?.defaultViewSlug ?? null;
+  const waitingForBareBaseTarget = bareBaseRoute && (!baseViewsSettled || !baseSettingsSettled);
   const defaultViewPath =
-    baseParams?.slug && activeBase && baseViewsSettled
-      ? resolveDefaultViewPath({ baseSlug: activeBase.slug, search, views: baseViews })
+    bareBaseRoute && activeBase && !waitingForBareBaseTarget
+      ? resolveDefaultViewPath({
+          baseSlug: activeBase.slug,
+          defaultViewSlug,
+          search,
+          views: baseViews,
+        })
       : null;
   useEffect(() => {
     if (defaultViewPath) {
@@ -884,13 +905,13 @@ function BusabaseDashboardContent({
   const isResolvingBaseRoute = Boolean(
     activeBase &&
       (defaultViewPath !== null ||
+        waitingForBareBaseTarget ||
         (!baseViewsSettled &&
-          (Boolean(baseParams?.slug) ||
-            (isBaseChildRoute &&
-              !selectedBaseView &&
-              !isBaseSetupRoute &&
-              !isBaseActivityRoute &&
-              baseChildParams?.childId !== "new")))),
+          isBaseChildRoute &&
+          !selectedBaseView &&
+          !isBaseSetupRoute &&
+          !isBaseActivityRoute &&
+          baseChildParams?.childId !== "new")),
   );
   const recordPaginationUrl = useMemo(() => readRecordPagination(search), [search]);
   // Table and Gallery render the parent page. Calendar and Gantt read their

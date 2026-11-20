@@ -99,7 +99,7 @@ export const baseContract = {
       tags: ["Views"],
       summary: "List views for a Base",
       successDescription:
-        "Saved views for a Base, in their shared tab order (`position`, then creation time). The first one is the view the Base opens on. Every Base keeps at least one active view. `status=archived` returns the soft-deleted ones instead.",
+        "Saved views for a Base, in their shared tab order (`position`, then creation time). With no `settings.defaultViewSlug` on the Base's node, the first one is the view the Base opens on. Every Base keeps at least one active view. `status=archived` returns the soft-deleted ones instead.",
     })
     .input(listByStatusInputSchema.extend({ baseId: z.string() }))
     .output(z.array(viewSchema)),

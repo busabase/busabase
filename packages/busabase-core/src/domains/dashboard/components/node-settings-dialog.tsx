@@ -20,6 +20,7 @@ import type { NodeIcon } from "busabase-contract/types";
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { Input } from "kui/input";
 import { Label } from "kui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
 import type { LucideIcon } from "lucide-react";
 import { Info, KeyRound, Shield, SlidersHorizontal } from "lucide-react";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -57,6 +58,9 @@ import { NodeSettingsPermissionsSlotContext } from "./node-settings-permissions-
 import { SplitSubmitButton } from "./split-submit-button";
 
 export type NodeSettingsTab = "general" | "info" | "permissions" | "signIn";
+
+/** Select value for "no default" — the Base opens on its leftmost tab. */
+const LEFTMOST_VIEW = "__leftmost__";
 
 export interface NodeSettingsDialogProps {
   orpc: BusabaseQueryUtils;
@@ -254,6 +258,8 @@ function GeneralTabContent({
   const [icon, setIcon] = useState<NodeIcon | null>(null);
   const [iconDirty, setIconDirty] = useState(false);
   const [runnerKind, setRunnerKind] = useState<AirAppEngineChoice>(FOLLOW_APP);
+  /** `null` until the person changes the select. The saved slug is shown until then. */
+  const [defaultViewDraft, setDefaultViewDraft] = useState<string | null>(null);
   /** What `airapp.json` asks for, so "follow the app" can name it. */
   const [appPreferred, setAppPreferred] = useState<AirAppRunnerKind | undefined>(undefined);
   const [appRequired, setAppRequired] = useState<AirAppRunnerKind | undefined>(undefined);
@@ -265,18 +271,53 @@ function GeneralTabContent({
   const search = useSearch();
 
   const updateSettings = useMutation(orpc.nodes.updateSettings.mutationOptions());
+  // Hosts and tests sometimes hand this dialog a client that only implements
+  // the node writes. The view list is optional in that case: the field stays
+  // on "loading" rather than throwing while the rest of the form still works.
+  const listBaseViews = orpc.bases?.listViews;
+  const viewsQuery = useQuery({
+    ...(listBaseViews
+      ? listBaseViews.queryOptions({ input: { baseId: nodeId } })
+      : {
+          queryKey: ["busabase", "node-settings", "views", nodeId],
+          queryFn: async () => [],
+        }),
+    enabled: open && nodeType === "base" && Boolean(listBaseViews),
+  });
+
+  const savedDefaultViewChoice = (() => {
+    if (!viewsQuery.isSuccess) return LEFTMOST_VIEW;
+    const saved = detail?.node.settings?.defaultViewSlug;
+    return saved && viewsQuery.data.some((view) => view.slug === saved) ? saved : LEFTMOST_VIEW;
+  })();
+  const defaultViewChoice = defaultViewDraft ?? savedDefaultViewChoice;
 
   /**
-   * Persist the engine override onto the node.
+   * Persist the system settings this dialog edits.
    *
-   * `null` clears it, which is what "follow the app" means — the server drops
-   * the key rather than storing a sentinel, so a later reader never has to
-   * decide whether `null` and absent differ. They do not.
+   * The endpoint replaces the whole object, so a save of one key has to send
+   * the other one too or it wipes it. `null` clears a key — "follow the app"
+   * for the engine, "leftmost tab" for the default view. The server drops the
+   * null rather than storing a sentinel.
    */
-  const saveEngine = async () => {
+  const persistNodeSettings = async () => {
+    const defaultViewDirty = defaultViewDraft !== null;
+    if (!runnerKindDirtyRef.current && !defaultViewDirty) return;
+    const current = detail?.node.settings;
     await updateSettings.mutateAsync({
       nodeId,
-      settings: { airappEngine: runnerKind === FOLLOW_APP ? null : runnerKind },
+      settings: {
+        airappEngine: runnerKindDirtyRef.current
+          ? runnerKind === FOLLOW_APP
+            ? null
+            : runnerKind
+          : (current?.airappEngine ?? null),
+        defaultViewSlug: defaultViewDirty
+          ? defaultViewChoice === LEFTMOST_VIEW
+            ? null
+            : defaultViewChoice
+          : (current?.defaultViewSlug ?? null),
+      },
     });
   };
 
@@ -288,6 +329,7 @@ function GeneralTabContent({
     }
     setName(nodeName);
     runnerKindDirtyRef.current = false;
+    setDefaultViewDraft(null);
     setAppPreferred(undefined);
     setAppRequired(undefined);
     setAppManifest(undefined);
@@ -415,7 +457,7 @@ function GeneralTabContent({
           },
         ],
       });
-      if (nodeType === "airapp" && runnerKindDirtyRef.current) await saveEngine();
+      if (runnerKindDirtyRef.current || defaultViewDraft !== null) await persistNodeSettings();
       // A merged slug change retires the url this page was reached by. Move to
       // the new one BEFORE invalidating, so the refetch runs against the new
       // slug rather than 404ing the old one on screen; `replace`, so Back does
@@ -510,6 +552,40 @@ function GeneralTabContent({
           value={description}
         />
       </div>
+
+      {nodeType === "base" ? (
+        <div className="space-y-2">
+          <Label htmlFor="node-settings-default-view">{t.defaultViewLabel}</Label>
+          {viewsQuery.isPending ? (
+            <p className="text-muted-foreground text-xs">{t.defaultViewLoading}</p>
+          ) : viewsQuery.isError ? (
+            <p className="text-destructive text-xs">{t.defaultViewLoadFailed}</p>
+          ) : (
+            <Select
+              disabled={!detail}
+              onValueChange={(next) => {
+                setDefaultViewDraft(next);
+              }}
+              value={defaultViewChoice}
+            >
+              <SelectTrigger id="node-settings-default-view">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={LEFTMOST_VIEW}>{t.defaultViewLeftmost}</SelectItem>
+                {(viewsQuery.data ?? []).map((view) => (
+                  <SelectItem key={view.id} value={view.slug}>
+                    {view.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <p className="text-muted-foreground text-xs" id="node-settings-default-view-hint">
+            {t.defaultViewHint}
+          </p>
+        </div>
+      ) : null}
 
       {nodeType === "airapp" ? (
         <AirAppEngineSetting
