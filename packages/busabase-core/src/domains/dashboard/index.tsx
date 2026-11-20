@@ -155,7 +155,11 @@ import {
   resolveActiveRecord,
 } from "./helpers/record-snapshots";
 import { isConflictErrorMessage } from "./helpers/search";
-import { resolveDefaultViewPath, sortViewsByPosition } from "./helpers/view-order";
+import {
+  isDefaultViewSettingsSettled,
+  resolveDefaultViewPath,
+  sortViewsByPosition,
+} from "./helpers/view-order";
 import type {
   BusabaseBreadcrumbItem,
   CreateBaseFieldPayload,
@@ -865,8 +869,7 @@ function BusabaseDashboardContent({
     }),
     enabled: bareBaseRoute,
   });
-  const baseSettingsSettled =
-    !bareBaseRoute || baseNodeQuery.isFetched || baseNodeQuery.failureCount > 0;
+  const baseSettingsSettled = !bareBaseRoute || isDefaultViewSettingsSettled(baseNodeQuery);
   const defaultViewSlug = baseNodeQuery.data?.node.settings?.defaultViewSlug ?? null;
   const waitingForBareBaseTarget = bareBaseRoute && (!baseViewsSettled || !baseSettingsSettled);
   const defaultViewPath =

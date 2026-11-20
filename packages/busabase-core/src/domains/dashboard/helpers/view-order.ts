@@ -1,6 +1,17 @@
 import type { ViewVO } from "busabase-contract/types";
 
 /**
+ * A cached result can be fetched while still refetching after a settings save.
+ * Wait for that request before redirecting, or the old default wins the race.
+ * A first failure still releases the route to its existing fallback.
+ */
+export const isDefaultViewSettingsSettled = (query: {
+  isFetched: boolean;
+  isFetching: boolean;
+  failureCount: number;
+}): boolean => (query.isFetched && !query.isFetching) || query.failureCount > 0;
+
+/**
  * Views of a Base in their shared tab order — `position`, ties broken by
  * creation time (then id, so the order is total). The server already lists
  * them this way; sorting again keeps an optimistic cache write, a host's seed
