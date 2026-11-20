@@ -223,12 +223,17 @@ export const demoIsDescendant = (nodeId: string, potentialAncestorId: string): b
  */
 export const demoNodeAncestorIds = async (
   nodeIdOrSlug: string,
-): Promise<{ ancestorIds: string[] }> => {
+): Promise<{
+  ancestorIds: string[];
+  ancestors: Array<{ id: string; name: string; slug: string; type: NodeVO["type"] }>;
+}> => {
   const parentById = new Map<string, string | null>();
+  const nodeById = new Map<string, NodeVO>();
   const idBySlug = new Map<string, string>();
   const visit = (nodes: NodeVO[], parentId: string | null) => {
     for (const node of nodes) {
       parentById.set(node.id, parentId);
+      nodeById.set(node.id, node);
       if (node.slug && !idBySlug.has(node.slug)) idBySlug.set(node.slug, node.id);
       if (node.children.length > 0) visit(node.children, node.id);
     }
@@ -238,8 +243,13 @@ export const demoNodeAncestorIds = async (
   // Accepts an id or a slug, mirroring the real one (whose `resolveVisibleNode`
   // does the same).
   const nodeId = parentById.has(nodeIdOrSlug) ? nodeIdOrSlug : idBySlug.get(nodeIdOrSlug);
-  if (!nodeId) return { ancestorIds: [] };
-  return { ancestorIds: await collectAncestorIds(nodeId, (id) => parentById.get(id)) };
+  if (!nodeId) return { ancestorIds: [], ancestors: [] };
+  const ancestorIds = await collectAncestorIds(nodeId, (id) => parentById.get(id));
+  const ancestors = ancestorIds.flatMap((id) => {
+    const node = nodeById.get(id);
+    return node ? [{ id: node.id, name: node.name, slug: node.slug, type: node.type }] : [];
+  });
+  return { ancestorIds, ancestors };
 };
 
 /**

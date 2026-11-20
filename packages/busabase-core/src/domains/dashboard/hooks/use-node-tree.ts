@@ -69,11 +69,10 @@ export function useNodeTree({
   // get/setQueryData (which need an exact cache-entry match, not a partial
   // one).
   const nodesQueryKey = nodesListQueryOptions.queryKey;
-  // Deliberately the BROADER `{}` (no input) key instead: a move must
-  // invalidate the root tree AND every lazily-fetched folder — each of which
-  // is its own `nodes.list` query — in one call. A partial key with no
-  // `input` matches every `nodes.list` variant regardless of its own input.
-  const nodesInvalidateQueryKey = orpc.nodes.list.queryOptions({}).queryKey;
+  // A move changes both the lazy tree and every descendant's ancestor path.
+  // Invalidate the whole nodes family so a visited descendant cannot retain
+  // an infinitely fresh breadcrumb for its former location.
+  const nodesInvalidateQueryKey = orpc.nodes.key();
   const moveNodeMutation = useMoveNode({
     apiClient,
     queryClient,

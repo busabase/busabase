@@ -331,9 +331,9 @@ export const busabaseContractRoutes = {
         method: "GET",
         path: "/nodes/{nodeId}/ancestors",
         tags: ["Nodes"],
-        summary: "List a node's ancestor ids",
+        summary: "List a node's ancestor folders",
         successDescription:
-          "The node's ancestor ids, root-first, excluding the node itself (`[]` directly under the workspace root). `nodeId` accepts an id or a slug, same as `nodes.get`; pass `type` when a slug exists under more than one type. Lets a depth-bounded, lazily-expanded tree open straight to a deep node on a cold load (a refresh, a bookmark, a shared link) without one round trip per level.",
+          "The node's ancestors, root-first, excluding the node itself and the workspace root (`[]` directly under the workspace root). `ancestorIds` is every id on that chain; `ancestors` repeats the same chain with name, slug and type for the rows this caller can see, which is what the header breadcrumb renders. `nodeId` accepts an id or a slug, same as `nodes.get`; pass `type` when a slug exists under more than one type. Lets a depth-bounded, lazily-expanded tree open straight to a deep node on a cold load (a refresh, a bookmark, a shared link) without one round trip per level.",
       })
       .input(getNodeInputSchema)
       .output(nodeAncestorsVOSchema),

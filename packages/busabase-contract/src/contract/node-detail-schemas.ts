@@ -133,14 +133,31 @@ export type NodeDetailVO = z.infer<typeof NodeDetailVOSchema>;
  * resolved to whichever row sorts first.
  */
 /**
- * `nodes.ancestors` output — the node's ancestor ids, ROOT-FIRST, excluding
- * the node itself. Ids only, deliberately: the sidebar already has (or can
- * lazily fetch) each ancestor's own row, and it only needs to know WHICH
- * folders to expand. Returning full nodes here would duplicate `nodes.list`
- * and make a cheap navigational lookup expensive.
+ * One ancestor in `nodes.ancestors`, root-first. A name/slug/type projection,
+ * not a `NodeVO`: the sidebar still expands from `ancestorIds`, and the header
+ * breadcrumb needs a label and a route without a second fetch per folder.
+ * Ancestors the caller cannot see are omitted here (their ids may still be
+ * listed in `ancestorIds` so the sidebar can try to expand them).
+ */
+export const nodeAncestorSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  type: z.enum(NODE_TYPES),
+});
+
+export type NodeAncestorSummary = z.infer<typeof nodeAncestorSummarySchema>;
+
+/**
+ * `nodes.ancestors` output — the node's ancestors, ROOT-FIRST, excluding the
+ * node itself and the workspace root. `ancestorIds` is the expand list the
+ * sidebar already uses. `ancestors` is the same chain reduced to the rows this
+ * caller can see, so a breadcrumb can name each folder on a cold load (the
+ * depth-bounded tree has not fetched them yet).
  */
 export const nodeAncestorsVOSchema = z.object({
   ancestorIds: z.array(z.string()),
+  ancestors: z.array(nodeAncestorSummarySchema),
 });
 
 export const getNodeInputSchema = z.object({

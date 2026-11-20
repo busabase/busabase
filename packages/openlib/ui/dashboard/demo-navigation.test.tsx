@@ -11,10 +11,22 @@ vi.mock("kui/breadcrumb", () => ({
   Breadcrumb: ({ children }: { children: ReactNode }) => <nav>{children}</nav>,
   BreadcrumbList: ({ children }: { children: ReactNode }) => <ol>{children}</ol>,
   BreadcrumbItem: ({ children }: { children: ReactNode }) => <li>{children}</li>,
-  BreadcrumbLink: ({ href, children }: { href: string; children: ReactNode }) => (
-    <a href={href}>{children}</a>
+  BreadcrumbLink: ({
+    href,
+    title,
+    children,
+  }: {
+    href: string;
+    title?: string;
+    children: ReactNode;
+  }) => (
+    <a href={href} title={title}>
+      {children}
+    </a>
   ),
-  BreadcrumbPage: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+  BreadcrumbPage: ({ title, children }: { title?: string; children: ReactNode }) => (
+    <span title={title}>{children}</span>
+  ),
   BreadcrumbSeparator: () => <li>/</li>,
 }));
 
@@ -95,5 +107,33 @@ describe("SPABreadcrumb", () => {
       render(<SPABreadcrumb rootHref="/dashboard" rootLabel="Dashboard" breadcrumb={breadcrumb} />);
     });
     expect(screen.getByText("Dashboard").getAttribute("href")).toBe("/dashboard");
+  });
+
+  it("renders an ordered folder trail and keeps the full name on each crumb", async () => {
+    const longName = "Quarterly Report for the Acme Launch Review Board";
+    await act(async () => {
+      render(
+        <SPABreadcrumb
+          rootHref="/dashboard"
+          rootLabel="Dashboard"
+          breadcrumb={{
+            parent: "Workspace",
+            title: longName,
+            crumbs: [
+              { href: "/home", label: "Workspace" },
+              { href: "/folder/projects", label: "Projects" },
+              { href: "/folder/acme", label: "Acme" },
+              { href: null, label: longName },
+            ],
+          }}
+        />,
+      );
+    });
+
+    expect(screen.getByText("Workspace").getAttribute("href")).toBe("/home");
+    expect(screen.getByText("Projects").getAttribute("href")).toBe("/folder/projects");
+    expect(screen.getByText("Acme").getAttribute("href")).toBe("/folder/acme");
+    expect(screen.getByText(longName).getAttribute("title")).toBe(longName);
+    expect(screen.queryByText("Dashboard")).toBeNull();
   });
 });

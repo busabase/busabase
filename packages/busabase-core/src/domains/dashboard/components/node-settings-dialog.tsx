@@ -417,7 +417,8 @@ function GeneralTabContent({
   // comment for the full "why a predicate over every query key" reasoning.
   const invalidateNodes = () =>
     Promise.all([
-      queryClient.invalidateQueries({ queryKey: orpc.nodes.list.queryOptions({}).queryKey }),
+      // Renaming a folder also changes the labels in descendants' trails.
+      queryClient.invalidateQueries({ queryKey: orpc.nodes.key() }),
       queryClient.invalidateQueries({
         predicate: (query) => {
           const keyStr = JSON.stringify(query.queryKey);

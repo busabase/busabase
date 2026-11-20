@@ -960,7 +960,8 @@ describe("Webhook automation domain — oRPC", () => {
               throw error;
             }
           `,
-          timeoutMs: 1000,
+          // This tests SSRF rejection, not timing; allow worker startup on busy CI.
+          timeoutMs: 5_000,
         },
         enabled: true,
       });
@@ -970,7 +971,7 @@ describe("Webhook automation domain — oRPC", () => {
       const settled = await waitFor(async () => {
         const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
         return deliveries.length > 0;
-      }, 2000);
+      }, 7_000);
       expect(settled, "expected a delivery to be recorded within the bounded wait").toBe(true);
 
       const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
@@ -1002,7 +1003,8 @@ describe("Webhook automation domain — oRPC", () => {
             console.log("errors:", JSON.stringify(errors));
             return { errorCount: errors.length };
           `,
-          timeoutMs: 3000,
+          // Eleven VM/host fetch round trips need headroom on a busy CI worker.
+          timeoutMs: 5_000,
         },
         enabled: true,
       });
@@ -1012,7 +1014,7 @@ describe("Webhook automation domain — oRPC", () => {
       const settled = await waitFor(async () => {
         const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });
         return deliveries.length > 0;
-      }, 5000);
+      }, 7_000);
       expect(settled, "expected a delivery to be recorded within the bounded wait").toBe(true);
 
       const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 5 });

@@ -259,4 +259,31 @@ describe("BusabaseTopbarBreadcrumb", () => {
     expect(markup).toContain('aria-current="page"');
     expect(markup).toContain(">Quarterly Report</span>");
   });
+
+  it("links ancestor folders and keeps a long path's full names", () => {
+    const markup = renderToStaticMarkup(
+      <Router hook={useStaticLocation} searchHook={useStaticSearch}>
+        <BusabaseTopbarBreadcrumb
+          items={[
+            { href: "/home", label: "Workspace" },
+            { href: "/folder/projects", label: "Projects" },
+            { href: "/folder/acme", label: "Acme" },
+            { href: "/base/personal-tasks", isNode: true, label: "Tasks" },
+            { label: "Board" },
+          ]}
+        />
+      </Router>,
+    );
+
+    expect(markup).toContain('href="/folder/projects"');
+    expect(markup).toContain('href="/folder/acme"');
+    expect(markup).toContain('href="/base/personal-tasks"');
+    expect(markup).toContain('title="Projects"');
+    expect(markup).toContain('title="Acme"');
+    expect(markup).toContain('title="Tasks"');
+    expect(markup).toContain('title="Board"');
+    // The narrow header moves the surrounding path steps into its menu.
+    expect(markup).toContain('aria-label="More"');
+    expect(markup).toContain(">Board</span>");
+  });
 });
