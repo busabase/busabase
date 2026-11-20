@@ -6,6 +6,7 @@ import { defineConfig } from "tsdown";
 export default defineConfig({
   entry: {
     apply: "src/apply.ts",
+    audit: "src/audit.ts",
     client: "src/client.ts",
     collect: "src/collect.ts",
     discover: "src/discover.ts",
