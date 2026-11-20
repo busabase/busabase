@@ -282,7 +282,7 @@ describe("BusabaseTopbarBreadcrumb", () => {
     expect(markup).toContain('title="Acme"');
     expect(markup).toContain('title="Tasks"');
     expect(markup).toContain('title="Board"');
-    // The two middle folders collapse on a narrow header; the menu lists them.
+    // The narrow header moves the surrounding path steps into its menu.
     expect(markup).toContain('aria-label="More"');
     expect(markup).toContain(">Board</span>");
   });

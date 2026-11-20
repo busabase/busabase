@@ -35,13 +35,16 @@ describe("BusabaseTopbarBreadcrumb folder path", () => {
       pointerType: "mouse",
     });
 
-    const projects = await screen.findByRole("menuitem", { name: "Projects" });
+    const workspace = await screen.findByRole("menuitem", { name: "Workspace" });
+    expect(workspace.getAttribute("href")).toBe("/home");
+    expect(screen.getByRole("menuitem", { name: "Board" }).textContent).toBe("Board");
+    const projects = screen.getByRole("menuitem", { name: "Projects" });
     const acme = screen.getByRole("menuitem", { name: "Acme" });
     expect(projects.getAttribute("href")).toBe("/folder/projects");
     expect(acme.getAttribute("href")).toBe("/folder/acme");
   });
 
-  it("shows a short folder path inline, with no overflow menu", () => {
+  it("keeps short-trail ancestors reachable from the path menu", async () => {
     render(
       <Router>
         <BusabaseTopbarBreadcrumb
@@ -57,6 +60,25 @@ describe("BusabaseTopbarBreadcrumb folder path", () => {
     expect(screen.getByRole("link", { name: "Projects" }).getAttribute("href")).toBe(
       "/folder/projects",
     );
+    fireEvent.pointerDown(screen.getByRole("button", { name: "More" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    expect((await screen.findByRole("menuitem", { name: "Projects" })).getAttribute("href")).toBe(
+      "/folder/projects",
+    );
+    expect(screen.getByRole("menuitem", { name: "Workspace" }).getAttribute("href")).toBe("/home");
+    expect(screen.getByText("Tasks").getAttribute("title")).toBe("Tasks");
+  });
+
+  it("does not create an empty path menu for a single node", () => {
+    render(
+      <Router>
+        <BusabaseTopbarBreadcrumb items={[{ isNode: true, label: "Tasks" }]} />
+      </Router>,
+    );
+
     expect(screen.queryByRole("button", { name: "More" })).toBeNull();
     expect(screen.getByText("Tasks").getAttribute("title")).toBe("Tasks");
   });

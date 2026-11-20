@@ -10,7 +10,7 @@ import type {
   ViewVO,
 } from "busabase-contract/types";
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
-import { Pencil, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
+import { Pencil, PencilRuler, Plus, RotateCcw, Star, Table2, Trash2 } from "lucide-react";
 import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib/i18n/i-string";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -2331,28 +2331,34 @@ export function BaseTopbarActions({
   // visitor has no business there and the mutations behind it are refused anyway.
   const isAnon = useIsAnonymousVisitor();
 
+  // Icons only on a phone: the two labels alone left the Base's name one
+  // character wide in the topbar. Each label stays as the link's name.
   return (
     <nav className="flex rounded-md bg-muted/60 p-0.5 text-xs">
       <FieldContextLink
-        className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
+        className={`rounded px-2.5 py-1.5 font-medium transition-colors max-sm:px-2 ${
           activeTab === "records"
             ? "bg-card text-foreground"
             : "text-muted-foreground hover:text-foreground"
         }`}
         href={fieldRecordsHref(base.slug, currentSearch, activeView ?? originView)}
+        title={messages.base.recordsTab}
       >
-        {messages.base.recordsTab}
+        <Table2 aria-hidden className="size-3.5 sm:hidden" />
+        <span className="max-sm:sr-only">{messages.base.recordsTab}</span>
       </FieldContextLink>
       {isAnon ? null : (
         <FieldContextLink
-          className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
+          className={`rounded px-2.5 py-1.5 font-medium transition-colors max-sm:px-2 ${
             activeTab === "design"
               ? "bg-card text-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
           href={fieldDesignHref(base.slug, currentSearch, activeView?.id ?? originView?.id)}
+          title={messages.base.designTab}
         >
-          {messages.base.designTab}
+          <PencilRuler aria-hidden className="size-3.5 sm:hidden" />
+          <span className="max-sm:sr-only">{messages.base.designTab}</span>
         </FieldContextLink>
       )}
     </nav>

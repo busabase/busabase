@@ -18,7 +18,6 @@ import { Info, MoreHorizontal } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment, type ReactNode, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
-import { narrowCollapsedBreadcrumbIndexes } from "../helpers/breadcrumbs";
 import type { BusabaseBreadcrumbItem } from "../helpers/view-types";
 import { useNodeLocator } from "../hooks/use-copy-locator";
 import { useTopbarNodeActionsStore } from "../store/topbar-node-actions-store";
@@ -82,19 +81,20 @@ export function BusabaseTopbarBreadcrumb({
   // topbar is unchanged.
   const markedNodeIndex = visibleItems.findIndex((item) => item.isNode);
   const nodeIndex = markedNodeIndex === -1 ? visibleItems.length - 1 : markedNodeIndex;
-  // Long trails keep the first crumb and the last two on a phone and fold the
-  // folders in between into one menu, so a 360px header stays a single line.
-  // Wider screens show every folder. Four crumbs or fewer never collapse.
-  const collapsedIndexes = new Set(narrowCollapsedBreadcrumbIndexes(visibleItems.length));
-  const collapsedItems = visibleItems.filter((_, index) => collapsedIndexes.has(index));
+  // Keep the phone's node name readable beside its actions, while every
+  // hidden step remains reachable through the path menu.
+  const collapsedItems = visibleItems.filter((_, index) => index !== nodeIndex);
 
   return (
     <Breadcrumb aria-label={messages.shell.breadcrumb} className="min-w-0 flex-1">
       <BreadcrumbList className="flex-nowrap gap-1.5 overflow-hidden text-xs sm:gap-2">
         {visibleItems.map((item, index) => {
           const isLast = index === visibleItems.length - 1;
-          const collapsedOnNarrow = collapsedIndexes.has(index);
-          const narrowHidden = collapsedOnNarrow ? "hidden sm:inline-flex" : "";
+          // A phone keeps only the node's own name. With the node actions
+          // beside it, the path above ("Workspace > …") and a Base's view or
+          // record crumb after it squeezed the name down to one character —
+          // and the page itself already shows the view tabs and record title.
+          const hideOnMobile = index !== nodeIndex;
           // The node crumb carries the page's visual focus now that node-detail
           // views no longer render a big in-page title: one step up in size,
           // semibold, full-contrast. Every other crumb stays the small muted
@@ -103,27 +103,23 @@ export function BusabaseTopbarBreadcrumb({
           const emphasis = isNodeCrumb
             ? "font-semibold text-foreground text-sm"
             : "font-normal text-muted-foreground";
-          // Cap each name so a long label ellipsizes instead of pushing the
-          // row onto a second line. The `title` carries the uncut name.
-          const truncate = "block max-w-[4.5rem] min-w-0 truncate sm:max-w-48 md:max-w-64";
+          const truncate = "block max-w-48 min-w-0 truncate md:max-w-64";
 
           return (
             <Fragment key={`${item.label}-${index}`}>
-              {index === 1 && collapsedItems.length > 0 ? (
+              {index === nodeIndex && collapsedItems.length > 0 ? (
                 <>
-                  <BreadcrumbSeparator className="shrink-0 text-muted-foreground/70 sm:hidden" />
                   <BreadcrumbItem className="shrink-0 sm:hidden">
                     <CollapsedBreadcrumbMenu items={collapsedItems} />
                   </BreadcrumbItem>
+                  <BreadcrumbSeparator className="shrink-0 text-muted-foreground/70 sm:hidden" />
                 </>
               ) : null}
               {index > 0 ? (
-                <BreadcrumbSeparator
-                  className={`shrink-0 text-muted-foreground/70 ${narrowHidden}`}
-                />
+                <BreadcrumbSeparator className="hidden shrink-0 text-muted-foreground/70 sm:inline-flex" />
               ) : null}
               <BreadcrumbItem
-                className={`min-w-0 ${isNodeCrumb ? "group/node-crumb" : ""} ${narrowHidden}`}
+                className={`min-w-0 ${isNodeCrumb ? "group/node-crumb" : ""} ${hideOnMobile ? "hidden sm:inline-flex" : ""}`}
               >
                 {item.href && !isLast ? (
                   <BreadcrumbLink asChild className={`${truncate} ${emphasis}`}>
@@ -220,7 +216,7 @@ export function TopbarNodeInfoButton() {
           <TooltipTrigger asChild>
             <button
               aria-label={messages.nodeDetail.details}
-              className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:hidden"
               onClick={() => setOpen(true)}
               type="button"
             >
@@ -257,7 +253,9 @@ export function TopbarNodeInfoButton() {
  * Copy this node's locator (target line + connection check) for an agent —
  * Notion's "copy link" icon, but producing something an agent can act on.
  * Revealed with the Info marker's row on hover/focus so the resting topbar is
- * unchanged; always shown where there is no hover (touch).
+ * unchanged; always shown where there is no hover (touch). Below `sm` the
+ * compact header omits this marker so the node's name keeps the room; the
+ * existing node settings and agent-prompt actions remain available.
  */
 function TopbarNodeLocatorButton({
   nodeId,
@@ -273,7 +271,7 @@ function TopbarNodeLocatorButton({
   if (isAnon) return null;
   return (
     <CopyLocatorIconButton
-      className="opacity-0 focus-visible:opacity-100 group-focus-within/node-crumb:opacity-100 group-hover/node-crumb:opacity-100 [@media(hover:none)]:opacity-100"
+      className="opacity-0 focus-visible:opacity-100 group-focus-within/node-crumb:opacity-100 group-hover/node-crumb:opacity-100 max-sm:hidden [@media(hover:none)]:opacity-100"
       locator={locator}
     />
   );
