@@ -156,7 +156,9 @@ describe("Gantt rows", () => {
   it("draws a view of up to 500 rows whole, as before", async () => {
     const { client, listRecordsPage } = makeClient({ total: 250, inPeriod: 0 });
     renderGantt(client);
-    await waitFor(() => expect(screen.getAllByRole("link")).toHaveLength(250));
+    // Three pages of 100 load one after another. A 1s wait gives up at 200
+    // when the suite is busy (the coverage run).
+    await waitFor(() => expect(screen.getAllByRole("link")).toHaveLength(250), { timeout: 5_000 });
     expect(screen.queryByTestId("gantt-period")).toBeNull();
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
     expect(periodCalls(listRecordsPage)).toHaveLength(0);
