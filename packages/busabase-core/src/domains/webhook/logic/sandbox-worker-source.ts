@@ -12,9 +12,11 @@
  * terminates the worker on timeout, which ends a busy loop or a promise that
  * never settles, and frees everything the VM held.
  *
- * Messages: worker → main `{ type: "fetch", id, url, options }` and
- * `{ type: "done", result, logs, error }`; main → worker
- * `{ type: "fetchResult", id, ok, value | error }`.
+ * Messages: worker → main `{ type: "ready" }` once QuickJS is loaded,
+ * `{ type: "fetch", id, url, options }`, and `{ type: "done", result, logs, error }`;
+ * main → worker `{ type: "fetchResult", id, ok, value | error }`. The main
+ * thread starts the function's timeout only after `ready`, so loading the VM
+ * does not spend that budget.
  */
 export const SANDBOX_WORKER_SOURCE = String.raw`
 "use strict";
@@ -130,6 +132,10 @@ const finish = (message) => {
   });
   context.setProp(context.global, "fetch", fetchHandle);
   fetchHandle.dispose();
+
+  // Tell the main thread the VM is loaded so its timeout covers the function,
+  // not the time spent importing QuickJS.
+  parentPort.postMessage({ type: "ready" });
 
   // Code is written against the standard fetch: give the bridge's plain
   // { status, ok, headers, body } json(), text(), and headers.get(), and keep
