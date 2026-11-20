@@ -43,11 +43,10 @@ export function BusabaseTopbar({
   children?: ReactNode;
 }) {
   const messages = useCoreI18n();
-  // 12px sides on a phone: an HTML node being edited (Cancel + Save) otherwise
-  // pushes the side-panel button 1px past a 390px screen.
+  // Compact spacing keeps the node name readable beside the phone's actions.
   return (
     <div
-      className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-3 py-1.5 backdrop-blur-sm sm:px-4 md:h-12"
+      className="flex h-10 shrink-0 items-center gap-1 border-b bg-background/80 px-2 py-1.5 backdrop-blur-sm sm:gap-2 sm:px-4 md:h-12"
       data-dashboard-topbar
     >
       <SidebarTrigger
