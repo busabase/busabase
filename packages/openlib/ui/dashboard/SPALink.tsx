@@ -9,8 +9,10 @@ import { useAddDemoParam } from "./demo-client";
  * app-wide context — Busabase's record dialog writes `?record=rec_…` so the
  * address can be copied and reopened. They describe this page only, so
  * following a link never carries them somewhere they would mean something else.
+ * `fromView` belongs to the originating Base too; a same-record link must
+ * name it explicitly instead of leaking it into another Base with the same view slug.
  */
-export const PAGE_LOCAL_SEARCH_PARAMS: readonly string[] = ["record"];
+export const PAGE_LOCAL_SEARCH_PARAMS: readonly string[] = ["record", "fromView"];
 
 /**
  * Merge the current page's query string into a same-app navigation `href`, so

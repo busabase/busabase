@@ -3,9 +3,9 @@
 import { createContext, type ReactNode, useContext } from "react";
 import { useSearch } from "wouter";
 import { mergeSearchIntoHref } from "./link-search";
-import { withSourceView } from "./source-view-url";
+import { readSourceViewSlug, withSourceView } from "./source-view-url";
 
-const SourceViewSlugContext = createContext<string | null>(null);
+const SourceViewSlugContext = createContext<string | null | undefined>(undefined);
 
 /** The view whose records are on screen, so a record link can name it. */
 export function SourceViewProvider({
@@ -21,7 +21,11 @@ export function SourceViewProvider({
 }
 
 export function useSourceViewSlug(): string | null {
-  return useContext(SourceViewSlugContext);
+  const provided = useContext(SourceViewSlugContext);
+  const search = useSearch();
+  // Full record pages carry their source in the URL. An explicit null from a
+  // provider still means "no source" (for example, a cross-Base preview).
+  return provided === undefined ? readSourceViewSlug(search) : provided;
 }
 
 /** A record href that keeps the view it was opened from, plus the current page's query. */

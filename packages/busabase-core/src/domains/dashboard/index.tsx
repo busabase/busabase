@@ -2100,14 +2100,14 @@ function BusabaseDashboardContent({
       if (result.materialized) {
         await refresh();
         toast.success(messages.nodeSettings.saved);
-        setLocation(`/base/${result.base.slug}/${result.id}`);
+        setLocation(withSourceView(`/base/${result.base.slug}/${result.id}`, carriedViewSlug));
         return;
       }
       toast.success(messages.nodeSettings.changeRequestSubmitted);
       setLocation(`/inbox/${result.id}`);
       await refresh();
     },
-    [client, messages, refresh, setLocation],
+    [carriedViewSlug, client, messages, refresh, setLocation],
   );
 
   // The one "update these fields of a record" request, shared by the record edit
@@ -2142,14 +2142,14 @@ function BusabaseDashboardContent({
       if (result.materialized) {
         await refresh();
         toast.success(messages.nodeSettings.saved);
-        setLocation(`/base/${result.base.slug}/${result.id}`);
+        setLocation(withSourceView(`/base/${result.base.slug}/${result.id}`, carriedViewSlug));
         return;
       }
       toast.success(messages.nodeSettings.changeRequestSubmitted);
       setLocation(`/inbox/${result.id}`);
       await refresh();
     },
-    [messages, refresh, requestRecordUpdate, setLocation],
+    [carriedViewSlug, messages, refresh, requestRecordUpdate, setLocation],
   );
 
   // Kanban drag-to-move: set one field on a record and auto-merge the resulting
