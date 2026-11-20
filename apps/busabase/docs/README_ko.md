@@ -50,6 +50,14 @@ Claude Code, Codex, Cursor, 그리고 직접 만든 에이전트가 다음 작�
 
 Busabase는 에이전트는 상태 없이, 일은 오래 남도록 합니다. 어떤 에이전트든 연결하면 팀과 다른 에이전트가 이미 남겨 둔 레코드, 문서, Skill, 앱을 똑같이 읽고 — 자신의 작업을 diff와 이력과 함께 다시 기록합니다.
 
+**한 문장으로 AI 에이전트 연결.** Claude Code, Codex, Cursor, ChatGPT 등 링크를 읽을 수 있는 에이전트에 이 문장을 붙여 넣으세요:
+
+```text
+https://busabase.com/SETUP_SKILL.md 를 읽고 Busabase에 연결해 줘.
+```
+
+Busabase Cloud나 데스크톱 앱을 추천하고, 브라우저 링크로 로그인한 뒤 Busabase skills를 설치합니다. API 키를 붙여 넣을 필요가 없습니다. 직접 서버를 운영한다면 대신 `http://localhost:15419/SETUP_SKILL.md`를 읽게 하세요(아래 참고).
+
 ## 빠른 시작
 
 ```bash
@@ -131,6 +139,8 @@ pnpm --filter busabase dev
 </details>
 
 ## 에이전트 연결
+
+가장 빠른 방법: 에이전트에게 "https://busabase.com/SETUP_SKILL.md 를 읽고 Busabase에 연결해 줘."라고 말하세요. 가이드가 그 에이전트에 맞는 연결 방법을 고릅니다.
 
 **Claude Code · Codex · Cursor · Gemini CLI · OpenCode · OpenClaw · Hermes · Buda AI · n8n** — 또는 직접 만든 프로세스와 함께 동작합니다.
 
