@@ -28,12 +28,6 @@ const FETCH_BODY_CAP_CHARS = 32_000;
 const MAX_CONCURRENT_FUNCTIONS = 4;
 /** After the deadline, how long a worker gets to report before it is terminated. */
 const TERMINATE_GRACE_MS = 500;
-/**
- * Loading QuickJS can take longer than a short function budget on a busy
- * machine. That load is not the function running, so it does not consume
- * `timeoutMs`. This only bounds a worker that never reports ready.
- */
-const SANDBOX_STARTUP_TIMEOUT_MS = 30_000;
 
 export interface RunFunctionResult {
   /** JSON-serializable value the function returned, or `undefined` on error. */
@@ -186,45 +180,24 @@ const runOnWorker = (code: string, input: unknown, timeoutMs: number): Promise<R
       return;
     }
 
-    // The execution budget starts when the VM is ready, not when the worker
-    // process is spawned. Otherwise a slow QuickJS load spends a short
-    // `timeoutMs` before the function has run a line, and a blocked fetch
-    // comes back as a timeout.
-    let deadline: ReturnType<typeof setTimeout> | undefined;
-    let startupTimer: ReturnType<typeof setTimeout> | undefined;
     const end = (result: RunFunctionResult) => {
       if (settled) return;
       settled = true;
-      clearTimeout(startupTimer);
       clearTimeout(deadline);
       void worker.terminate().catch(() => {});
       resolve(result);
     };
-    startupTimer = setTimeout(
+    const deadline = setTimeout(
       () =>
         end({
           result: undefined,
           logs,
-          error: "Could not start the function: the sandbox did not become ready in time",
+          error: `Function execution timed out after ${timeoutMs}ms`,
         }),
-      SANDBOX_STARTUP_TIMEOUT_MS,
+      timeoutMs + TERMINATE_GRACE_MS,
     );
 
     worker.on("message", (message: Record<string, unknown>) => {
-      if (message.type === "ready") {
-        clearTimeout(startupTimer);
-        if (deadline || settled) return;
-        deadline = setTimeout(
-          () =>
-            end({
-              result: undefined,
-              logs,
-              error: `Function execution timed out after ${timeoutMs}ms`,
-            }),
-          timeoutMs + TERMINATE_GRACE_MS,
-        );
-        return;
-      }
       if (message.type === "done") {
         logs = typeof message.logs === "string" ? message.logs : logs;
         const error = typeof message.error === "string" ? message.error : null;
