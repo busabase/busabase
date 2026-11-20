@@ -33,6 +33,8 @@ import { resolveDateField } from "../../base/utils/view-field-resolution";
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { retryRecordRead } from "../helpers/query-state";
+import { useSourceViewSlug } from "../helpers/source-view-context";
+import { withSourceView } from "../helpers/source-view-url";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { rescheduledCalendarValue } from "./calendar-reschedule";
 import { DialogContent } from "./localized-dialog-content";
@@ -233,6 +235,7 @@ function CalendarDayDialog({
   onClose,
   onOpenRecord,
   range,
+  sourceViewSlug,
   viewId,
 }: {
   baseId: string;
@@ -246,6 +249,7 @@ function CalendarDayDialog({
   onClose: () => void;
   onOpenRecord?: (record: RecordVO) => void;
   range: DateRange | null;
+  sourceViewSlug: string | null;
   viewId: string | undefined;
 }) {
   const messages = useCoreI18n();
@@ -310,7 +314,10 @@ function CalendarDayDialog({
             <li key={record.id}>
               <Link
                 className="block truncate rounded bg-primary/10 px-2 py-1 text-foreground text-sm hover:bg-primary/20"
-                href={mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)}
+                href={mergeSearchIntoHref(
+                  withSourceView(`/base/${baseSlug}/${record.id}`, sourceViewSlug),
+                  currentSearch,
+                )}
                 onClick={(event) => {
                   if (
                     !onOpenRecord ||
@@ -374,6 +381,8 @@ export function BusaBaseCalendar({
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const currentSearch = useSearch();
+  const contextViewSlug = useSourceViewSlug();
+  const sourceViewSlug = activeView?.slug ?? contextViewSlug;
   const dateField = resolveDateField(base, fields, activeView?.config.dateFieldSlug);
   const baseId = base?.id ?? "";
   const today = new Date();
@@ -697,7 +706,10 @@ export function BusaBaseCalendar({
                   {dayRecords.slice(0, DAY_PREVIEW_COUNT).map((record) => (
                     <CalendarCard
                       canDrag={canReschedule && !pendingRecordId}
-                      href={mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)}
+                      href={mergeSearchIntoHref(
+                        withSourceView(`/base/${baseSlug}/${record.id}`, sourceViewSlug),
+                        currentSearch,
+                      )}
                       key={record.id}
                       onOpenRecord={onOpenRecord}
                       record={record}
@@ -737,6 +749,7 @@ export function BusaBaseCalendar({
             onClose={() => setOpenDay(null)}
             onOpenRecord={onOpenRecord}
             range={getCalendarDayRange(dateField.type, dateOptions, openDay)}
+            sourceViewSlug={sourceViewSlug}
             viewId={activeView?.id}
           />
         ) : null}

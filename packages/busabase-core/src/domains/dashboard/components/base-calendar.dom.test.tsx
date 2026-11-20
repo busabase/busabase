@@ -182,7 +182,7 @@ describe("calendar drag to reschedule", () => {
     const onOpenRecord = vi.fn();
     renderCalendar(dateField(), undefined, onOpenRecord);
     const link = screen.getByRole("link", { name: "Launch story" });
-    expect(link.getAttribute("href")).toBe("/base/calendar/rec_calendar");
+    expect(link.getAttribute("href")).toBe("/base/calendar/rec_calendar?fromView=calendar");
     expect(fireEvent.click(link)).toBe(false);
     expect(onOpenRecord).toHaveBeenLastCalledWith(expect.objectContaining({ id: "rec_calendar" }));
     expect(fireEvent.click(link, { detail: 0 })).toBe(false);

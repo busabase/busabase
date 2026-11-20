@@ -1763,6 +1763,12 @@ export const dashboardVi: CoreI18nMessages = {
     iconFileTooLarge: "Ảnh phải nhỏ hơn 2MB",
     iconUpdated: "Đã cập nhật biểu tượng",
     iconUploadFailed: "Tải biểu tượng lên thất bại",
+    defaultViewLabel: "Chế độ xem mặc định",
+    defaultViewHint:
+      "Chế độ xem mà Base này mở ra. Chế độ xem ngoài cùng bên trái theo thứ tự tab.",
+    defaultViewLeftmost: "Ngoài cùng bên trái",
+    defaultViewLoading: "Đang tải chế độ xem…",
+    defaultViewLoadFailed: "Không tải được các chế độ xem của Base này.",
   },
   base: {
     searchRecordsToLink: "Tìm bản ghi để liên kết",

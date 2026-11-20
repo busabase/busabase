@@ -159,7 +159,13 @@ import {
   resolveActiveRecord,
 } from "./helpers/record-snapshots";
 import { isConflictErrorMessage } from "./helpers/search";
-import { resolveDefaultViewPath, sortViewsByPosition } from "./helpers/view-order";
+import { SourceViewProvider } from "./helpers/source-view-context";
+import { baseCrumbHref, resolveCarriedViewSlug, withSourceView } from "./helpers/source-view-url";
+import {
+  isDefaultViewSettingsSettled,
+  resolveDefaultViewPath,
+  sortViewsByPosition,
+} from "./helpers/view-order";
 import type {
   BusabaseBreadcrumbItem,
   CreateBaseFieldPayload,
@@ -880,12 +886,29 @@ function BusabaseDashboardContent({
     baseViews.length > 0 ||
     viewsQuery.isFetched ||
     viewsQuery.failureCount > 0;
-  // Bare `/base/:slug` opens the Base's leftmost view.
-  // Every link in the app keeps pointing at the bare route; it is resolved
-  // here, once the views are known, with a history replace so Back skips it.
+  // Bare `/base/:slug` opens the Base's default view: the node's
+  // `settings.defaultViewSlug` when that slug is still an active view,
+  // otherwise the leftmost tab. Every link in the app keeps pointing at the
+  // bare route; it is resolved here, once the views and that setting are
+  // known, with a history replace so Back skips it.
+  const bareBaseRoute = Boolean(baseParams?.slug && activeBase);
+  const baseNodeQuery = useQuery({
+    ...orpc.nodes.get.queryOptions({
+      input: { nodeId: activeBase?.nodeId ?? "", type: "base" },
+    }),
+    enabled: bareBaseRoute,
+  });
+  const baseSettingsSettled = !bareBaseRoute || isDefaultViewSettingsSettled(baseNodeQuery);
+  const defaultViewSlug = baseNodeQuery.data?.node.settings?.defaultViewSlug ?? null;
+  const waitingForBareBaseTarget = bareBaseRoute && (!baseViewsSettled || !baseSettingsSettled);
   const defaultViewPath =
-    baseParams?.slug && activeBase && baseViewsSettled
-      ? resolveDefaultViewPath({ baseSlug: activeBase.slug, search, views: baseViews })
+    bareBaseRoute && activeBase && !waitingForBareBaseTarget
+      ? resolveDefaultViewPath({
+          baseSlug: activeBase.slug,
+          defaultViewSlug,
+          search,
+          views: baseViews,
+        })
       : null;
   useEffect(() => {
     if (defaultViewPath) {
@@ -911,13 +934,13 @@ function BusabaseDashboardContent({
   const isResolvingBaseRoute = Boolean(
     activeBase &&
       (defaultViewPath !== null ||
+        waitingForBareBaseTarget ||
         (!baseViewsSettled &&
-          (Boolean(baseParams?.slug) ||
-            (isBaseChildRoute &&
-              !selectedBaseView &&
-              !isBaseSetupRoute &&
-              !isBaseActivityRoute &&
-              baseChildParams?.childId !== "new")))),
+          isBaseChildRoute &&
+          !selectedBaseView &&
+          !isBaseSetupRoute &&
+          !isBaseActivityRoute &&
+          baseChildParams?.childId !== "new")),
   );
   const recordPaginationUrl = useMemo(() => readRecordPagination(search), [search]);
   // Table and Gallery render the parent page. Calendar and Gantt read their
@@ -1494,6 +1517,10 @@ function BusabaseDashboardContent({
     return ancestorFoldersFromTree(nodeTree, routeNodeRef);
   }, [breadcrumbAncestorsQuery.data, nodeTree, routeNodeRef]);
 
+  // Record pages carry `fromView` so the Base crumb returns to the view the
+  // record was opened from. A slug that is no longer an active view falls
+  // back to the bare Base, which opens on the default view.
+  const carriedViewSlug = baseViewsSettled ? resolveCarriedViewSlug(search, baseViews) : null;
   const breadcrumbItems = useMemo<BusabaseBreadcrumbItem[]>(() => {
     const withFolders = (items: BusabaseBreadcrumbItem[]): BusabaseBreadcrumbItem[] =>
       withAncestorFolders(items, breadcrumbAncestors);
@@ -1631,7 +1658,7 @@ function BusabaseDashboardContent({
       return withFolders([
         { href: "/home", label: messages.nav.workspace },
         {
-          href: activeBase ? `/base/${activeBase.slug}` : undefined,
+          href: activeBase ? baseCrumbHref(activeBase.slug, carriedViewSlug) : undefined,
           isNode: true,
           label: activeBase?.name ?? messages.nav.base,
         },
@@ -1644,15 +1671,17 @@ function BusabaseDashboardContent({
         { href: "/home", label: messages.nav.workspace },
         {
           href: activeRecord
-            ? `/base/${activeRecord.base.slug}`
+            ? baseCrumbHref(activeRecord.base.slug, carriedViewSlug)
             : activeBase
-              ? `/base/${activeBase.slug}`
+              ? baseCrumbHref(activeBase.slug, carriedViewSlug)
               : undefined,
           isNode: true,
           label: activeBase?.name ?? activeRecord?.base.name ?? messages.nav.base,
         },
         {
-          href: activeRecord ? `/base/${activeRecord.base.slug}/${activeRecord.id}` : undefined,
+          href: activeRecord
+            ? withSourceView(`/base/${activeRecord.base.slug}/${activeRecord.id}`, carriedViewSlug)
+            : undefined,
           label: activeRecord ? getRecordTitle(activeRecord, messages) : messages.common.record,
         },
         { label: messages.common.edit },
@@ -1664,9 +1693,9 @@ function BusabaseDashboardContent({
         { href: "/home", label: messages.nav.workspace },
         {
           href: activeRecord
-            ? `/base/${activeRecord.base.slug}`
+            ? baseCrumbHref(activeRecord.base.slug, carriedViewSlug)
             : activeBase
-              ? `/base/${activeBase.slug}`
+              ? baseCrumbHref(activeBase.slug, carriedViewSlug)
               : undefined,
           isNode: true,
           label: activeBase?.name ?? activeRecord?.base.name ?? messages.nav.base,
@@ -1701,6 +1730,7 @@ function BusabaseDashboardContent({
     activeDetailNode,
     activeRecord,
     breadcrumbAncestors,
+    carriedViewSlug,
     agentDetailParams,
     isAgentDetailRoute,
     isArchivedRoute,
@@ -2217,13 +2247,13 @@ function BusabaseDashboardContent({
           return;
         }
         await refresh();
-        setLocation(`/base/${record.base.slug}`);
+        setLocation(baseCrumbHref(record.base.slug, resolveCarriedViewSlug(search, baseViews)));
         return;
       }
       setLocation(`/inbox/${result.id}`);
       await refresh();
     },
-    [client, previewRecordId, refresh, setLocation, writeRecordPreviewUrl],
+    [baseViews, client, previewRecordId, refresh, search, setLocation, writeRecordPreviewUrl],
   );
 
   // Bulk delete from the table's multi-select toolbar. There is no batch
@@ -3772,35 +3802,43 @@ function BusabaseDashboardContent({
         scopeKey={airAppKeepAliveScopeKey}
       />
       {previewRecordId ? (
-        <RecordDetailDialog
-          // A pasted `?record=` can name a record from another Base; its own
-          // links (full page, edit, activity) must follow the record.
-          baseSlug={
-            activeRecord?.base.slug ??
-            activeBase?.slug ??
-            activeBase?.nodeId ??
-            activeBase?.id ??
-            ""
-          }
-          client={client}
-          error={
-            fallbackRecordQuery.error
-              ? presentCoreError(
-                  messages,
-                  locale,
-                  fallbackRecordQuery.error,
-                  messages.recordView.recordNotFoundBody,
-                )
+        <SourceViewProvider
+          slug={
+            selectedBaseView && activeRecord?.base.id === activeBase?.id
+              ? selectedBaseView.slug
               : null
           }
-          isLoading={isRecordReadPending}
-          key={previewRecordId}
-          onClose={closeRecordPreview}
-          onDeleteChangeRequest={submitDeleteRecord}
-          record={fallbackRecordQuery.error ? null : activeRecord}
-          records={records}
-          returnFocusTo={recordPreview?.trigger ?? null}
-        />
+        >
+          <RecordDetailDialog
+            // A pasted `?record=` can name a record from another Base; its own
+            // links (full page, edit, activity) must follow the record.
+            baseSlug={
+              activeRecord?.base.slug ??
+              activeBase?.slug ??
+              activeBase?.nodeId ??
+              activeBase?.id ??
+              ""
+            }
+            client={client}
+            error={
+              fallbackRecordQuery.error
+                ? presentCoreError(
+                    messages,
+                    locale,
+                    fallbackRecordQuery.error,
+                    messages.recordView.recordNotFoundBody,
+                  )
+                : null
+            }
+            isLoading={isRecordReadPending}
+            key={previewRecordId}
+            onClose={closeRecordPreview}
+            onDeleteChangeRequest={submitDeleteRecord}
+            record={fallbackRecordQuery.error ? null : activeRecord}
+            records={records}
+            returnFocusTo={recordPreview?.trigger ?? null}
+          />
+        </SourceViewProvider>
       ) : null}
     </>
   );
