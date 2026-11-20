@@ -650,7 +650,9 @@ function BusabaseDashboardContent({
       // deleted from the UI — the row would leave Fields while "Deleted fields"
       // stayed stale, hiding the very undo the delete flow promises.
       deletedFields: orpc.bases.listDeletedFields.key() as QueryKey,
-      nodes: orpc.nodes.list.queryOptions({}).queryKey as QueryKey,
+      // A rename/move changes descendant trails too. Include `ancestors`,
+      // whose cached result is otherwise fresh indefinitely, in node refreshes.
+      nodes: orpc.nodes.key() as QueryKey,
       // Partial key so a single invalidation covers `nodes.get` for every
       // nodeId — the rich-node editors (whiteboard/workflow/html) fetch their
       // document via `nodes.get` instead of the tree, so live-sync has to
