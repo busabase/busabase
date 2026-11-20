@@ -11,6 +11,7 @@ import { memoryLocation } from "wouter/memory-location";
 import { CoreI18nProvider } from "../../../i18n";
 import { coreMessagesByLocale } from "../../../i18n/catalog";
 import type { CoreLocale } from "../../../i18n/locales";
+import { SourceViewProvider } from "../helpers/source-view-context";
 import { DashboardVisitorProvider } from "../visitor-context";
 import { RecordDetailDialog } from "./record-detail-dialog";
 
@@ -70,7 +71,12 @@ afterEach(() => {
 function renderDialog(
   locale: CoreLocale = "en",
   visitorKind: "member" | "anonymous" = "member",
-  state: { record?: RecordVO | null; isLoading?: boolean; path?: string } = {},
+  state: {
+    record?: RecordVO | null;
+    isLoading?: boolean;
+    path?: string;
+    sourceView?: string | null;
+  } = {},
 ) {
   const location = memoryLocation({
     path: state.path ?? "/base/customers/calendar?space=tnl_test",
@@ -84,7 +90,7 @@ function renderDialog(
 
   function Preview() {
     const [open, setOpen] = useState(true);
-    return open ? (
+    const preview = (
       <RecordDetailDialog
         baseSlug="customers"
         client={client}
@@ -95,7 +101,13 @@ function renderDialog(
         records={[record]}
         returnFocusTo={trigger}
       />
-    ) : null;
+    );
+    if (!open) return null;
+    return state.sourceView === undefined ? (
+      preview
+    ) : (
+      <SourceViewProvider slug={state.sourceView}>{preview}</SourceViewProvider>
+    );
   }
 
   render(
@@ -115,6 +127,31 @@ function renderDialog(
 }
 
 describe("record detail dialog", () => {
+  it("preserves the URL source on record links when no view provider is mounted", () => {
+    renderDialog("en", "member", {
+      path: "/base/customers/calendar?space=tnl_test&fromView=calendar",
+    });
+    const link = screen.getByRole("link", { name: "Open full page" });
+    expect(
+      new URL(link.getAttribute("href") ?? "", "http://localhost").searchParams.get("fromView"),
+    ).toBe("calendar");
+  });
+
+  it("honors an explicit no-source provider instead of inheriting another Base's URL source", () => {
+    renderDialog("en", "member", {
+      path: "/base/other/board?space=tnl_test&demo=1&view=review&fromView=board",
+      sourceView: null,
+    });
+    const link = screen.getByRole("link", { name: "Open full page" });
+    const href = new URL(link.getAttribute("href") ?? "", "http://localhost");
+    expect(href.pathname).toBe("/base/customers/rec_dialog");
+    expect(Object.fromEntries(href.searchParams)).toEqual({
+      space: "tnl_test",
+      demo: "1",
+      view: "review",
+    });
+  });
+
   it("shows every attachment in details and previews the final file", () => {
     const files = Array.from({ length: 12 }, (_, index) => ({
       id: `att_${index}`,

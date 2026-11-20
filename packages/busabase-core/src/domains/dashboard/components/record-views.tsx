@@ -145,6 +145,7 @@ export function RecordTopbarActions({
 }) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
+  const sourceViewSlug = useSourceViewSlug();
   const isAnon = useIsAnonymousVisitor();
   return (
     <div className="flex items-center gap-2">
@@ -184,7 +185,10 @@ export function RecordTopbarActions({
               ? "bg-card text-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
-          href={mergeSearchIntoHref(`/base/${base.slug}/${recordId}`, currentSearch)}
+          href={mergeSearchIntoHref(
+            withSourceView(`/base/${base.slug}/${recordId}`, sourceViewSlug),
+            currentSearch,
+          )}
         >
           {messages.recordView.view}
         </Link>
@@ -194,7 +198,10 @@ export function RecordTopbarActions({
               ? "bg-card text-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
-          href={mergeSearchIntoHref(`/base/${base.slug}/${recordId}/edit`, currentSearch)}
+          href={mergeSearchIntoHref(
+            withSourceView(`/base/${base.slug}/${recordId}/edit`, sourceViewSlug),
+            currentSearch,
+          )}
         >
           {messages.recordView.edit}
         </Link>
