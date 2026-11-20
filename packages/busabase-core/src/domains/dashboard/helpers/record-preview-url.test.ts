@@ -9,6 +9,7 @@ import {
   readRecordPreviewId,
   writeRecordPreviewId,
 } from "./record-preview-url";
+import { SOURCE_VIEW_PARAM, withSourceView } from "./source-view-url";
 
 describe("record preview URL", () => {
   it("reads the record named by ?record= and ignores a blank value", () => {
@@ -38,5 +39,34 @@ describe("record preview URL", () => {
     expect(mergeSearchIntoHref("/base/crm/grid?record=rec_1", "record=rec_1")).toBe(
       "/base/crm/grid?record=rec_1",
     );
+  });
+});
+
+describe("source-view query ownership", () => {
+  const search = "space=tnl_a&demo=1&lang=en&view=review&fromView=board&record=rec_preview";
+
+  it("drops an implicit source through both link mergers while preserving app context", () => {
+    expect(PAGE_LOCAL_SEARCH_PARAMS).toContain(SOURCE_VIEW_PARAM);
+    const href = mergeSpaLinkSearch(mergeSearchIntoHref("/base/other/rec_2", search), search);
+    expect(Object.fromEntries(new URL(href, "http://localhost").searchParams)).toEqual({
+      space: "tnl_a",
+      demo: "1",
+      lang: "en",
+      view: "review",
+    });
+  });
+
+  it("keeps an explicitly chosen source for same-record navigation through both mergers", () => {
+    for (const suffix of ["", "/edit", "/activity"]) {
+      const path = withSourceView(`/base/crm/rec_1${suffix}`, "calendar");
+      const href = mergeSpaLinkSearch(mergeSearchIntoHref(path, search), search);
+      expect(Object.fromEntries(new URL(href, "http://localhost").searchParams)).toEqual({
+        space: "tnl_a",
+        demo: "1",
+        lang: "en",
+        view: "review",
+        fromView: "calendar",
+      });
+    }
   });
 });

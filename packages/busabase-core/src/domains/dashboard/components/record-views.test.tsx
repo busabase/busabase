@@ -322,9 +322,10 @@ describe("Record source references", () => {
   function renderReferences(
     getSource = vi.fn(async () => source),
     listLinks = vi.fn(async () => inbound),
+    currentSearch = "space=tnl_test",
   ) {
     const location = memoryLocation({
-      path: "/base/customers/rec_preview?space=tnl_test",
+      path: `/base/customers/rec_preview?${currentSearch}`,
       record: true,
     });
     const orpc = {
@@ -366,6 +367,43 @@ describe("Record source references", () => {
     );
     return { ...result, getSource, listLinks, location };
   }
+
+  it("does not carry the originating view into another Base's source record", async () => {
+    const { location } = renderReferences(
+      undefined,
+      undefined,
+      "space=tnl_test&demo=1&lang=en&view=review&fromView=board",
+    );
+    fireEvent.click(await screen.findByText("References to this record"));
+    const link = await screen.findByRole("link", { name: "Go to source record: Launch deal" });
+    const href = new URL(link.getAttribute("href") ?? "", "http://localhost");
+    expect(href.pathname).toBe("/base/deals/rec_source");
+    expect(Object.fromEntries(href.searchParams)).toEqual({
+      space: "tnl_test",
+      demo: "1",
+      lang: "en",
+      view: "review",
+    });
+    fireEvent.click(link);
+    expect(
+      new URL(location.history.at(-1) ?? "", "http://localhost").searchParams.has("fromView"),
+    ).toBe(false);
+  });
+
+  it("keeps the source view when a reference opens another record of the same Base", async () => {
+    const sameBaseSource = { ...source, baseId: target.baseId, base: target.base };
+    renderReferences(
+      vi.fn(async () => sameBaseSource),
+      undefined,
+      "space=tnl_test&fromView=board",
+    );
+    fireEvent.click(await screen.findByText("References to this record"));
+    const link = await screen.findByRole("link", { name: "Go to source record: Launch deal" });
+    const href = new URL(link.getAttribute("href") ?? "", "http://localhost");
+    expect(href.pathname).toBe("/base/customers/rec_source");
+    expect(href.searchParams.get("fromView")).toBe("board");
+    expect(href.searchParams.get("space")).toBe("tnl_test");
+  });
 
   it("keeps references collapsed and only offers source navigation for the unpaired field", async () => {
     const { getSource, location } = renderReferences();

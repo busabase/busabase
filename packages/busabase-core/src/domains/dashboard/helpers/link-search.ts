@@ -2,6 +2,7 @@
 
 import { useSearch } from "wouter";
 import { RECORD_PREVIEW_PARAM } from "./record-preview-url";
+import { SOURCE_VIEW_PARAM } from "./source-view-url";
 
 /**
  * Merge a page's query string into a same-app navigation `href`, so state
@@ -14,8 +15,9 @@ import { RECORD_PREVIEW_PARAM } from "./record-preview-url";
  *
  * `href`'s own explicit query params (if any) win over `currentSearch`'s for
  * the same key; everything else from the current page is preserved as-is,
- * except the open record dialog's `?record=`, which only means something on
- * the page that wrote it (openlib's `SPALink` drops it the same way).
+ * except page-local `record` and `fromView`: neither describes an arbitrary
+ * destination. Same-record navigation opts into `fromView` explicitly, which
+ * wins below (openlib's `SPALink` follows the same rule).
  * Plain function (no hook) so callers building several hrefs in a loop (e.g.
  * mapping linked-record chips) can call `useSearch()` once outside the loop
  * and reuse it here — hooks can't be called per-iteration.
@@ -26,6 +28,7 @@ export function mergeSearchIntoHref(href: string, currentSearch: string): string
   const [path, hrefQuery] = href.split("?");
   const merged = new URLSearchParams(currentSearch);
   merged.delete(RECORD_PREVIEW_PARAM);
+  merged.delete(SOURCE_VIEW_PARAM);
   if (hrefQuery) {
     for (const [key, value] of new URLSearchParams(hrefQuery)) {
       merged.set(key, value);
