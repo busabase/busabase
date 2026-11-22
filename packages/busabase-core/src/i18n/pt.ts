@@ -1780,11 +1780,6 @@ export const dashboardPt: CoreI18nMessages = {
     iconFileTooLarge: "A imagem deve ter menos de 2 MB",
     iconUpdated: "Ícone atualizado",
     iconUploadFailed: "Falha ao enviar o ícone",
-    defaultViewLabel: "Visualização padrão",
-    defaultViewHint: "A visualização em que esta Base abre. A da esquerda segue a ordem das abas.",
-    defaultViewLeftmost: "Visualização da esquerda",
-    defaultViewLoading: "Carregando visualizações…",
-    defaultViewLoadFailed: "Não foi possível carregar as visualizações desta Base.",
   },
   base: {
     searchRecordsToLink: "Pesquisar registros para vincular",

@@ -7,7 +7,7 @@
  *
  * The path stays `/base/<slug>/<recordId>`. The query is only how the Base
  * breadcrumb (and edit, save, and cancel) get back to that view. A bare
- * `/base/<slug>` still opens the Base's default view, which is a different
+ * `/base/<slug>` still opens the Base's leftmost view, which is a different
  * question.
  */
 export const SOURCE_VIEW_PARAM = "fromView";

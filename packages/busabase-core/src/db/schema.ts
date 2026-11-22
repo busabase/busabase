@@ -185,15 +185,6 @@ export const busabaseNodes = pgTable(
          * so the column stores the absence rather than defaulting it away.
          */
         airappEngine?: "browser" | "local" | "remote" | "site";
-        /**
-         * View slug this Base opens on when the URL names no view.
-         *
-         * Absent means the leftmost tab. Present means a person (or an agent)
-         * chose a view in node settings, independent of tab order. Cleared
-         * when that view is archived, and by sending `null` to
-         * `PATCH /nodes/{id}/settings`.
-         */
-        defaultViewSlug?: string;
       }>()
       .notNull()
       .default({}),

@@ -161,11 +161,7 @@ import {
 import { isConflictErrorMessage } from "./helpers/search";
 import { SourceViewProvider } from "./helpers/source-view-context";
 import { baseCrumbHref, resolveCarriedViewSlug, withSourceView } from "./helpers/source-view-url";
-import {
-  isDefaultViewSettingsSettled,
-  resolveDefaultViewPath,
-  sortViewsByPosition,
-} from "./helpers/view-order";
+import { resolveDefaultViewPath, sortViewsByPosition } from "./helpers/view-order";
 import type {
   BusabaseBreadcrumbItem,
   CreateBaseFieldPayload,
@@ -886,29 +882,12 @@ function BusabaseDashboardContent({
     baseViews.length > 0 ||
     viewsQuery.isFetched ||
     viewsQuery.failureCount > 0;
-  // Bare `/base/:slug` opens the Base's default view: the node's
-  // `settings.defaultViewSlug` when that slug is still an active view,
-  // otherwise the leftmost tab. Every link in the app keeps pointing at the
-  // bare route; it is resolved here, once the views and that setting are
-  // known, with a history replace so Back skips it.
-  const bareBaseRoute = Boolean(baseParams?.slug && activeBase);
-  const baseNodeQuery = useQuery({
-    ...orpc.nodes.get.queryOptions({
-      input: { nodeId: activeBase?.nodeId ?? "", type: "base" },
-    }),
-    enabled: bareBaseRoute,
-  });
-  const baseSettingsSettled = !bareBaseRoute || isDefaultViewSettingsSettled(baseNodeQuery);
-  const defaultViewSlug = baseNodeQuery.data?.node.settings?.defaultViewSlug ?? null;
-  const waitingForBareBaseTarget = bareBaseRoute && (!baseViewsSettled || !baseSettingsSettled);
+  // Bare `/base/:slug` opens the Base's leftmost view.
+  // Every link in the app keeps pointing at the bare route; it is resolved
+  // here, once the views are known, with a history replace so Back skips it.
   const defaultViewPath =
-    bareBaseRoute && activeBase && !waitingForBareBaseTarget
-      ? resolveDefaultViewPath({
-          baseSlug: activeBase.slug,
-          defaultViewSlug,
-          search,
-          views: baseViews,
-        })
+    baseParams?.slug && activeBase && baseViewsSettled
+      ? resolveDefaultViewPath({ baseSlug: activeBase.slug, search, views: baseViews })
       : null;
   useEffect(() => {
     if (defaultViewPath) {
@@ -934,13 +913,13 @@ function BusabaseDashboardContent({
   const isResolvingBaseRoute = Boolean(
     activeBase &&
       (defaultViewPath !== null ||
-        waitingForBareBaseTarget ||
         (!baseViewsSettled &&
-          isBaseChildRoute &&
-          !selectedBaseView &&
-          !isBaseSetupRoute &&
-          !isBaseActivityRoute &&
-          baseChildParams?.childId !== "new")),
+          (Boolean(baseParams?.slug) ||
+            (isBaseChildRoute &&
+              !selectedBaseView &&
+              !isBaseSetupRoute &&
+              !isBaseActivityRoute &&
+              baseChildParams?.childId !== "new")))),
   );
   const recordPaginationUrl = useMemo(() => readRecordPagination(search), [search]);
   // Table and Gallery render the parent page. Calendar and Gantt read their
@@ -1519,7 +1498,7 @@ function BusabaseDashboardContent({
 
   // Record pages carry `fromView` so the Base crumb returns to the view the
   // record was opened from. A slug that is no longer an active view falls
-  // back to the bare Base, which opens on the default view.
+  // back to the bare Base, which opens on its leftmost view.
   const carriedViewSlug = baseViewsSettled ? resolveCarriedViewSlug(search, baseViews) : null;
   const breadcrumbItems = useMemo<BusabaseBreadcrumbItem[]>(() => {
     const withFolders = (items: BusabaseBreadcrumbItem[]): BusabaseBreadcrumbItem[] =>

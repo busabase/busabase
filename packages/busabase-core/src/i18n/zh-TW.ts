@@ -1694,11 +1694,6 @@ export const dashboardZhTW: CoreI18nMessages = {
     iconFileTooLarge: "圖片大小需小於 2MB",
     iconUpdated: "圖示已更新",
     iconUploadFailed: "圖示上傳失敗",
-    defaultViewLabel: "預設檢視",
-    defaultViewHint: "開啟這個 Base 時顯示的檢視。選擇「最左側檢視」則跟隨分頁順序。",
-    defaultViewLeftmost: "最左側檢視",
-    defaultViewLoading: "正在載入檢視…",
-    defaultViewLoadFailed: "無法載入這個 Base 的檢視。",
   },
   base: {
     searchRecordsToLink: "搜尋要關聯的記錄",
