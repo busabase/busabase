@@ -1692,11 +1692,6 @@ export const dashboardZhCN: CoreI18nMessages = {
     iconFileTooLarge: "图片大小需小于 2MB",
     iconUpdated: "图标已更新",
     iconUploadFailed: "图标上传失败",
-    defaultViewLabel: "默认视图",
-    defaultViewHint: "打开这个 Base 时显示的视图。选择“最左侧视图”则跟随标签顺序。",
-    defaultViewLeftmost: "最左侧视图",
-    defaultViewLoading: "正在加载视图…",
-    defaultViewLoadFailed: "无法加载这个 Base 的视图。",
   },
   base: {
     searchRecordsToLink: "搜索要关联的记录",

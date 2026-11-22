@@ -1761,12 +1761,6 @@ export const dashboardJa: CoreI18nMessages = {
     iconFileTooLarge: "画像は2MB未満にしてください",
     iconUpdated: "アイコンを更新しました",
     iconUploadFailed: "アイコンのアップロードに失敗しました",
-    defaultViewLabel: "デフォルトビュー",
-    defaultViewHint:
-      "この Base を開いたときに表示するビューです。「左端のビュー」はタブの並び順に従います。",
-    defaultViewLeftmost: "左端のビュー",
-    defaultViewLoading: "ビューを読み込み中…",
-    defaultViewLoadFailed: "この Base のビューを読み込めませんでした。",
   },
   base: {
     searchRecordsToLink: "リンクするレコードを検索",

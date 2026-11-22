@@ -166,14 +166,9 @@ export interface NodeVO {
    *
    * Absent (or an absent key) means "unset". For an AirApp's engine that means
    * "follow the app" — `airapp.json` decides — which is why absence has to stay
-   * distinguishable from any particular value. For a Base, an absent
-   * `defaultViewSlug` means the leftmost tab.
+   * distinguishable from any particular value.
    */
-  settings?: {
-    airappEngine?: "browser" | "local" | "remote" | "site" | null;
-    /** View slug a Base opens on when the URL names no view. Absent follows the leftmost tab. */
-    defaultViewSlug?: string | null;
-  };
+  settings?: { airappEngine?: "browser" | "local" | "remote" | "site" | null };
   /**
    * This node's OWN declared visibility, or null when it inherits from its
    * ancestors. A real column rather than a metadata key, because it is the node

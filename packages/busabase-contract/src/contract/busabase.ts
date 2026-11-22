@@ -387,7 +387,7 @@ export const busabaseContractRoutes = {
         tags: ["Nodes"],
         summary: "Update node system settings",
         successDescription:
-          "Replaced the node's system settings. Unlike metadata this is a closed set of keys Busabase itself acts on, so an unknown key is rejected rather than stored. Send a key as null to clear it. For an AirApp, clearing `airappEngine` returns the node to following its airapp.json. For a Base, `defaultViewSlug` is the active view the Base opens on when its URL names no view; null follows the leftmost tab, and archiving that view clears the key. Send every key you want to keep: this replaces the whole object. Requires write access on the node.",
+          "Replaced the node's system settings. Unlike metadata this is a closed set of keys Busabase itself acts on, so an unknown key is rejected rather than stored. Send a key as null to clear it — for an AirApp's engine that returns the node to following its airapp.json. Requires write access on the node.",
       })
       .input(updateNodeSettingsInputSchema)
       .output(nodeSchema),

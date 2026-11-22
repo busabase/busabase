@@ -21,14 +21,7 @@ import { customAgentPromptsSchema } from "./node-agent-prompt-schemas";
 import { PlaybookAttributionVOSchema } from "./playbook-schemas";
 
 /** @see nodeSettingsSchema — declared here so `NodeOutput` can reference it. */
-export type NodeSettings = {
-  airappEngine?: "browser" | "local" | "remote" | "site" | null;
-  /**
-   * View slug a Base opens on when the URL names no view. Absent follows the
-   * leftmost tab. `null` is the writer's spelling for clearing it.
-   */
-  defaultViewSlug?: string | null;
-};
+export type NodeSettings = { airappEngine?: "browser" | "local" | "remote" | "site" | null };
 
 export interface NodeOutput {
   id: string;
@@ -345,22 +338,6 @@ export const nodeSettingsSchema = z.strictObject({
    * override and returns the node to following the app.
    */
   airappEngine: z.enum(["browser", "local", "remote", "site"]).nullish(),
-  /**
-   * The view a Base opens on when its URL names no view.
-   *
-   * A slug of one of that Base's active views. Absent — and `null`, which the
-   * writer drops — means the leftmost tab, so tab order stays the default and
-   * this key is only how a Base opens somewhere else without moving that tab.
-   * Archiving the named view clears the key. A slug that matches nothing is
-   * stored and then ignored: the Base still opens on the leftmost tab.
-   */
-  defaultViewSlug: z
-    .string()
-    .min(1)
-    .nullish()
-    .describe(
-      "View slug a Base opens on when its URL names no view. Null clears it and the leftmost tab opens instead. A slug that is not an active view of this Base is ignored.",
-    ),
 });
 
 const updateNodeSettingsInputSchema = z.object({

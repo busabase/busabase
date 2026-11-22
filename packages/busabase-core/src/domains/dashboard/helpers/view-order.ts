@@ -1,17 +1,6 @@
 import type { ViewVO } from "busabase-contract/types";
 
 /**
- * A cached result can be fetched while still refetching after a settings save.
- * Wait for that request before redirecting, or the old default wins the race.
- * A first failure still releases the route to its existing fallback.
- */
-export const isDefaultViewSettingsSettled = (query: {
-  isFetched: boolean;
-  isFetching: boolean;
-  failureCount: number;
-}): boolean => (query.isFetched && !query.isFetching) || query.failureCount > 0;
-
-/**
  * Views of a Base in their shared tab order — `position`, ties broken by
  * creation time (then id, so the order is total). The server already lists
  * them this way; sorting again keeps an optimistic cache write, a host's seed
@@ -28,34 +17,23 @@ export const sortViewsByPosition = <T extends Pick<ViewVO, "position" | "created
   );
 
 /**
- * Where a bare `/base/<slug>` should land.
- *
- * `defaultViewSlug` wins when it names one of `views`. Otherwise the leftmost
- * view does — tab order stays the default, and the setting is only how a Base
- * opens somewhere else. A slug that matches nothing is ignored, same as
- * leaving the setting unset. The current query string (`?space=…`, `?demo`,
- * …) is kept. `null` when the Base has no views — the caller then keeps
- * rendering the plain all-records grid.
+ * Where a bare `/base/<slug>` should land: the Base's leftmost view, keeping
+ * the current query string (`?space=…`, `?demo`, …). `null` when the Base has
+ * no views — the caller then keeps rendering the plain all-records grid.
  */
 export const resolveDefaultViewPath = ({
   baseSlug,
-  defaultViewSlug,
   search = "",
   views,
 }: {
   baseSlug: string;
-  defaultViewSlug?: string | null;
   search?: string;
   views: readonly Pick<ViewVO, "position" | "createdAt" | "id" | "slug">[];
 }): string | null => {
-  const ordered = sortViewsByPosition(views);
-  const preferred = defaultViewSlug
-    ? ordered.find((view) => view.slug === defaultViewSlug)
-    : undefined;
-  const target = preferred ?? ordered[0];
-  if (!target || !baseSlug) return null;
+  const [first] = sortViewsByPosition(views);
+  if (!first || !baseSlug) return null;
   const query = search.replace(/^\?/, "");
-  return `/base/${baseSlug}/${target.slug}${query ? `?${query}` : ""}`;
+  return `/base/${baseSlug}/${first.slug}${query ? `?${query}` : ""}`;
 };
 
 /**

@@ -15,7 +15,6 @@ import type { CommitPO, OperationPO, ViewPO } from "../../../../db/schema";
 import {
   busabaseBaseFields,
   busabaseBases,
-  busabaseNodes,
   busabaseOperations,
   busabaseViews,
 } from "../../../../db/schema";
@@ -297,37 +296,6 @@ export const mergeViewUpdate = async (ctx: MergeCtx, item: OperationPO, headComm
   ctx.mergedViewIds.push(targetView.id);
 };
 
-/**
- * Drop `settings.defaultViewSlug` when it names the view just archived.
- *
- * The setting is a property of the node, not of the view row, so deleting the
- * view does not remove it on its own. Absent and "leftmost tab" are the same
- * state, so the key is removed rather than left pointing at a view that is
- * no longer active.
- */
-const clearDefaultViewSlug = async (ctx: MergeCtx, baseId: string, viewSlug: string) => {
-  const { db, timestamp } = ctx;
-  const [base] = await db
-    .select({ nodeId: busabaseBases.nodeId })
-    .from(busabaseBases)
-    .where(eq(busabaseBases.id, baseId))
-    .limit(1);
-  if (!base) return;
-  const [node] = await db
-    .select({ settings: busabaseNodes.settings })
-    .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, base.nodeId))
-    .for("update")
-    .limit(1);
-  if (!node || node.settings?.defaultViewSlug !== viewSlug) return;
-  const next = { ...node.settings };
-  delete next.defaultViewSlug;
-  await db
-    .update(busabaseNodes)
-    .set({ settings: next, updatedAt: timestamp })
-    .where(eq(busabaseNodes.id, base.nodeId));
-};
-
 export const mergeViewDelete = async (ctx: MergeCtx, item: OperationPO, _headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
   const targetView = item.targetViewId ? ctx.targetViewsById.get(item.targetViewId) : undefined;
@@ -351,10 +319,6 @@ export const mergeViewDelete = async (ctx: MergeCtx, item: OperationPO, _headCom
     .update(busabaseViews)
     .set({ archivedAt: timestamp, status: "archived", updatedAt: timestamp })
     .where(eq(busabaseViews.id, targetView.id));
-  // The Base opens on this view only while the view is active. A dangling slug
-  // would be ignored, but clearing it keeps the setting honest for the next
-  // reader (and for a slug that is later reused).
-  await clearDefaultViewSlug(ctx, targetView.baseId, targetView.slug);
   await db
     .update(busabaseOperations)
     .set({ status: "archived", mergedViewId: targetView.id, updatedAt: timestamp })

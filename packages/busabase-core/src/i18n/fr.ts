@@ -1801,12 +1801,6 @@ export const dashboardFr: CoreI18nMessages = {
     iconFileTooLarge: "L'image doit faire moins de 2 Mo",
     iconUpdated: "Icône mise à jour",
     iconUploadFailed: "Échec du téléversement de l'icône",
-    defaultViewLabel: "Vue par défaut",
-    defaultViewHint:
-      "La vue sur laquelle cette Base s'ouvre. La vue la plus à gauche suit l'ordre des onglets.",
-    defaultViewLeftmost: "Vue la plus à gauche",
-    defaultViewLoading: "Chargement des vues…",
-    defaultViewLoadFailed: "Impossible de charger les vues de cette Base.",
   },
   base: {
     searchRecordsToLink: "Rechercher des enregistrements à lier",
