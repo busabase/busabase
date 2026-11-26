@@ -20,7 +20,10 @@ export interface HostFileViewer {
   /** Optional inline policy; text File nodes may own their full source/editor. */
   canRenderInline?: (file: HostFileViewerFile) => boolean;
   /** Fills its container; callers size the frame the same way they size a PDF. */
-  render: (file: HostFileViewerFile) => ReactNode;
+  render: (
+    file: HostFileViewerFile,
+    options?: { fitToContainer?: boolean; pdfScrollMode?: "single" | "continuous" },
+  ) => ReactNode;
 }
 
 const FileViewerSlotContext = createContext<HostFileViewer | null>(null);

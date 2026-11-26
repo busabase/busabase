@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import {
   type AirAppSiteDomainBindingVO,
@@ -40,7 +40,9 @@ const binding = (
   status: "pending",
   hostnameStatus: "pending",
   sslStatus: "pending_validation",
-  dnsRecords: [{ type: "CNAME", name: "shop.company.com", value: "site-dns.sites.test" }],
+  dnsRecords: [
+    { type: "CNAME", name: overrides.hostname ?? "shop.company.com", value: "site-dns.sites.test" },
+  ],
   errors: [],
   issues: [],
   isPrimary: false,
@@ -190,7 +192,8 @@ describe("website custom domain setup guide", () => {
     const steps = guide()?.querySelectorAll("ol > li");
     expect(steps?.length).toBe(3);
     expect(steps?.[0]?.textContent).toContain("click “Add domain”");
-    expect(steps?.[2]?.textContent).toContain("click “Check again”");
+    expect(steps?.[2]?.textContent).toContain("“Check again”");
+    expect(steps?.[2]?.textContent).toContain("automatically verifies the hostname");
     expect(guide()?.querySelector("[data-airapp-site-domain-guide-record]")?.textContent).toContain(
       "CNAME",
     );
@@ -436,6 +439,8 @@ describe("website custom domain settings", () => {
     });
     await screen.findByText(coreMessagesByLocale.en.airapp.site.domains.pendingHttpsHint);
     expect(screen.queryByText("Connected")).toBeNull();
+    expect(screen.queryByRole("button", { name: `Copy DNS value ${longValue}` })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced verification" }));
     const value = screen.getByText(longValue);
     expect(value.className).toContain("break-all");
     fireEvent.click(screen.getByRole("button", { name: `Copy DNS value ${longValue}` }));
@@ -473,7 +478,8 @@ describe("website custom domain settings", () => {
         }),
       ]),
     });
-    expect(await screen.findByText("Verification URL")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Advanced verification" }));
+    expect(screen.getByText("Verification URL")).toBeTruthy();
     expect(screen.getByText("Response body")).toBeTruthy();
     expect(
       screen.getByText(
@@ -481,8 +487,9 @@ describe("website custom domain settings", () => {
       ),
     ).toBeTruthy();
     expect(
-      screen.queryByText(coreMessagesByLocale.en.airapp.site.domains.dnsInstructions),
-    ).toBeNull();
+      screen.getByText(coreMessagesByLocale.en.airapp.site.domains.dnsInstructions),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy DNS value site-dns.sites.test" })).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", { name: `Copy verification URL ${verificationUrl}` }),
     );
@@ -743,6 +750,175 @@ describe("website toolbar address", () => {
   });
 });
 
+describe("CNAME-first domain verification", () => {
+  const records: AirAppSiteDomainBindingVO["dnsRecords"] = [
+    { type: "CNAME", name: "a.baidu.com", value: "site-dns.busabase.app" },
+    { type: "TXT", name: "_cf-custom-hostname.a.baidu.com", value: "ownership-token" },
+    { type: "TXT", name: "_acme-challenge.a.baidu.com", value: "certificate-token" },
+    {
+      type: "HTTP",
+      name: "http://a.baidu.com/.well-known/cf-custom-hostname-challenge/ownership",
+      value: "ownership-http-body",
+    },
+    {
+      type: "HTTP",
+      name: "http://a.baidu.com/.well-known/pki-validation/certificate",
+      value: "certificate-http-body",
+    },
+    { type: "CNAME", name: "_acme-challenge.a.baidu.com", value: "certificate.validation.example" },
+  ];
+  const rowFor = (hostname: string) => {
+    const row = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-airapp-site-domain]"),
+    ).find((item) => item.dataset.airappSiteDomain === hostname);
+    if (!row) throw new Error(`Missing domain ${hostname}`);
+    return row;
+  };
+  const clipboard = () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    return writeText;
+  };
+
+  it("shows only the routing CNAME by default and reveals every exact ownership/certificate record on request", async () => {
+    const writeText = clipboard();
+    const data = {
+      ...domainsState([
+        binding({ hostname: "a.baidu.com", url: "https://a.baidu.com", dnsRecords: records }),
+      ]),
+      cnameTarget: "site-dns.busabase.app",
+    };
+    const { queryClient } = renderSettings({ domains: data });
+    await screen.findByText("Setup pending");
+    const row = rowFor("a.baidu.com");
+    const routing = row.querySelector("[data-airapp-site-domain-routing]") as HTMLElement;
+    expect(routing.querySelectorAll("[data-airapp-site-dns-record]")).toHaveLength(1);
+    expect(
+      routing
+        .querySelector("[data-airapp-site-dns-record]")
+        ?.getAttribute("data-airapp-site-dns-record"),
+    ).toBe("CNAME");
+    expect(routing.textContent).toContain("a.baidu.com");
+    expect(routing.textContent).toContain("site-dns.busabase.app");
+    const toggle = within(row).getByRole("button", { name: "Advanced verification" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    for (const record of records.slice(1)) {
+      expect(
+        within(row).queryByRole("button", {
+          name:
+            record.type === "HTTP"
+              ? `Copy verification response ${record.value}`
+              : `Copy DNS value ${record.value}`,
+        }),
+      ).toBeNull();
+    }
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const advanced = row.querySelector("[data-airapp-site-domain-advanced]") as HTMLElement;
+    expect(advanced.querySelectorAll("[data-airapp-site-dns-record]")).toHaveLength(5);
+    expect(advanced.textContent).toContain("migration or verification before switching traffic");
+    for (const record of records) {
+      const entry = Array.from(
+        row.querySelectorAll<HTMLElement>("[data-airapp-site-dns-record]"),
+      ).find(
+        (item) =>
+          item.getAttribute("data-airapp-site-dns-record") === record.type &&
+          item.textContent?.includes(record.name) &&
+          item.textContent.includes(record.value),
+      );
+      if (!entry) throw new Error(`Missing ${record.type} record ${record.name}`);
+      fireEvent.click(
+        within(entry).getByRole("button", {
+          name:
+            record.type === "HTTP"
+              ? `Copy verification URL ${record.name}`
+              : `Copy DNS name ${record.name}`,
+        }),
+      );
+      fireEvent.click(
+        within(entry).getByRole("button", {
+          name:
+            record.type === "HTTP"
+              ? `Copy verification response ${record.value}`
+              : `Copy DNS value ${record.value}`,
+        }),
+      );
+    }
+    await waitFor(() =>
+      expect(writeText.mock.calls.map(([value]) => value)).toEqual(
+        records.flatMap((record) => [record.name, record.value]),
+      ),
+    );
+    expect(queryClient.getQueryData(["airapps", "siteDomains", "node"])).toEqual(data);
+    expect(
+      row
+        .querySelector("[data-airapp-site-domain-status]")
+        ?.getAttribute("data-airapp-site-domain-status"),
+    ).toBe("pending");
+    expect(within(row).queryByRole("link", { name: "a.baidu.com" })).toBeNull();
+  });
+
+  it("does not offer advanced verification when only the routing CNAME is present", async () => {
+    renderSettings({ domains: domainsState([binding()]) });
+    await screen.findByText("Setup pending");
+    expect(screen.queryByRole("button", { name: "Advanced verification" })).toBeNull();
+    expect(document.querySelectorAll("[data-airapp-site-dns-record]")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Copy DNS value site-dns.sites.test" })).toBeTruthy();
+  });
+
+  it("keeps advanced disclosures isolated per hostname and replaces challenge values on recheck without losing provider state", async () => {
+    const make = (hostname: string, token: string) =>
+      binding({
+        hostname,
+        url: `https://${hostname}`,
+        dnsRecords: [
+          { type: "CNAME", name: hostname, value: "site-dns.sites.test" },
+          { type: "TXT", name: `_acme-challenge.${hostname}`, value: token },
+        ],
+      });
+    const data = domainsState([
+      make("a.company.com", "old-token-a"),
+      make("b.company.com", "token-b"),
+    ]);
+    const { read, queryClient } = renderSettings({ domains: data });
+    await screen.findAllByText("Setup pending");
+    const a = rowFor("a.company.com"),
+      b = rowFor("b.company.com");
+    const aToggle = within(a).getByRole("button", { name: "Advanced verification" });
+    const bToggle = within(b).getByRole("button", { name: "Advanced verification" });
+    fireEvent.click(aToggle);
+    expect(aToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(bToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(within(b).queryByRole("button", { name: "Copy DNS value token-b" })).toBeNull();
+    const fresh = domainsState([
+      {
+        ...make("a.company.com", "new-token-a"),
+        status: "error",
+        hostnameStatus: "pending",
+        sslStatus: "pending_validation",
+        errors: ["Provider still requires verification"],
+        issues: ["route-unverified"],
+      },
+      make("b.company.com", "token-b"),
+    ]);
+    read.mockResolvedValueOnce(fresh);
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await within(a).findByRole("button", { name: "Copy DNS value new-token-a" });
+    expect(within(a).queryByRole("button", { name: "Copy DNS value old-token-a" })).toBeNull();
+    expect(aToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(bToggle.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      a
+        .querySelector("[data-airapp-site-domain-status]")
+        ?.getAttribute("data-airapp-site-domain-status"),
+    ).toBe("error");
+    fireEvent.click(aToggle);
+    expect(within(a).getByText("Provider still requires verification")).toBeTruthy();
+    expect(a.querySelector("[data-airapp-site-domain-issue=route-unverified]")).not.toBeNull();
+    expect(queryClient.getQueryData(["airapps", "siteDomains", "node"])).toEqual(fresh);
+  });
+});
+
 describe("primary custom domain", () => {
   const active = { status: "active" as const, hostnameStatus: "active", sslStatus: "active" };
   const apex = binding({
@@ -819,7 +995,7 @@ describe("primary custom domain", () => {
     renderSettings({
       domains: { ...domainsState([apex, www]), primarySupported: false },
     });
-    await screen.findByText("company.com");
+    await screen.findByRole("link", { name: "company.com" });
     expect(screen.queryByText("Primary")).toBeNull();
     expect(screen.queryByText(/Redirects to/)).toBeNull();
     expect(screen.queryByRole("button", { name: /primary domain/ })).toBeNull();
@@ -857,7 +1033,7 @@ describe("primary custom domain", () => {
       domains: domainsState([apex]),
       state: siteState({ engine: "locked" }),
     });
-    await screen.findByText("company.com");
+    await screen.findByRole("link", { name: "company.com" });
     expect(document.querySelector("[data-airapp-site-domain-suggestion]")).toBeNull();
   });
 

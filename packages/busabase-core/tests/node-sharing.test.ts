@@ -2,14 +2,19 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { runWithAnonymousContext, runWithBusabaseContext } from "../src/context";
+import { getDb } from "../src/db";
+import { busabaseNodeShares } from "../src/db/schema";
 import { DEMO_BASES, DEMO_FOLDERS } from "../src/demo/dataset";
 import { createDoc } from "../src/domains/doc/handlers";
-import { getEffectiveNodeLevel, getPublicScopeOf } from "../src/logic/node-acl";
+import { encodeVaultValue } from "../src/domains/vault/logic/vault-crypto";
+import { getEffectiveNodeLevel, getPublicScopeOf, grantNodePrincipal } from "../src/logic/node-acl";
 import {
   disableNodeShare,
   expireElapsedNodeShares,
+  getNodeShare,
   hashSharePassword,
   hasNodeShareHistory,
   isShareLive,
@@ -400,6 +405,200 @@ describe("public node sharing", () => {
     // …and the sweep closed the materialized scope itself, not just the marker.
     await runWithAnonymousContext({}, async () => {
       expect(await getEffectiveNodeLevel(childNodeId)).toBeNull();
+    });
+  });
+
+  describe("retrievable share passwords", () => {
+    // A real key, so the stored payload is genuinely encrypted (the no-key
+    // fallback stores it plain, exactly as Vault does).
+    const VAULT_KEY = "a".repeat(64);
+    let revealNodeId = "";
+
+    const asOwner = <T>(fn: () => Promise<T>) => runWithBusabaseContext({}, fn);
+    const asMember = <T>(
+      actorId: string,
+      permissionLevel: "read" | "changeRequest" | "write" | "manage",
+      fn: () => Promise<T>,
+    ) => runWithBusabaseContext({ actorId, isSpaceManager: false, permissionLevel }, fn);
+    const rawRow = async () => {
+      const db = await getDb();
+      const [row] = await db
+        .select()
+        .from(busabaseNodeShares)
+        .where(eq(busabaseNodeShares.nodeId, revealNodeId));
+      return row;
+    };
+
+    beforeAll(async () => {
+      await client.nodes.createChangeRequest({
+        autoMerge: true,
+        operations: [
+          { kind: "create", nodeType: "folder", slug: "share-reveal", name: "Share Reveal" },
+        ],
+      });
+      revealNodeId = (await findNodeIdBySlug("share-reveal")) ?? "";
+      expect(revealNodeId).not.toBe("");
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("gives the manager the password back, encrypted at rest beside the scrypt verifier", async () => {
+      vi.stubEnv("BUSABASE_VAULT_ENCRYPTION_KEY", VAULT_KEY);
+      const set = await asOwner(() =>
+        setNodeShare(revealNodeId, { scope: "public", password: "482913" }),
+      );
+      expect(set).toMatchObject({ hasPassword: true, password: "482913" });
+      expect(await asOwner(() => getNodeShare(revealNodeId))).toMatchObject({
+        hasPassword: true,
+        password: "482913",
+      });
+      // The logic result is not the row: neither secret column travels.
+      expect(set).not.toHaveProperty("passwordHash");
+      expect(set).not.toHaveProperty("passwordCiphertext");
+
+      const row = await rawRow();
+      expect(row?.passwordCiphertext).toMatchObject({ encoding: "encrypted" });
+      expect(JSON.stringify(row?.passwordCiphertext)).not.toContain("482913");
+      expect(await verifySharePassword("482913", row?.passwordHash ?? "")).toBe(true);
+    });
+
+    it("keeps both columns when the password is omitted, so other settings don't clear it", async () => {
+      vi.stubEnv("BUSABASE_VAULT_ENCRYPTION_KEY", VAULT_KEY);
+      const before = await rawRow();
+      const updated = await asOwner(() =>
+        setNodeShare(revealNodeId, { scope: "public", capability: "submit" }),
+      );
+      expect(updated).toMatchObject({ capability: "submit", password: "482913" });
+      const after = await rawRow();
+      expect(after?.passwordHash).toBe(before?.passwordHash);
+      expect(after?.passwordCiphertext).toEqual(before?.passwordCiphertext);
+      await asOwner(() => setNodeShare(revealNodeId, { scope: "public", capability: "read" }));
+    });
+
+    it("tells a member below manage that the link is locked, but not what opens it", async () => {
+      vi.stubEnv("BUSABASE_VAULT_ENCRYPTION_KEY", VAULT_KEY);
+      for (const level of ["read", "changeRequest", "write"] as const) {
+        const seen = await asMember("usr_member_bob", level, () => getNodeShare(revealNodeId));
+        expect(seen, level).toMatchObject({ hasPassword: true, password: null });
+        const viaRpc = await asMember("usr_member_bob", level, () =>
+          client.nodes.share.get({ nodeId: revealNodeId }),
+        );
+        expect(viaRpc, level).toMatchObject({ hasPassword: true, password: null });
+        expect(JSON.stringify(viaRpc)).not.toContain("482913");
+      }
+
+      // `manage` on the NODE (not only the workspace) is what reveals it.
+      await asOwner(() =>
+        grantNodePrincipal(
+          revealNodeId,
+          { principalType: "user", principalId: "usr_member_carol", role: "manage" },
+          "local-user",
+        ),
+      );
+      expect(
+        await asMember("usr_member_carol", "read", () => getNodeShare(revealNodeId)),
+      ).toMatchObject({ hasPassword: true, password: "482913" });
+    });
+
+    it("shows nothing — and does not fail — when the key no longer opens the stored password", async () => {
+      vi.stubEnv("BUSABASE_VAULT_ENCRYPTION_KEY", "b".repeat(64));
+      expect(await asOwner(() => getNodeShare(revealNodeId))).toMatchObject({
+        hasPassword: true,
+        password: null,
+      });
+      // The link itself is untouched: unlocking only ever checks the hash.
+      expect(
+        await runWithAnonymousContext({}, () =>
+          unlockPublicShare(revealNodeId, "482913", "folder"),
+        ),
+      ).toMatchObject({ nodeId: revealNodeId });
+    });
+
+    it("treats a row from before this change (hash only) as locked but unshowable", async () => {
+      const db = await getDb();
+      await db
+        .update(busabaseNodeShares)
+        .set({ passwordHash: await hashSharePassword("legacy-pass"), passwordCiphertext: null })
+        .where(eq(busabaseNodeShares.nodeId, revealNodeId));
+
+      expect(await asOwner(() => getNodeShare(revealNodeId))).toMatchObject({
+        hasPassword: true,
+        password: null,
+      });
+      expect(
+        await runWithAnonymousContext({}, () =>
+          unlockPublicShare(revealNodeId, "legacy-pass", "folder"),
+        ),
+      ).toMatchObject({ nodeId: revealNodeId, passwordVersion: expect.any(String) });
+    });
+
+    it("never shows a stale password that an older server left behind after changing the hash", async () => {
+      // An old pod mid-deploy rewrites `password_hash` and knows nothing about
+      // the ciphertext column, so the previous password's ciphertext survives.
+      const db = await getDb();
+      await db
+        .update(busabaseNodeShares)
+        .set({
+          passwordHash: await hashSharePassword("changed-elsewhere"),
+          passwordCiphertext: encodeVaultValue("stale-old-pass"),
+        })
+        .where(eq(busabaseNodeShares.nodeId, revealNodeId));
+
+      expect(await asOwner(() => getNodeShare(revealNodeId))).toMatchObject({
+        hasPassword: true,
+        password: null,
+      });
+    });
+
+    it("changing the password makes it readable again and retires the old unlock version", async () => {
+      const before = await runWithAnonymousContext({}, () =>
+        unlockPublicShare(revealNodeId, "changed-elsewhere", "folder"),
+      );
+      await asOwner(() => setNodeShare(revealNodeId, { scope: "public", password: "731052" }));
+
+      expect(await asOwner(() => getNodeShare(revealNodeId))).toMatchObject({
+        password: "731052",
+      });
+      const after = await runWithAnonymousContext({}, () =>
+        unlockPublicShare(revealNodeId, "731052", "folder"),
+      );
+      expect(after?.passwordVersion).toBeTruthy();
+      expect(after?.passwordVersion).not.toBe(before?.passwordVersion);
+      expect(
+        await runWithAnonymousContext({}, () =>
+          unlockPublicShare(revealNodeId, "changed-elsewhere", "folder"),
+        ),
+      ).toBeNull();
+    });
+
+    it("clearing the password removes the verifier and the ciphertext together", async () => {
+      const cleared = await asOwner(() =>
+        setNodeShare(revealNodeId, { scope: "public", password: null }),
+      );
+      expect(cleared).toMatchObject({ hasPassword: false, password: null });
+      const row = await rawRow();
+      expect(row?.passwordHash).toBeNull();
+      expect(row?.passwordCiphertext).toBeNull();
+    });
+
+    it.each([
+      ["empty", ""],
+      ["three characters", "123"],
+      ["65 characters", "x".repeat(65)],
+    ])("refuses a %s password in the logic layer and at the contract", async (_label, password) => {
+      await expect(
+        asOwner(() => setNodeShare(revealNodeId, { scope: "public", password })),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+      await expect(
+        client.nodes.share.set({ nodeId: revealNodeId, scope: "public", password }),
+      ).rejects.toThrow();
+      // Nothing was written: the link is still open, not locked behind a
+      // password nobody could enter.
+      expect(await asOwner(() => getNodeShare(revealNodeId))).toMatchObject({
+        hasPassword: false,
+      });
     });
   });
 

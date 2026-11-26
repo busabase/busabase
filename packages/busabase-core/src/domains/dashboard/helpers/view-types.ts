@@ -2,6 +2,7 @@ import type { FieldType, LookupRollup, ViewConfigVO, ViewType } from "busabase-c
 import type { iString } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
 import type { FormulaFieldOptions } from "./formula-field";
+import type { RecordPageSize } from "./record-pagination-url";
 
 export interface BusabaseBreadcrumbItem {
   href?: string;
@@ -39,7 +40,7 @@ export interface BaseTableViewState {
 // Table pagination controls threaded from the dashboard down to BusaBaseTable.
 export interface RecordsPagination {
   page: number;
-  pageSize: 25 | 50 | 100;
+  pageSize: RecordPageSize;
   total: number;
   totalPages: number;
   /** More records match than `total` counts: show it as "at least". */
@@ -50,7 +51,7 @@ export interface RecordsPagination {
   isFetching?: boolean;
   error?: string | null;
   onPageChange: (page: number) => void;
-  onPageSizeChange: (pageSize: 25 | 50 | 100) => void;
+  onPageSizeChange: (pageSize: RecordPageSize) => void;
   onRetry?: () => void;
   getPageHref?: (page: number) => string;
 }

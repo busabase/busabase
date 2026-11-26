@@ -1,4 +1,5 @@
 import type { CoreI18nMessages } from "./messages";
+import { siteEnvironmentMessages } from "./site-environment";
 
 export const dashboardEs: CoreI18nMessages = {
   lookup: lookupEs,
@@ -501,10 +502,17 @@ export const dashboardEs: CoreI18nMessages = {
     requireSignInHint:
       "Cualquiera con el enlace puede seguir abriendo el formulario; solo los visitantes que hayan iniciado sesión pueden enviarlo.",
     passwordLabel: "Contraseña",
-    passwordHint: "Déjalo vacío para no usar contraseña",
-    passwordPlaceholder: "Establece una contraseña",
-    passwordSet: "Hay una contraseña establecida: escribe una nueva para cambiarla o bórrala",
-    passwordClear: "Quitar contraseña",
+    passwordProtectionLabel: "Protección con contraseña",
+    passwordProtectionHint: "Los visitantes deben introducir la contraseña para abrir este enlace.",
+    passwordChange: "Cambiar",
+    passwordSave: "Guardar",
+    passwordCancel: "Cancelar",
+    passwordLengthHint: "Usa entre 4 y 64 caracteres.",
+    passwordLegacy:
+      "Hay una contraseña establecida, pero no se puede mostrar aquí. Cámbiala por una nueva para verla y copiarla.",
+    copyLinkAndPassword: "Copiar enlace y contraseña",
+    linkAndPasswordCopied: "Enlace y contraseña copiados",
+    linkAndPasswordClipboard: "Enlace: {url}\nContraseña: {password}",
     expiryLabel: "Caduca",
     expiryHint: "El enlace deja de funcionar automáticamente a la hora seleccionada.",
     expiryNever: "Nunca",
@@ -782,6 +790,8 @@ export const dashboardEs: CoreI18nMessages = {
       phone: "Vista previa en tu teléfono",
       signIn:
         "Escanea esta vista previa privada. Inicia sesión con la misma cuenta en el teléfono. No es el Site publicado.",
+      sharedLink:
+        "Cualquier persona con este enlace puede previsualizar esta versión durante un máximo de 24 horas. Mantén el enlace privado. Es una vista previa, no el Site publicado.",
       browserOnly:
         "Esta vista previa se ejecuta en este navegador. Prepara una vista previa de Site con «Publicar Site» para abrirla en el teléfono.",
       loopback:
@@ -792,7 +802,38 @@ export const dashboardEs: CoreI18nMessages = {
       openLink: "Abrir vista previa",
     },
     site: {
+      environment: siteEnvironmentMessages.es,
       publishUpdate: "Publicar actualización",
+      logs: {
+        contentHiddenTitle: "Contenido de los registros oculto",
+        contentHiddenDescription:
+          "No se puede confirmar la configuración de secretos usada en algunos registros. Sus mensajes y rutas se ocultan para proteger los datos sensibles. Las horas, los métodos y los códigos de estado siguen visibles.",
+
+        button: "Registros",
+        versionButton: "Ver registros de {version}",
+        title: "Registros · {version}",
+        description:
+          "Registros de producción de los períodos de despliegue de esta versión en las últimas 24 horas. Las solicitudes durante un cambio de versión pueden solaparse.",
+        collectionHint:
+          "Los nuevos despliegues recopilan registros. Las versiones anteriores pueden no tenerlos; publica una actualización y espera a que aparezcan.",
+        loading: "Cargando registros de producción…",
+        loadFailed: "No se pudieron cargar los registros. Inténtalo de nuevo.",
+        unavailable: "Los registros de producción no están disponibles en este despliegue.",
+        empty:
+          "No hay registros para los períodos de despliegue de esta versión en las últimas 24 horas.",
+        refresh: "Actualizar registros",
+        close: "Cerrar registros",
+        checkedAt: "Consultado a las {time}",
+        truncated:
+          "Se muestran los últimos registros disponibles. Es posible que se omitan otros eventos o períodos de despliegue.",
+        levels: {
+          debug: "Depuración",
+          info: "Información",
+          log: "Registro",
+          warn: "Advertencia",
+          error: "Error",
+        },
+      },
       releases: {
         busy: "Se está aplicando una publicación. La lista se actualizará automáticamente.",
         manage: "Gestionar publicaciones",
@@ -824,6 +865,9 @@ export const dashboardEs: CoreI18nMessages = {
           "Escanea para abrir el Site publicado. Los cambios del borrador sin publicar no se incluyen.",
       },
       publish: {
+        alreadyLive:
+          "Esta versión ya está publicada. Modifica la aplicación y prepara una nueva vista previa para publicar una actualización.",
+        readyToPublish: "Vista previa comprobada. Ya puedes publicar esta versión.",
         previewStale:
           "Los archivos cambiaron después de esta vista previa. Crea o actualiza la vista previa web antes de publicar.",
         noPreview: "Crea una vista previa web antes de publicar.",
@@ -835,10 +879,10 @@ export const dashboardEs: CoreI18nMessages = {
           "La vista previa del navegador sigue funcionando mientras preparas el sitio.",
         checking: "Comprobando si el sitio está listo…",
         checkFailed: "No se pudo comprobar el sitio. Inténtalo de nuevo.",
-        planRequired: "El alojamiento de sitios está incluido desde {plan}.",
-        paidPlanRequired: "Este espacio necesita un plan de pago para alojar un sitio.",
+        planRequired: "La publicación de sitios web está incluida desde {plan}.",
+        paidPlanRequired: "Este espacio necesita un plan de pago para publicar un sitio web.",
         upgradeHint:
-          "Prepara la app y luego mejora el plan del espacio para previsualizarla y publicarla. Un enlace de vista previa del navegador no es un sitio siempre disponible.",
+          "Ya puedes ver una vista previa privada. Mejora el plan de este espacio cuando quieras publicar un sitio web siempre disponible.",
         prepareTitle: "Preparar la versión web",
         prepareHint:
           "Pide a tu agente que prepare una versión web. Puede ser necesario cambiar el código antes de publicar.",
@@ -853,7 +897,7 @@ export const dashboardEs: CoreI18nMessages = {
         refreshPreview: "Actualizar vista previa web",
         previewTitle: "Vista previa web privada",
         publishConsent:
-          "Se publicará la versión revisada. Cualquier persona con la dirección podrá utilizar el sitio, incluidos los datos y las acciones que exponga su código.",
+          "Cualquiera con la dirección del Site puede acceder a esta versión y a los datos y acciones que ofrece.",
       },
       statusNotLive: "Sin publicar",
       statusLive: "Publicado",
@@ -890,7 +934,7 @@ export const dashboardEs: CoreI18nMessages = {
         guideNameHint:
           "Escribe la parte anterior a tu dominio raíz, por ejemplo shop para shop.company.com. Algunos proveedores piden el nombre completo.",
         guideStepCheck:
-          "Vuelve aquí y haz clic en «{check}». Los cambios de DNS pueden tardar de unos minutos a unas horas; después, HTTPS se configura automáticamente. Si también hace falta un registro TXT de verificación, aparecerá aquí después de añadir el dominio.",
+          "Cuando se resuelve el CNAME de enrutamiento, Cloudflare verifica el nombre de host automáticamente y prepara HTTPS. Pulsa «{check}» para consultar el estado; los cambios de DNS pueden tardar.",
         guideRootDomain:
           "¿Quieres usar un dominio raíz como company.com? Solo funciona si tu proveedor de DNS admite un CNAME en la raíz (CNAME flattening, ALIAS o ANAME; Cloudflare lo admite). Si no, usa un subdominio como www o shop.",
         guideLink: "Ver la guía de configuración",
@@ -907,7 +951,7 @@ export const dashboardEs: CoreI18nMessages = {
         adding: "Añadiendo…",
         pending: "Configuración pendiente",
         pendingDnsHint:
-          "Añade los registros siguientes en tu proveedor de DNS y vuelve a comprobar. Los cambios de DNS pueden tardar en aparecer.",
+          "Añade el CNAME de enrutamiento en tu proveedor de DNS y vuelve a comprobarlo. Los cambios de DNS pueden tardar en aparecer.",
         pendingHttpsHint:
           "La propiedad del dominio está verificada. HTTPS se está preparando; vuelve a comprobar en breve.",
         active: "Conectado",
@@ -924,8 +968,11 @@ export const dashboardEs: CoreI18nMessages = {
         },
         offlineHint:
           "El sitio está desactivado. Todas sus direcciones muestran una página no encontrada.",
+        advancedVerification: "Verificación avanzada",
+        advancedHint:
+          "Usa estas comprobaciones opcionales de propiedad y certificado para una migración o antes de cambiar el tráfico. La configuración normal de un subdominio comienza con el CNAME de enrutamiento de arriba.",
         dnsInstructions:
-          "Añade estos registros en tu proveedor de DNS. Conserva los demás registros que necesite tu dominio. El proxy de Cloudflare es compatible una vez verificado que el dominio llega al sitio web.",
+          "Añade este CNAME en tu proveedor de DNS y vuelve a comprobarlo. El proxy de Cloudflare es compatible cuando la ruta del sitio esté verificada.",
         dnsName: "Nombre",
         dnsValue: "Valor / destino",
         httpInstructions:
@@ -1731,6 +1778,7 @@ export const dashboardEs: CoreI18nMessages = {
       "Escribe unos caracteres para buscar en el contenido de registros y archivos en esta pestaña.",
   },
   trash: {
+    deletedAt: "Eliminado",
     title: "Papelera",
     body: "Los elementos archivados se ocultan de la barra lateral. Restáuralos para volver a activarlos.",
     bases: "Bases",
@@ -1738,7 +1786,7 @@ export const dashboardEs: CoreI18nMessages = {
     noArchivedBasesBody: "Las bases que archives aparecerán aquí.",
     foldersDocsSkills: "Carpetas, documentos y Skills",
     noArchivedItemsTitle: "No hay elementos archivados",
-    noArchivedItemsBody: "Las carpetas, documentos y Skills que elimines aparecerán aquí.",
+    noArchivedItemsBody: "Los elementos eliminados aparecerán aquí.",
     deleteForever: "Eliminar definitivamente",
     deletePermanentlyTitle: "¿Eliminar definitivamente?",
     deletePermanentlyBody: '¿Eliminar definitivamente "{name}"? Esta acción no se puede deshacer.',
@@ -1781,6 +1829,8 @@ export const dashboardEs: CoreI18nMessages = {
     changeIcon: "Cambiar icono",
     iconUploadLabel: "Subir imagen",
     iconUploadFormatHint: "PNG, JPG, GIF o WebP, hasta 2 MB",
+    restoreDefaultIcon: "Restaurar icono predeterminado",
+    restoreDefaultIconHint: "Quita la imagen o el emoji personalizado",
     cropDialogTitle: "Editar icono",
     confirmCrop: "Aplicar",
     iconFileMustBeImage: "Selecciona un archivo de imagen",
@@ -2427,6 +2477,8 @@ export const dashboardEs: CoreI18nMessages = {
       'Esto abre una solicitud de cambio para eliminar "{title}". El registro canónico seguirá visible hasta que se revise y se fusione la solicitud.',
     editRecord: "Editar registro",
     newRecordTitle: "Nuevo registro de {base}",
+    newRecordHelp:
+      "¿Necesitas un ejemplo? Abre Indicaciones para el agente → Crear un registro de práctica. Revisa el ejemplo marcado como ficticio antes de guardarlo. Para registros reales, aporta tus propios datos y archivos.",
     failedSaveChangeRequest: "No se pudo guardar la solicitud de cambio",
     invalidFields: "Revisa los siguientes campos: {fields}.",
     submitRequest: "Enviar solicitud",
@@ -2865,6 +2917,8 @@ export const dashboardEs: CoreI18nMessages = {
     untitledStep: "Paso sin título",
     completed: "Completado",
     previewFrame: "Vista previa de {name}",
+    htmlSourcePlainText:
+      "El código fuente extenso se muestra como texto sin formato para mantener la vista previa fluida. El contenido está completo.",
     save: "Guardar",
     saved: "Guardado",
     unsaved: "Cambios sin guardar",

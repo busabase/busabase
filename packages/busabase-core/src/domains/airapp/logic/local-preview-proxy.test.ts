@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { runInNewContext } from "node:vm";
 import { brotliCompressSync, deflateSync, gzipSync } from "node:zlib";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { proxyLocalPreview } from "./local-preview-proxy";
 import { registerLocalPreview, unregisterLocalPreview } from "./local-preview-registry";
 
@@ -129,6 +129,73 @@ describe("AirApp preview response compression over real HTTP", () => {
       }
     },
   );
+});
+
+describe("share-capable preview protocol readiness", () => {
+  it("waits for a rotated credential deployment when content and protocol are unchanged", async () => {
+    let requests = 0;
+    const upstream = await listen((_request, response) => {
+      requests += 1;
+      response.setHeader("content-type", "text/html");
+      response.setHeader("x-busabase-preview-version", "same-content");
+      response.setHeader("x-busabase-preview-protocol", "2");
+      response.setHeader(
+        "x-busabase-preview-deployment",
+        requests > 1 ? "fresh-credential" : "old-credential",
+      );
+      response.end(
+        requests > 1 ? "<h1>Fresh credential ready</h1>" : "<h1>Old revoked credential</h1>",
+      );
+    });
+    await registerLocalPreview(NODE_ID, OWNER, upstream.origin, {
+      "x-busabase-preview-version": "same-content",
+      "x-busabase-preview-protocol": "2",
+      "x-busabase-preview-deployment": "fresh-credential",
+    });
+    try {
+      const response = await proxyLocalPreview(
+        new Request("https://busabase.test/api/airapp-preview/preview-node/"),
+        NODE_ID,
+        "",
+        OWNER,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("Fresh credential ready");
+      expect(requests).toBe(2);
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  it("waits for the sharing protocol even when an older gate has the same content hash", async () => {
+    let requests = 0;
+    const upstream = await listen((_request, response) => {
+      requests += 1;
+      response.setHeader("content-type", "text/html");
+      response.setHeader("x-busabase-preview-version", "same-content");
+      if (requests > 1) response.setHeader("x-busabase-preview-protocol", "2");
+      response.end(requests > 1 ? "<h1>Sharing ready</h1>" : "<h1>Old gate cannot share</h1>");
+    });
+    await registerLocalPreview(NODE_ID, OWNER, upstream.origin, {
+      "x-busabase-preview-version": "same-content",
+      "x-busabase-preview-protocol": "2",
+    });
+    try {
+      const response = await proxyLocalPreview(
+        new Request(
+          "https://busabase.test/api/airapp-preview/preview-node/?__busabase_site_version=same-content",
+        ),
+        NODE_ID,
+        "",
+        OWNER,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("Sharing ready");
+      expect(requests).toBe(2);
+    } finally {
+      await upstream.close();
+    }
+  });
 });
 
 describe("versioned private previews over real HTTP", () => {
@@ -584,6 +651,96 @@ describe("AirApp preview proxy credential boundary", () => {
 
     expect(response.status).toBe(501);
     expect(await response.text()).toContain("not supported");
+  });
+
+  it("captures real browser console calls and unhandled errors before app scripts without suppressing native output", async () => {
+    const upstream = await listen((_request, response) => {
+      response.setHeader("content-type", "text/html; charset=utf-8");
+      response.end(
+        '<!doctype html><html><head><script>console.log("app startup")</script></head><body>AirApp</body></html>',
+      );
+    });
+    await registerLocalPreview(NODE_ID, OWNER, upstream.origin);
+    try {
+      const response = await proxyLocalPreview(
+        new Request("https://busabase.example/api/airapp-preview/preview-node/"),
+        NODE_ID,
+        "",
+        OWNER,
+      );
+      const html = await response.text();
+      const bridge = html.match(
+        /<script data-busabase-airapp-preview-bridge="">([\s\S]*?)<\/script>/,
+      )?.[1];
+      expect(bridge).toBeDefined();
+      expect(html.indexOf("data-busabase-airapp-preview-bridge")).toBeLessThan(
+        html.indexOf('console.log("app startup")'),
+      );
+      const messages: Array<{ channel: string; level: string; message: string }> = [];
+      const origins: string[] = [];
+      type BrowserErrorEvent = { error?: Error; message?: string; reason?: unknown };
+      const events = new Map<string, (event: BrowserErrorEvent) => void>();
+      const nativeConsole = {
+        log: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      };
+      const browserWindow = {
+        console: { ...nativeConsole },
+        parent: {
+          postMessage: (message: (typeof messages)[number], origin: string) => {
+            messages.push(message);
+            origins.push(origin);
+          },
+        },
+        addEventListener: (name: string, listener: (event: BrowserErrorEvent) => void) => {
+          events.set(name, listener);
+        },
+        location: {
+          href: "https://busabase.example/api/airapp-preview/preview-node/",
+          origin: "https://busabase.example",
+        },
+        fetch: async () => new Response(null, { status: 204 }),
+      };
+      runInNewContext(bridge as string, { URL, Error, window: browserWindow });
+      browserWindow.console.log("app startup", { count: 3 });
+      browserWindow.console.info("connected");
+      browserWindow.console.warn("stock low");
+      browserWindow.console.error(new Error("checkout failed"));
+      browserWindow.console.debug("trace");
+      const circular: { self?: unknown } = {};
+      circular.self = circular;
+      browserWindow.console.log(circular, "x".repeat(20_000));
+      events.get("error")?.({ message: "uncaught script error" });
+      events.get("unhandledrejection")?.({ reason: new Error("request rejected") });
+      expect(nativeConsole.log).toHaveBeenCalledWith("app startup", { count: 3 });
+      expect(nativeConsole.warn).toHaveBeenCalledExactlyOnceWith("stock low");
+      expect(messages[0]).toEqual({
+        channel: "busabase-airapp-console",
+        level: "log",
+        message: 'app startup {"count":3}',
+      });
+      expect(messages.map(({ level }) => level)).toEqual([
+        "log",
+        "info",
+        "warn",
+        "error",
+        "debug",
+        "log",
+        "error",
+        "error",
+      ]);
+      expect(messages[3]?.message).toContain("checkout failed");
+      expect(messages[5]?.message).toContain("[Circular]");
+      expect(messages[6]?.message).toBe("uncaught script error");
+      expect(messages[7]?.message).toContain("Unhandled rejection: Error: request rejected");
+      expect(messages.every(({ message }) => message.length <= 8192)).toBe(true);
+      expect(new Set(origins)).toEqual(new Set(["https://busabase.example"]));
+    } finally {
+      await upstream.close();
+    }
   });
 });
 

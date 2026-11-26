@@ -428,9 +428,9 @@ function GraphInner({ bases, nodes: nodeTree }: BaseGraphViewProps) {
         </span>
       </div>
 
-      {/* Legend */}
+      {/* Legend — under the badge on a phone, where both on one line overlap. */}
       {relationCount > 0 && (
-        <div className="pointer-events-none absolute right-4 top-3 z-10 flex items-center gap-4 text-xs text-muted-foreground">
+        <div className="pointer-events-none absolute top-10 left-4 z-10 flex items-center gap-4 text-xs text-muted-foreground sm:top-3 sm:right-4 sm:left-auto">
           {oneWayCount > 0 && (
             <span className="flex items-center gap-1">
               <span style={{ color: EDGE_ONE_WAY }}>→</span>

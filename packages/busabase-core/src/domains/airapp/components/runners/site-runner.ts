@@ -1,6 +1,11 @@
 "use client";
 
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import {
+  AirAppSiteAccessError,
+  readSiteAccessDenial,
+  sitePreviewDeploymentDenial,
+} from "../../utils/site-access";
 import type { SiteBundleBlocker } from "../../utils/site-bundle";
 import type { AirAppMountedFile, AirAppRunner } from "./types";
 
@@ -38,10 +43,28 @@ export class SiteRunner implements AirAppRunner {
   async install(): Promise<void> {}
 
   async start(): Promise<void> {
+    const read = this.orpc.airapps.siteState?.call;
+    try {
+      if (read) {
+        const denial = sitePreviewDeploymentDenial(await read({ nodeId: this.nodeId }));
+        if (denial) throw new AirAppSiteAccessError(denial);
+      }
+    } catch (cause) {
+      const denial = readSiteAccessDenial(cause);
+      if (denial) throw new AirAppSiteAccessError(denial);
+      throw cause;
+    }
+    if (this.disposed) return;
     this.logCallback?.("[busabase] deploying a preview of this site\n");
-    const { outcome, state } = await this.orpc.airapps.siteDeployPreview.call({
-      nodeId: this.nodeId,
-    });
+    const { outcome, state } = await this.orpc.airapps.siteDeployPreview
+      .call({
+        nodeId: this.nodeId,
+      })
+      .catch((cause: unknown) => {
+        const denial = readSiteAccessDenial(cause);
+        if (denial) throw new AirAppSiteAccessError(denial);
+        throw cause;
+      });
     if (this.disposed) return;
     if (outcome === "blocked") throw new AirAppSiteBlockedError(state.blockers);
     if (!state.previewUrl) throw new Error("The server reported a preview with no address.");

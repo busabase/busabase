@@ -12,7 +12,7 @@ import type { NodeIcon } from "busabase-contract/types";
 import { EmojiPicker, EmojiPickerSearch } from "kui/emoji-picker";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import { cn } from "kui/utils";
-import { ImageUp, Loader2 } from "lucide-react";
+import { ImageUp, Loader2, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
 import { resolveNodeIcon } from "../helpers/node-icons";
@@ -24,7 +24,7 @@ interface NodeIconPickerProps {
   nodeId: string;
   nodeType: string;
   icon: NodeIcon | null;
-  onChange: (icon: NodeIcon) => void;
+  onChange: (icon: NodeIcon | null) => void;
 }
 
 export function NodeIconPicker({ orpc, nodeId, nodeType, icon, onChange }: NodeIconPickerProps) {
@@ -144,6 +144,28 @@ export function NodeIconPicker({ orpc, nodeId, nodeType, icon, onChange }: NodeI
                 </p>
               </div>
             </button>
+
+            {icon ? (
+              <button
+                className="flex items-center gap-2.5 border-t px-3 py-2 text-left transition-colors hover:bg-muted/60 disabled:pointer-events-none disabled:opacity-60"
+                disabled={isUploading}
+                onClick={() => {
+                  onChange(null);
+                  setOpen(false);
+                }}
+                type="button"
+              >
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-xs leading-tight">{t.restoreDefaultIcon}</p>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground leading-tight">
+                    {t.restoreDefaultIconHint}
+                  </p>
+                </div>
+              </button>
+            ) : null}
           </div>
         </PopoverContent>
       </Popover>

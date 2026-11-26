@@ -22,7 +22,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { listNodeTypes, publicAccessOf } from "busabase-contract/domains";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NodeShareDialog } from "./node-share-button";
 
 vi.mock("qrcode", () => ({
@@ -51,9 +51,23 @@ Element.prototype.releasePointerCapture ??= () => {};
 Element.prototype.scrollIntoView ??= () => {};
 
 const FIXTURES: Record<string, unknown> = {
-  "nodes.share.get": { scope: "none", capability: "read", hasPassword: false, expiresAt: null },
+  "nodes.share.get": {
+    scope: "none",
+    capability: "read",
+    hasPassword: false,
+    password: null,
+    expiresAt: null,
+  },
   "embedLinks.list": [],
 };
+
+/** Every mutation the dialog fired, in order, as `{ path, input }`. */
+const MUTATIONS: Array<{ path: string; input: unknown }> = [];
+/**
+ * Optional per-procedure server stand-ins, run on each mutation — lets a test
+ * make `nodes.share.set` change what the next `nodes.share.get` returns.
+ */
+const MUTATION_HANDLERS: Record<string, (input: never) => void> = {};
 
 /** A `BusabaseQueryUtils` stand-in: any `a.b.c.queryOptions()` resolves to a fixture. */
 const fakeOrpc = (): BusabaseQueryUtils => {
@@ -66,7 +80,17 @@ const fakeOrpc = (): BusabaseQueryUtils => {
             queryFn: async () => FIXTURES[path.join(".")] ?? null,
           });
         }
-        if (key === "mutationOptions") return () => ({ mutationFn: async () => ({}) });
+        if (key === "key") return () => path;
+        if (key === "mutationOptions") {
+          return () => ({
+            mutationFn: async (input: unknown) => {
+              const name = path.join(".");
+              MUTATIONS.push({ path: name, input });
+              MUTATION_HANDLERS[name]?.(input as never);
+              return {};
+            },
+          });
+        }
         return node([...path, key]);
       },
     });
@@ -269,5 +293,155 @@ describe("NodeShareDialog: public QR link", () => {
     const renamedUrl = ((await screen.findByTestId("node-share-public-url")) as HTMLInputElement)
       .value;
     expect(renamedUrl).toBe(firstUrl);
+  });
+});
+
+describe("NodeShareDialog: link password", () => {
+  const publicShare = (password: { hasPassword: boolean; password: string | null }) => ({
+    nodeId: "nod_1",
+    scope: "public",
+    capability: "read",
+    expiresAt: null,
+    updatedAt: "2026-11-25T00:00:00.000Z",
+    ...password,
+  });
+  const passwordSwitch = () => screen.getByTestId("node-share-password-switch");
+  const shareSetInputs = () =>
+    MUTATIONS.filter((call) => call.path === "nodes.share.set").map((call) => call.input);
+  let writeText: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    MUTATIONS.length = 0;
+    writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    // Behave like the server: a set password is returned to the manager.
+    MUTATION_HANDLERS["nodes.share.set"] = (input: { password?: string | null }) => {
+      if (input.password === undefined) return;
+      FIXTURES["nodes.share.get"] = publicShare({
+        hasPassword: input.password !== null,
+        password: input.password,
+      });
+    };
+  });
+
+  afterEach(() => {
+    delete MUTATION_HANDLERS["nodes.share.set"];
+    FIXTURES["nodes.share.get"] = {
+      scope: "none",
+      capability: "read",
+      hasPassword: false,
+      password: null,
+      expiresAt: null,
+    };
+  });
+
+  it("is off without a password, and switching it on generates and shows a 6-digit code", async () => {
+    FIXTURES["nodes.share.get"] = publicShare({ hasPassword: false, password: null });
+    renderDialog("doc");
+
+    await waitFor(() => expect(passwordSwitch().getAttribute("data-state")).toBe("unchecked"));
+    expect(screen.queryByTestId("node-share-password-value")).toBeNull();
+
+    fireEvent.click(passwordSwitch());
+
+    await waitFor(() => expect(shareSetInputs()).toHaveLength(1));
+    const sent = shareSetInputs()[0] as { nodeId: string; scope: string; password: string };
+    expect(sent).toMatchObject({ nodeId: "nod_1", scope: "public" });
+    expect(sent.password).toMatch(/^\d{6}$/);
+    const shown = await screen.findByTestId("node-share-password-value");
+    expect(shown.textContent).toBe(sent.password);
+    expect(passwordSwitch().getAttribute("data-state")).toBe("checked");
+  });
+
+  it("copies the link and the password together, labelled, with a copied state", async () => {
+    FIXTURES["nodes.share.get"] = publicShare({ hasPassword: true, password: "482913" });
+    renderDialog("doc");
+
+    expect((await screen.findByTestId("node-share-password-value")).textContent).toBe("482913");
+    const url = (screen.getByTestId("node-share-public-url") as HTMLInputElement).value;
+    fireEvent.click(screen.getByTestId("node-share-copy-link-and-password"));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`Link: ${url}\nPassword: 482913`));
+    // The URL itself never carries the password.
+    expect(url).not.toContain("482913");
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("node-share-copy-link-and-password").querySelector(".lucide-check"),
+      ).not.toBeNull(),
+    );
+  });
+
+  it("changes the password through an inline editor that refuses fewer than 4 or more than 64 characters", async () => {
+    FIXTURES["nodes.share.get"] = publicShare({ hasPassword: true, password: "482913" });
+    renderDialog("doc");
+
+    fireEvent.click(await screen.findByTestId("node-share-password-edit"));
+    const input = screen.getByTestId("node-share-password-input") as HTMLInputElement;
+    expect(input.value).toBe("482913");
+    const save = () => screen.getByTestId("node-share-password-save") as HTMLButtonElement;
+
+    fireEvent.change(input, { target: { value: "abc" } });
+    expect(save().disabled).toBe(true);
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.change(input, { target: { value: "x".repeat(65) } });
+    expect(save().disabled).toBe(true);
+
+    fireEvent.change(input, { target: { value: "river-otter" } });
+    expect(save().disabled).toBe(false);
+    expect(input.getAttribute("aria-invalid")).toBe("false");
+    fireEvent.click(save());
+
+    await waitFor(() =>
+      expect(shareSetInputs()).toEqual([
+        { nodeId: "nod_1", scope: "public", password: "river-otter" },
+      ]),
+    );
+    expect((await screen.findByTestId("node-share-password-value")).textContent).toBe(
+      "river-otter",
+    );
+    expect(screen.queryByTestId("node-share-password-input")).toBeNull();
+  });
+
+  it("cancelling the editor sends nothing and keeps the current password", async () => {
+    FIXTURES["nodes.share.get"] = publicShare({ hasPassword: true, password: "482913" });
+    renderDialog("doc");
+
+    fireEvent.click(await screen.findByTestId("node-share-password-edit"));
+    fireEvent.change(screen.getByTestId("node-share-password-input"), {
+      target: { value: "something-else" },
+    });
+    fireEvent.click(screen.getByTestId("node-share-password-cancel"));
+
+    expect(screen.getByTestId("node-share-password-value").textContent).toBe("482913");
+    expect(shareSetInputs()).toEqual([]);
+  });
+
+  it("explains a password that cannot be shown, which can only be replaced", async () => {
+    FIXTURES["nodes.share.get"] = publicShare({ hasPassword: true, password: null });
+    renderDialog("doc");
+
+    await waitFor(() => expect(passwordSwitch().getAttribute("data-state")).toBe("checked"));
+    expect(screen.getByTestId("node-share-password-legacy").textContent).toContain(
+      "can't be shown",
+    );
+    expect(screen.queryByTestId("node-share-password-value")).toBeNull();
+    expect(screen.queryByTestId("node-share-copy-link-and-password")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("node-share-password-edit"));
+    expect((screen.getByTestId("node-share-password-input") as HTMLInputElement).value).toBe("");
+  });
+
+  it("switching it off removes the password", async () => {
+    FIXTURES["nodes.share.get"] = publicShare({ hasPassword: true, password: "482913" });
+    renderDialog("doc");
+
+    await screen.findByTestId("node-share-password-value");
+    fireEvent.click(passwordSwitch());
+
+    await waitFor(() =>
+      expect(shareSetInputs()).toEqual([{ nodeId: "nod_1", scope: "public", password: null }]),
+    );
+    await waitFor(() => expect(passwordSwitch().getAttribute("data-state")).toBe("unchecked"));
+    expect(screen.queryByTestId("node-share-password-value")).toBeNull();
   });
 });

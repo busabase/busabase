@@ -84,6 +84,17 @@ export const createDumpBusinessFixture = (spaceId: string, prefix: string) => {
         scope: "public",
         capability: "read",
         passwordHash: "scrypt:preserved-access-verifier",
+        // The manager-readable copy of the password: opaque jsonb that a
+        // restore must carry byte-for-byte (it only decrypts under the source
+        // server's Vault key — elsewhere it reads back as "can't be shown").
+        passwordCiphertext: {
+          version: 1,
+          encoding: "encrypted",
+          algorithm: "aes-256-gcm",
+          iv: "cHJlc2VydmVkLWl2",
+          tag: "cHJlc2VydmVkLXRhZy0xMjM0",
+          ciphertext: "cHJlc2VydmVkLWNpcGhlcnRleHQ=",
+        },
         expiresAt: future,
         createdBy: "fixture-user",
         updatedBy: "fixture-user",

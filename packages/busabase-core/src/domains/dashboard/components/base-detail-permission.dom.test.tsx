@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
@@ -17,6 +17,8 @@ import { SubmitPermissionProvider } from "./split-submit-button";
 // header's topbar cluster is unrelated to this suite.
 vi.mock("openlib/ui/dashboard", () => ({
   SPALink: (props: ComponentProps<typeof Link>) => <Link {...props} />,
+  // The column menu builds Agent prompt links.
+  useAddDemoParam: () => (href: string) => href,
 }));
 vi.mock("./node-actions-menu", () => ({ NodeActionsMenu: () => null }));
 vi.mock("./node-agent-prompts-button", () => ({ NodeAgentPromptsButton: () => null }));
@@ -52,7 +54,10 @@ const makeBase = (viewerPermissionLevel?: ApiKeyPermissionLevel): BaseVO => ({
   description: "",
   reviewPolicy: { kind: "single", requiredApprovals: 1 },
   createdAt: "2026-10-01T00:00:00Z",
-  fields: [titleField],
+  fields: [
+    titleField,
+    { ...titleField, id: "fld_notes", slug: "notes", name: "Notes", required: false, position: 1 },
+  ],
   ...(viewerPermissionLevel ? { viewerPermissionLevel } : {}),
 });
 const view = (id: string, position: number): ViewVO => ({
@@ -172,6 +177,33 @@ describe("Base page affordances follow the viewer's node level", () => {
     renderDetail({ viewerPermissionLevel: "write", workspaceLevel: "read" });
     expect(newRecordLink()).toBeTruthy();
     expect(sortableTabs().length).toBeGreaterThan(0);
+  });
+
+  it("keeps a read grant off the column layout controls, but lets the column menu open", () => {
+    renderDetail({ viewerPermissionLevel: "read", workspaceLevel: "manage" });
+    const disabled = (testId: string) => (screen.getByTestId(testId) as HTMLButtonElement).disabled;
+    expect(disabled("field-drag-handle-notes")).toBe(true);
+    expect(disabled("field-resize-handle-notes")).toBe(true);
+    // The menu still opens (agent prompts, filter/sort editors only read).
+    expect(disabled("field-header-actions-notes")).toBe(false);
+    fireEvent.click(screen.getByTestId("field-header-actions-notes"));
+    expect((screen.getByRole("button", { name: "Hide field" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it("lets a changeRequest grant change the column layout", () => {
+    renderDetail({ viewerPermissionLevel: "changeRequest" });
+    expect((screen.getByTestId("field-drag-handle-notes") as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    expect((screen.getByTestId("field-resize-handle-notes") as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    fireEvent.click(screen.getByTestId("field-header-actions-notes"));
+    expect((screen.getByRole("button", { name: "Hide field" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 
   it("falls back to the workspace level when the Base carries no viewer level", () => {

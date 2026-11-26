@@ -14,6 +14,7 @@ import {
 // Base-domain tables are referenced by the kernel CR tables (lazy FK thunks); the
 // import cycle with ../domains/base/schema resolves at runtime via live bindings.
 import { busabaseBases, busabaseRecords, busabaseViews } from "../domains/base/schema";
+import type { VaultValuePayload } from "../domains/vault/schema/vault-items";
 import { spaceIdColumn } from "./space-column";
 
 // Node type union is owned by the node-type registry (single source of truth).
@@ -388,8 +389,27 @@ export const busabaseNodeShares = pgTable(
      * equivalent ceiling is "can edit".)
      */
     capability: text("capability").$type<"read" | "submit">().notNull().default("read"),
-    /** Hashed, never plaintext. Only meaningful while `scope = "public"`. */
+    /**
+     * scrypt verifier (`salt:hash`). Only meaningful while `scope = "public"`.
+     * Stays the ONE thing a visitor's password is checked against, and the
+     * source of `passwordVersion` (the signed unlock cookie's revocation
+     * check) — `passwordCiphertext` below never takes part in unlocking.
+     */
     passwordHash: text("password_hash"),
+    /**
+     * The same password, reversibly encrypted with the Vault helpers
+     * (`domains/vault/logic/vault-crypto.ts`: aes-256-gcm under the server's
+     * Vault key; a plain payload when the server has no key, exactly as Vault
+     * secrets are stored there). It exists so a node manager can see and copy
+     * the password again later — a hash can only ever be checked, so the owner
+     * who set it could not send the link and its password on afterwards.
+     *
+     * Written and cleared together with `passwordHash`. NULL alongside a set
+     * hash is a legitimate state: a row from before this column existed. Such
+     * a link stays locked exactly as before; only the "show password" half is
+     * unavailable until the password is changed.
+     */
+    passwordCiphertext: jsonb("password_ciphertext").$type<VaultValuePayload>(),
     expiresAt: timestamp("expires_at", { mode: "date" }),
     createdBy: text("created_by").notNull(),
     updatedBy: text("updated_by").notNull(),
@@ -908,6 +928,8 @@ export * from "../domains/base/schema";
 export * from "../domains/embed-links/schema";
 // Form-as-Node: a node bound to a Base; submissions become record-create CRs.
 export * from "../domains/form/schema";
+// Runtime white-label branding (OSS Settings → Branding, Premium system admin).
+export * from "../domains/settings/schema/app-branding";
 export { busabaseSpaceInstructions } from "../domains/space-instructions/schema/space-instructions";
 // Which Doc/HTML node Home shows as the space's welcome page.
 export { busabaseSpaceWelcome } from "../domains/space-welcome/schema/space-welcome";

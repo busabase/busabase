@@ -14,6 +14,7 @@ const intentionalExclusions = {
   busabase_vault_items: "Dedicated credential store",
   busabase_router_oauth_states: "One-time OAuth credentials",
   busabase_router_pending_enrollments: "Pending credential enrollment",
+  busabase_app_branding: "Instance-wide white-label settings, not space data",
 };
 
 it("classifies every persistent kernel table as backed up or explicitly excluded", () => {

@@ -25,20 +25,28 @@ vi.mock("@tanstack/react-query", () => ({
   // A one-page month is drained, so no day asks on its own.
   useQueries: () => [],
 }));
-vi.mock("wouter", () => ({ useSearch: () => "" }));
+vi.mock("wouter", () => ({
+  useSearch: () => "",
+  useLocation: () => ["/base/calendar/calendar", vi.fn()],
+}));
 vi.mock("@dnd-kit/core", () => ({
   DndContext: ({
     children,
     onDragEnd,
+    onDragStart,
   }: {
     children: ReactNode;
     onDragEnd: (event: unknown) => void;
+    onDragStart: (event: unknown) => void;
   }) => (
     <div>
       {children}
       <button
         data-testid="drop-on-target-day"
-        onClick={() => onDragEnd({ active: { id: "rec_calendar" }, over: { id: targetDay } })}
+        onClick={() => {
+          onDragStart({ active: { id: "rec_calendar" } });
+          onDragEnd({ active: { id: "rec_calendar" }, over: { id: targetDay } });
+        }}
         type="button"
       >
         Drop

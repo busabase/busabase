@@ -12,7 +12,13 @@ import { SubmitPermissionProvider } from "./split-submit-button";
 // What a reader sees when a Base outgrows the record-list limits: a total that
 // says "at least", page numbers that say where they stop, and "too many
 // records, add a filter" where a view would otherwise look empty.
-vi.mock("wouter", () => ({ useSearch: () => "" }));
+vi.mock("wouter", () => {
+  const navigate = vi.fn();
+  return {
+    useSearch: () => "",
+    useLocation: () => ["/base/tasks/calendar", navigate],
+  };
+});
 vi.mock("openlib/ui/dashboard", () => ({
   SPALink: ({ children, ...props }: { children: ReactNode; href: string }) => (
     <a {...props}>{children}</a>

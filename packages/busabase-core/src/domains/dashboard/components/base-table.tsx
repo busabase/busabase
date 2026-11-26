@@ -29,7 +29,6 @@ import {
   ArrowUpDown,
   CalendarDays,
   Check,
-  ChevronRight,
   Columns3,
   ExternalLink,
   EyeOff,
@@ -54,6 +53,7 @@ import {
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import {
+  type ComponentProps,
   type CSSProperties,
   type DragEvent,
   type KeyboardEvent,
@@ -64,6 +64,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -83,6 +84,7 @@ import { getDateFieldOptions, parseDateFieldValue } from "../../base/utils/date-
 import { resolveEmbedPreview } from "../../base/utils/embed";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
+import { readCalendarMonth } from "../helpers/calendar-month-url";
 import { getRecordTitle } from "../helpers/change-request";
 import {
   getAttachmentRefs,
@@ -103,6 +105,7 @@ import {
   TABLE_CELL_LINK_MAX_CHARS,
   TABLE_CELL_PREVIEW_MAX_CHARS,
 } from "../helpers/table-cell-preview";
+import { readTimelineState } from "../helpers/timeline-state-url";
 import {
   canonicalizeViewFieldConfig,
   clampViewFieldWidth,
@@ -114,7 +117,9 @@ import {
   setViewFieldWidth,
 } from "../helpers/view-config";
 import { getViewConfigPatch, getViewUpdatePayload } from "../helpers/view-config-patch";
+import { getGroupableFields, resolveViewGrouping } from "../helpers/view-grouping";
 import { isOnlyRemainingView } from "../helpers/view-order";
+import { buildSummaryAggregates, resolveViewFieldSummaries } from "../helpers/view-summaries";
 import type {
   BaseTableViewState,
   RecordSubmitOptions,
@@ -129,7 +134,13 @@ import {
   useBaseGridEditing,
 } from "../hooks/use-base-grid-editing";
 import { type FieldFileUploader, useFieldFileUpload } from "../hooks/use-field-file-upload";
+import type { GroupedGridGroup } from "../hooks/use-grouped-grid-data";
 import type { RecordFindControl } from "../hooks/use-record-find";
+import {
+  getRecordFindHighlight,
+  RecordFindHighlightProvider,
+  useRecordFindHighlighter,
+} from "../hooks/use-record-find-highlight";
 import { getOmittedWhiteboardPreview, isListPayloadOmitted } from "../utils/list-payload-preview";
 import { toSlugInput } from "../utils/slug-input";
 import { useIsAnonymousVisitor } from "../visitor-context";
@@ -157,7 +168,18 @@ import { FieldHelpPopover } from "./field-help";
 import { FieldBadge, LookupFieldValue, WhiteboardThumbnail } from "./field-preview";
 import { FormulaValue } from "./formula-value";
 import { GridCellCollection, GridCellText } from "./grid-cell-presentation";
+import { GridGroupControl } from "./grid-group-control";
+import {
+  GRID_GROUP_FOOTER_HEIGHT,
+  GRID_GROUP_HEADER_HEIGHT,
+  GridGroupFooterRow,
+  GridGroupHeaderRow,
+  GroupedGridDataSource,
+  gridGroupNeedsFooter,
+  type ScopedGroupedGridData,
+} from "./grid-group-rows";
 import { GridRowHeightControl } from "./grid-row-height-control";
+import { GridSummaryFooter } from "./grid-summary-footer";
 import { UserAvatar } from "./identity";
 import { ImportRecordsDialog } from "./import-records-dialog";
 import { DialogContent } from "./localized-dialog-content";
@@ -220,6 +242,7 @@ const baseTableStatusCellClassName =
 
 function FieldColumnHeader({
   actionsDisabled,
+  layoutEditable,
   activeView,
   allFields,
   baseName,
@@ -250,6 +273,12 @@ function FieldColumnHeader({
   sticky,
 }: {
   actionsDisabled: boolean;
+  /**
+   * Whether this viewer may propose changes to the view's layout (order,
+   * width, visibility). Without changeRequest access the server refuses them,
+   * so the controls are off; the menu still opens for what only reads.
+   */
+  layoutEditable: boolean;
   activeView: ViewVO | null;
   allFields: BaseFieldVO[];
   /** Node identity of the Base this column belongs to — the Agent prompts
@@ -296,6 +325,7 @@ function FieldColumnHeader({
     ? getVisibleViewFieldSlugs(activeView.config, allFields).length
     : allFields.length;
   const resizeSession = useRef<{ startWidth: number; startX: number; width: number } | null>(null);
+  const layoutLocked = actionsDisabled || !layoutEditable;
 
   const getDropPlacement = (event: DragEvent<HTMLDivElement>): "before" | "after" => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -303,7 +333,7 @@ function FieldColumnHeader({
   };
 
   const startResize = (event: PointerEvent<HTMLButtonElement>) => {
-    if (!activeView || actionsDisabled) {
+    if (!activeView || layoutLocked) {
       return;
     }
     event.preventDefault();
@@ -340,11 +370,7 @@ function FieldColumnHeader({
   };
 
   const resizeWithKeyboard = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (
-      !activeView ||
-      actionsDisabled ||
-      (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
-    ) {
+    if (!activeView || layoutLocked || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) {
       return;
     }
     event.preventDefault();
@@ -389,14 +415,14 @@ function FieldColumnHeader({
         }
       }}
       onDragOver={(event) => {
-        if (!activeView || actionsDisabled || dragging) {
+        if (!activeView || layoutLocked || dragging) {
           return;
         }
         event.preventDefault();
         onDragOver(getDropPlacement(event));
       }}
       onDrop={(event) => {
-        if (!activeView || actionsDisabled || dragging) {
+        if (!activeView || layoutLocked || dragging) {
           return;
         }
         event.preventDefault();
@@ -411,8 +437,8 @@ function FieldColumnHeader({
           aria-label={fmt(messages.base.dragFieldAria, { name })}
           className="hidden size-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/60 hover:bg-accent hover:text-foreground active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-35 md:inline-flex"
           data-testid={`field-drag-handle-${field.slug}`}
-          disabled={actionsDisabled}
-          draggable={!actionsDisabled}
+          disabled={layoutLocked}
+          draggable={!layoutLocked}
           onDragEnd={onDragEnd}
           onDragStart={(event) => {
             event.dataTransfer.effectAllowed = "move";
@@ -499,7 +525,7 @@ function FieldColumnHeader({
                     <button
                       aria-label={messages.base.moveFieldLeft}
                       className="flex h-8 items-center justify-center gap-1.5 rounded transition-colors hover:bg-accent disabled:opacity-40"
-                      disabled={actionsDisabled || !canMoveLeft}
+                      disabled={layoutLocked || !canMoveLeft}
                       onClick={() => {
                         onMove("left");
                         setOpen(false);
@@ -512,7 +538,7 @@ function FieldColumnHeader({
                     <button
                       aria-label={messages.base.moveFieldRight}
                       className="flex h-8 items-center justify-center gap-1.5 rounded transition-colors hover:bg-accent disabled:opacity-40"
-                      disabled={actionsDisabled || !canMoveRight}
+                      disabled={layoutLocked || !canMoveRight}
                       onClick={() => {
                         onMove("right");
                         setOpen(false);
@@ -526,7 +552,7 @@ function FieldColumnHeader({
                   <button
                     className="mt-1 flex h-8 w-full items-center gap-2 rounded px-2 text-left transition-colors hover:bg-accent disabled:opacity-40"
                     disabled={
-                      actionsDisabled || activeView.config.fieldWidths?.[field.slug] === undefined
+                      layoutLocked || activeView.config.fieldWidths?.[field.slug] === undefined
                     }
                     onClick={() => runUpdate(resetViewFieldWidth(activeView.config, field.slug))}
                     type="button"
@@ -566,7 +592,7 @@ function FieldColumnHeader({
                   {!isPrimary ? (
                     <button
                       className="flex h-8 w-full items-center gap-2 rounded px-2 text-left transition-colors hover:bg-accent disabled:opacity-50"
-                      disabled={actionsDisabled || visibleFieldCount <= 1}
+                      disabled={layoutLocked || visibleFieldCount <= 1}
                       onClick={() => runUpdate(hideViewField(activeView.config, field, allFields))}
                       title={visibleFieldCount <= 1 ? messages.base.cannotHideLastField : undefined}
                       type="button"
@@ -635,7 +661,7 @@ function FieldColumnHeader({
           aria-label={fmt(messages.base.resizeFieldAria, { name })}
           className="absolute inset-y-0 right-0 z-30 hidden w-2 translate-x-1/2 cursor-col-resize touch-none items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-30 md:flex"
           data-testid={`field-resize-handle-${field.slug}`}
-          disabled={actionsDisabled}
+          disabled={layoutLocked}
           onKeyDown={resizeWithKeyboard}
           onPointerCancel={() => {
             resizeSession.current = null;
@@ -665,6 +691,18 @@ const toSlug = (value: string) =>
 
 // A full 100-record page is windowed; smaller pages render plainly.
 const VIRTUALIZE_ROW_THRESHOLD = 100;
+
+/**
+ * What the table body renders, in order. An ungrouped grid is only record
+ * rows; a grouped one interleaves each group's header and footer rows, and
+ * every record still goes through the one `BusaBaseRecordRow` renderer.
+ */
+type GridBodyItem =
+  | { kind: "record"; key: string; record: RecordVO }
+  | { kind: "group"; key: string; group: GroupedGridGroup }
+  | { kind: "group-footer"; key: string; group: GroupedGridGroup };
+
+const NO_RECORDS: RecordVO[] = [];
 
 // One canonical record row, shared by the plain and virtualized render paths.
 // `style` carries the absolute-positioning transform when virtualized.
@@ -821,7 +859,26 @@ function BusaBaseTableRowsSkeleton({
   );
 }
 
-export function BusaBaseTable({
+/**
+ * While a find is committed, cells in the fields it searched (the server's
+ * scope: the chosen field, or the eligible fields the View shows) mark the
+ * query, so every kept row shows why it matched.
+ */
+export function BusaBaseTable(props: ComponentProps<typeof BusaBaseTableContent>) {
+  const { activeView, base, recordFind, records } = props;
+  const fields = base?.fields ?? records[0]?.base.fields;
+  const findHighlight = useMemo(
+    () => getRecordFindHighlight(recordFind?.input, fields ?? [], activeView?.config),
+    [recordFind?.input, fields, activeView?.config],
+  );
+  return (
+    <RecordFindHighlightProvider value={findHighlight}>
+      <BusaBaseTableContent {...props} />
+    </RecordFindHighlightProvider>
+  );
+}
+
+function BusaBaseTableContent({
   activeView,
   viewState,
   client,
@@ -935,31 +992,49 @@ export function BusaBaseTable({
     activeView?.type === "kanban"
       ? resolveStackByField(base, base?.fields ?? [], activeView.config.stackByFieldSlug)
       : null;
-  const kanbanScope = JSON.stringify([
+  const collectionQueryScope = JSON.stringify([
     base?.id,
     activeView?.id,
     activeView?.config.filters,
     activeView?.config.sorts,
     kanbanStackField?.slug,
     kanbanStackField?.options.choices?.map((choice) => choice.id),
+    activeView?.type === "calendar"
+      ? [
+          activeView.config.dateFieldSlug,
+          readCalendarMonth(currentSearch, `${base?.id ?? ""}:${activeView.id}`),
+        ]
+      : null,
+    activeView?.type === "gantt"
+      ? [
+          activeView.config.startFieldSlug,
+          activeView.config.endFieldSlug,
+          activeView.config.ganttScale,
+          readTimelineState(currentSearch, `${base?.id ?? ""}:${activeView.id}`),
+        ]
+      : null,
     recordFind?.input,
   ]);
-  const [kanbanStatus, setKanbanStatus] = useState<RecordCollectionStatus>();
-  const currentKanbanStatus = kanbanStatus?.scope === kanbanScope ? kanbanStatus : undefined;
+  const viewLoadsRecords =
+    activeView?.type === "kanban" ||
+    activeView?.type === "calendar" ||
+    activeView?.type === "gantt";
+  const [collectionStatus, setCollectionStatus] = useState<RecordCollectionStatus>();
+  const currentCollectionStatus =
+    collectionStatus?.scope === collectionQueryScope ? collectionStatus : undefined;
   const recordFindControl = recordFind
     ? {
         ...recordFind,
-        isFetching:
-          activeView?.type === "kanban"
-            ? (currentKanbanStatus?.isFetching ?? true)
-            : recordFind.isFetching,
+        isFetching: viewLoadsRecords
+          ? (currentCollectionStatus?.isFetching ?? true)
+          : recordFind.isFetching,
       }
     : undefined;
   const recordsPending = Boolean(
     pagination?.isLoading ||
       recordFind?.isPending ||
       (recordFind?.hasQuery &&
-        (activeView?.type === "kanban" ? recordFindControl?.isFetching : pagination?.isFetching)),
+        (viewLoadsRecords ? recordFindControl?.isFetching : pagination?.isFetching)),
   );
   const [location, navigate] = useLocation();
   const reduceMotion = useReducedMotion();
@@ -1022,9 +1097,65 @@ export function BusaBaseTable({
   // Archived rows still need the trailing 112px track that the record-status
   // column used to provide — it holds their "Archived" pill and Restore button.
   const archivedColumnTemplate = `${columnTemplate} 112px`;
-  const selectedRecords = records.filter((record) => selectedRecordIds.has(record.id));
+  // Table-only presentation saved in the view: footer summaries, and grouping.
+  // A grouping whose field is gone or changed type renders the plain grid.
+  const isTableView = Boolean(activeView && activeView.type === "table");
+  const grouping = isTableView && base ? resolveViewGrouping(activeView, allFields) : null;
+  const fieldSummaries = isTableView
+    ? resolveViewFieldSummaries(activeView?.config, allFields)
+    : new Map<string, never>();
+  const summaryAggregates = buildSummaryAggregates(fieldSummaries.values());
+  const groupedScope =
+    grouping && base && activeView
+      ? JSON.stringify([base.id, activeView.id, grouping.field.id])
+      : null;
+  const [groupedState, setGroupedState] = useState<ScopedGroupedGridData | null>(null);
+  const groupedData = groupedScope && groupedState?.scope === groupedScope ? groupedState : null;
+  // Leaving grouped mode drops the last grouped result, so regrouping the same
+  // view never flashes it before the fresh queries report.
+  useEffect(() => {
+    if (!groupedScope) setGroupedState(null);
+  }, [groupedScope]);
+  const isGrouped = grouping !== null;
+  // The rows on screen: the loaded page, or every expanded group's loaded rows.
+  const tableRecords = grouping ? (groupedData?.records ?? NO_RECORDS) : records;
+  const tablePending = grouping
+    ? Boolean(recordFind?.isPending || !groupedData || groupedData.status === "pending")
+    : recordsPending;
+  // The footer row: values for whoever can see them, menus for whoever can
+  // change the view. A view without summaries shows it only to the latter.
+  const showSummaryFooter = Boolean(isTableView && base && (fieldSummaries.size > 0 || canPropose));
+  // The find box spins while whatever the table is showing refetches.
+  const tableRecordFindControl =
+    grouping && recordFindControl
+      ? { ...recordFindControl, isFetching: groupedData?.isFetching ?? true }
+      : recordFindControl;
+  const tableRelationRecords = useMemo(
+    () =>
+      groupedData?.relationRecords.length
+        ? [...relationRecords, ...groupedData.relationRecords]
+        : relationRecords,
+    [groupedData?.relationRecords, relationRecords],
+  );
+  const bodyItems = useMemo<GridBodyItem[]>(() => {
+    if (!isGrouped) {
+      return tableRecords.map((record) => ({ kind: "record", key: record.id, record }));
+    }
+    return (groupedData?.groups ?? []).flatMap((group): GridBodyItem[] => [
+      { kind: "group", key: `group:${group.id}`, group },
+      ...(group.collapsed
+        ? []
+        : group.records.map(
+            (record): GridBodyItem => ({ kind: "record", key: record.id, record }),
+          )),
+      ...(gridGroupNeedsFooter(group)
+        ? [{ kind: "group-footer" as const, key: `group-footer:${group.id}`, group }]
+        : []),
+    ]);
+  }, [isGrouped, groupedData?.groups, tableRecords]);
+  const selectedRecords = tableRecords.filter((record) => selectedRecordIds.has(record.id));
   const allRecordsSelected =
-    selectionEnabled && records.length > 0 && selectedRecords.length === records.length;
+    selectionEnabled && tableRecords.length > 0 && selectedRecords.length === tableRecords.length;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a merged View revision invalidates transient drag/resize state.
   useEffect(() => {
@@ -1051,17 +1182,18 @@ export function BusaBaseTable({
     if (viewState) viewState.selectedRecordIds = [...selectedRecordIds];
   }, [viewState, selectedRecordIds]);
 
+  const selectionSourcePending = grouping ? tablePending : Boolean(pagination?.isLoading);
   useEffect(() => {
     // A returning page may still be loading. Prune against the actual loaded
     // result, not its temporary empty skeleton, so deleted rows never revive.
-    if (pagination?.isLoading) return;
+    if (selectionSourcePending) return;
     setSelectedRecordIds((current) => {
       if (current.size === 0) return current;
-      const recordIds = new Set(records.map((record) => record.id));
+      const recordIds = new Set(tableRecords.map((record) => record.id));
       const next = new Set([...current].filter((id) => recordIds.has(id)));
       return next.size === current.size ? current : next;
     });
-  }, [records, pagination?.isLoading]);
+  }, [tableRecords, selectionSourcePending]);
 
   const toggleRecordSelected = (record: RecordVO) => {
     setSelectedRecordIds((current) => {
@@ -1076,7 +1208,7 @@ export function BusaBaseTable({
   };
 
   const toggleSelectAllRecords = () => {
-    setSelectedRecordIds(allRecordsSelected ? new Set() : new Set(records.map((r) => r.id)));
+    setSelectedRecordIds(allRecordsSelected ? new Set() : new Set(tableRecords.map((r) => r.id)));
   };
 
   const runBulkDelete = async (mergeImmediately: boolean) => {
@@ -1137,7 +1269,7 @@ export function BusaBaseTable({
   // Virtualize only long lists (small tables — the common case — render plainly
   // and are untouched). Rows are absolutely positioned inside a spacer; the grid
   // template + sticky first column are preserved.
-  const shouldVirtualize = records.length >= VIRTUALIZE_ROW_THRESHOLD;
+  const shouldVirtualize = bodyItems.length >= VIRTUALIZE_ROW_THRESHOLD;
   const tableRootRef = useRef<HTMLDivElement>(null);
   const horizontalScrollRef = useRef<HTMLDivElement>(null);
   const requestedHighlight = new URLSearchParams(currentSearch).get("highlightField");
@@ -1216,11 +1348,29 @@ export function BusaBaseTable({
         scrollEl.scrollTop;
       setListScrollMargin(margin);
     }
-  }, [shouldVirtualize, records.length, columnTemplate, getScrollElement]);
+  }, [shouldVirtualize, bodyItems.length, columnTemplate, getScrollElement]);
+  // Group header/footer rows are shorter than record rows; keying items by
+  // identity keeps the estimates attached to the right row when groups move.
+  const estimateBodyItemSize = useCallback(
+    (index?: number) => {
+      const item = index === undefined ? undefined : bodyItems[index];
+      return item?.kind === "group"
+        ? GRID_GROUP_HEADER_HEIGHT
+        : item?.kind === "group-footer"
+          ? GRID_GROUP_FOOTER_HEIGHT
+          : rowHeight;
+    },
+    [bodyItems, rowHeight],
+  );
+  const getBodyItemKey = useCallback(
+    (index: number) => bodyItems[index]?.key ?? index,
+    [bodyItems],
+  );
   const rowVirtualizer = useVirtualizer({
-    count: records.length,
+    count: bodyItems.length,
     getScrollElement,
-    estimateSize: () => rowHeight,
+    estimateSize: estimateBodyItemSize,
+    getItemKey: getBodyItemKey,
     overscan: 12,
     scrollMargin: listScrollMargin,
   });
@@ -1292,9 +1442,15 @@ export function BusaBaseTable({
   );
   const ensureRowVisible = useCallback(
     (rowIndex: number) => {
-      if (shouldVirtualize) rowVirtualizer.scrollToIndex?.(rowIndex, { align: "auto" });
+      if (!shouldVirtualize) return;
+      // Editing addresses rows by record; grouped bodies interleave header rows.
+      const recordId = tableRecords[rowIndex]?.id;
+      const itemIndex = grouping
+        ? bodyItems.findIndex((item) => item.kind === "record" && item.record.id === recordId)
+        : rowIndex;
+      if (itemIndex >= 0) rowVirtualizer.scrollToIndex?.(itemIndex, { align: "auto" });
     },
-    [rowVirtualizer, shouldVirtualize],
+    [bodyItems, grouping, rowVirtualizer, shouldVirtualize, tableRecords],
   );
   const formatCellSaveError = useCallback(
     (error: unknown) => presentCoreError(messages, locale, error, messages.shell.operationFailed),
@@ -1315,15 +1471,15 @@ export function BusaBaseTable({
     onOpenRecord: openRecordFromGrid,
     onUpdateRecordCell,
     proposalScope: viewState?.scope ?? currentSearch,
-    records,
+    records: tableRecords,
     resolveFieldName,
   });
   // One tab stop for the whole grid: the active cell, else the first cell.
   const activeCellVisible =
     gridEditing.active !== null &&
-    records.some((record) => record.id === gridEditing.active?.recordId) &&
+    tableRecords.some((record) => record.id === gridEditing.active?.recordId) &&
     fields.some((field) => field.slug === gridEditing.active?.fieldSlug);
-  const firstRecord = records[0];
+  const firstRecord = tableRecords[0];
   const firstField = fields[0];
   const gridEditingContext: BaseGridEditingContextValue | null = canEditCells
     ? {
@@ -1336,6 +1492,62 @@ export function BusaBaseTable({
               : null,
       }
     : null;
+
+  // Every body row, grouped or not, renders here — records through the one
+  // `BusaBaseRecordRow`, so editing, selection and opening work inside groups.
+  const renderBodyItem = (item: GridBodyItem, index: number, style?: CSSProperties) => {
+    if (item.kind === "group" && grouping) {
+      return (
+        <GridGroupHeaderRow
+          columnTemplate={columnTemplate}
+          fields={fields}
+          group={item.group}
+          grouping={grouping}
+          hasSelectionColumn={selectionEnabled}
+          key={item.key}
+          onToggle={() => groupedData?.toggleCollapsed(item.group.id)}
+          rowIndex={index + 2}
+          stickyClassName={`sticky z-10 border-border/70 border-r bg-muted shadow-sm ${leadingColumnsOffset(selectionEnabled)}`}
+          style={style}
+          summaries={fieldSummaries}
+        />
+      );
+    }
+    if (item.kind === "group-footer") {
+      return (
+        <GridGroupFooterRow
+          columnCount={fields.length + Number(selectionEnabled)}
+          group={item.group}
+          key={item.key}
+          onLoadMore={() => groupedData?.loadMore(item.group.id)}
+          onRetry={() => groupedData?.retry()}
+          rowIndex={index + 2}
+          style={style}
+        />
+      );
+    }
+    if (item.kind !== "record") return null;
+    return (
+      <BusaBaseRecordRow
+        baseSlug={base?.slug}
+        client={client}
+        columnTemplate={columnTemplate}
+        fields={fields}
+        grid={gridEditingContext}
+        key={item.key}
+        onOpenRecord={onOpenRecord}
+        onUploadAttachment={onUploadAttachment}
+        onToggleSelected={toggleRecordSelected}
+        record={item.record}
+        relationRecords={tableRelationRecords}
+        rowIndex={index + 2}
+        rowHeight={rowHeight}
+        selectable={selectionEnabled}
+        selected={selectedRecordIds.has(item.record.id)}
+        style={style}
+      />
+    );
+  };
 
   useLayoutEffect(() => {
     if (activeView?.type && activeView.type !== "table") return;
@@ -1371,266 +1583,300 @@ export function BusaBaseTable({
 
   return (
     <div className="@container/base-toolbar" ref={tableRootRef}>
-      <div
-        className="mb-3 flex min-w-0 flex-col gap-2 @3xl/base-toolbar:flex-row @3xl/base-toolbar:items-center @3xl/base-toolbar:gap-3"
-        data-testid="base-toolbar-layout"
-      >
+      <div className="sticky top-0 z-40 bg-background pt-3" data-testid="base-sticky-toolbar">
         <div
-          className="order-2 flex min-w-0 items-center gap-1 @3xl/base-toolbar:order-1 @3xl/base-toolbar:flex-1"
-          data-testid="base-view-navigation"
+          className="mb-3 flex min-w-0 flex-col gap-2 @3xl/base-toolbar:flex-row @3xl/base-toolbar:items-center @3xl/base-toolbar:gap-3"
+          data-testid="base-toolbar-layout"
         >
-          <nav
-            aria-label={messages.recordView.view}
-            className="flex h-8 min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            data-testid="base-view-tabs"
-            ref={viewTabsRef}
+          <div
+            className="order-2 flex min-w-0 items-center gap-1 @3xl/base-toolbar:order-1 @3xl/base-toolbar:flex-1"
+            data-testid="base-view-navigation"
           >
-            {base ? (
-              <BaseViewTabs
-                activeViewId={activeView?.id ?? null}
-                base={base}
-                canReorder={canReorderViews}
-                currentSearch={currentSearch}
-                onReorder={onReorderView}
-                views={views}
-              />
-            ) : null}
-          </nav>
-          {base && canPropose ? (
-            <button
-              aria-label={messages.base.newView}
-              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/70 border-dashed text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              data-testid="base-new-view-button"
-              onClick={() => setEditingViewMode("create")}
-              title={messages.base.newView}
-              type="button"
+            <nav
+              aria-label={messages.recordView.view}
+              className="flex h-8 min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              data-testid="base-view-tabs"
+              ref={viewTabsRef}
             >
-              <Plus size={13} />
-            </button>
-          ) : null}
-        </div>
-        <div
-          className="order-1 flex h-8 min-w-0 items-center justify-between gap-2 @3xl/base-toolbar:order-2 @3xl/base-toolbar:shrink-0 @3xl/base-toolbar:justify-start"
-          data-testid="base-record-actions"
-        >
-          <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs @3xl/base-toolbar:flex-none">
-            {(() => {
-              if (activeView?.type === "kanban") {
-                if (recordFind?.isPending) return findMessages.searching;
-                if (currentKanbanStatus?.isError) return messages.shell.operationFailed;
-                if (!currentKanbanStatus || currentKanbanStatus.isFetching) {
-                  return recordFind?.hasQuery ? findMessages.searching : messages.common.loading;
-                }
-                if (currentKanbanStatus.total === undefined) return messages.base.kanbanNoSelect;
-                return fmt(messages.base.recordCount, {
-                  count: currentKanbanStatus.totalCapped
-                    ? `${currentKanbanStatus.total}+`
-                    : currentKanbanStatus.total,
-                  plural: currentKanbanStatus.total === 1 ? "" : "s",
-                });
-              }
-              if (recordFind && pagination?.error) return messages.shell.operationFailed;
-              if (recordFind && recordsPending) return findMessages.searching;
-              const displayCount = pagination?.total ?? records.length;
-              return fmt(messages.base.recordCount, {
-                count: pagination?.totalCapped ? `${displayCount}+` : displayCount,
-                plural: displayCount === 1 ? "" : "s",
-              });
-            })()}
-          </span>
-          <div className="flex shrink-0 items-center gap-2">
-            {!isAnon &&
-            ((activeView && canPropose) ||
-              archivedViews.length > 0 ||
-              archivedRecords.length > 0) ? (
-              <details className="relative">
-                <summary
-                  aria-label={messages.base.viewActions}
-                  className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden"
-                  data-testid="active-view-actions"
-                  title={messages.base.viewActions}
-                >
-                  <MoreHorizontal size={15} />
-                </summary>
-                <div className="absolute right-0 z-50 mt-1 w-max min-w-48 max-w-72 rounded-md border border-border/70 bg-card p-1 shadow-md">
-                  {activeView && canPropose ? (
-                    <>
-                      <button
-                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground text-xs transition-colors hover:bg-accent"
-                        onClick={(event) => {
-                          setEditingViewMode("edit");
-                          event.currentTarget.closest("details")?.removeAttribute("open");
-                        }}
-                        type="button"
-                      >
-                        <PenLine size={13} />
-                        {messages.base.editView}
-                      </button>
-                      <button
-                        aria-describedby={activeViewIsLastView ? lastViewDeleteHintId : undefined}
-                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-xs transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
-                        data-testid="delete-view-menu-item"
-                        disabled={isDeletingView || activeViewIsLastView}
-                        onClick={(event) => {
-                          setConfirmDeleteView(activeView);
-                          event.currentTarget.closest("details")?.removeAttribute("open");
-                        }}
-                        title={
-                          activeViewIsLastView ? messages.base.lastViewCannotBeDeleted : undefined
-                        }
-                        type="button"
-                      >
-                        <Trash2 size={13} />
-                        {isDeletingView ? messages.common.deleting : messages.base.deleteView}
-                      </button>
-                      {activeViewIsLastView ? (
-                        <p
-                          className="max-w-64 px-2 pb-1 text-muted-foreground text-xs leading-snug"
-                          id={lastViewDeleteHintId}
-                        >
-                          {messages.base.lastViewCannotBeDeleted}
-                        </p>
-                      ) : null}
-                    </>
-                  ) : null}
-                  {archivedViews.length > 0 ? (
-                    <button
-                      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground ${
-                        activeView && canPropose ? "mt-1 border-border/60 border-t pt-2" : ""
-                      }`}
-                      data-testid="archived-views-menu-item"
-                      onClick={(event) => {
-                        setShowArchivedViews(true);
-                        event.currentTarget.closest("details")?.removeAttribute("open");
-                      }}
-                      type="button"
-                    >
-                      <Archive size={13} />
-                      {fmt(messages.base.archivedViewsCount, {
-                        count: archivedViews.length,
-                        plural: archivedViews.length === 1 ? "" : "s",
-                      })}
-                    </button>
-                  ) : null}
-                  {archivedRecords.length > 0 ? (
-                    <button
-                      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground ${
-                        activeView && canPropose && archivedViews.length === 0
-                          ? "mt-1 border-border/60 border-t pt-2"
-                          : ""
-                      }`}
-                      data-testid="archived-records-menu-item"
-                      onClick={(event) => {
-                        setShowArchivedRecords((v) => !v);
-                        event.currentTarget.closest("details")?.removeAttribute("open");
-                      }}
-                      type="button"
-                    >
-                      {showArchivedRecords ? <EyeOff size={13} /> : <Archive size={13} />}
-                      {showArchivedRecords
-                        ? messages.base.hideArchivedRecords
-                        : fmt(messages.base.showArchivedRecords, {
-                            count: archivedRecords.length,
-                          })}
-                    </button>
-                  ) : null}
-                </div>
-              </details>
-            ) : null}
-            {base && canPropose && onImportRecords ? (
-              /* Secondary (bordered, not filled) so "New record" stays primary. */
+              {base ? (
+                <BaseViewTabs
+                  activeViewId={activeView?.id ?? null}
+                  base={base}
+                  canReorder={canReorderViews}
+                  currentSearch={currentSearch}
+                  onReorder={onReorderView}
+                  views={views}
+                />
+              ) : null}
+            </nav>
+            {base && canPropose ? (
               <button
-                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/70 bg-card px-2.5 font-medium text-xs transition-colors hover:bg-accent"
-                data-testid="import-records"
-                onClick={() => setIsImportOpen(true)}
+                aria-label={messages.base.newView}
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/70 border-dashed text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                data-testid="base-new-view-button"
+                onClick={() => setEditingViewMode("create")}
+                title={messages.base.newView}
                 type="button"
               >
-                <Upload size={13} />
-                {messages.base.importRecords}
+                <Plus size={13} />
               </button>
             ) : null}
-            {base && canPropose ? (
-              <Link
-                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-foreground px-2.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85"
-                href={mergeSearchIntoHref(
-                  withSourceView(`/base/${base.slug}/new`, sourceViewSlug),
-                  currentSearch,
-                )}
-              >
-                <Plus size={13} />
-                {messages.base.newRecord}
-              </Link>
-            ) : null}
+          </div>
+          <div
+            className="order-1 flex h-8 min-w-0 items-center justify-between gap-2 @3xl/base-toolbar:order-2 @3xl/base-toolbar:shrink-0 @3xl/base-toolbar:justify-start"
+            data-testid="base-record-actions"
+          >
+            <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs @3xl/base-toolbar:flex-none">
+              {(() => {
+                if (viewLoadsRecords) {
+                  if (recordFind?.isPending) return findMessages.searching;
+                  if (currentCollectionStatus?.isError) return messages.shell.operationFailed;
+                  if (!currentCollectionStatus || currentCollectionStatus.isFetching) {
+                    return recordFind?.hasQuery ? findMessages.searching : messages.common.loading;
+                  }
+                  if (currentCollectionStatus.total === undefined) {
+                    return activeView?.type === "calendar"
+                      ? messages.base.calendarNoDate
+                      : activeView?.type === "gantt"
+                        ? messages.base.ganttNoDates
+                        : messages.base.kanbanNoSelect;
+                  }
+                  return fmt(messages.base.recordCount, {
+                    count: currentCollectionStatus.totalCapped
+                      ? `${currentCollectionStatus.total}+`
+                      : currentCollectionStatus.total,
+                    plural: currentCollectionStatus.total === 1 ? "" : "s",
+                  });
+                }
+                if (grouping) {
+                  if (groupedData?.status === "error") return messages.shell.operationFailed;
+                  if (tablePending) {
+                    return recordFind?.hasQuery ? findMessages.searching : messages.common.loading;
+                  }
+                  return fmt(messages.base.recordCount, {
+                    count: groupedData?.total ?? 0,
+                    plural: groupedData?.total === 1 ? "" : "s",
+                  });
+                }
+                if (recordFind && pagination?.error) return messages.shell.operationFailed;
+                if (recordFind && recordsPending) return findMessages.searching;
+                const displayCount = pagination?.total ?? records.length;
+                return fmt(messages.base.recordCount, {
+                  count: pagination?.totalCapped ? `${displayCount}+` : displayCount,
+                  plural: displayCount === 1 ? "" : "s",
+                });
+              })()}
+            </span>
+            <div className="flex shrink-0 items-center gap-2">
+              {!isAnon &&
+              ((activeView && canPropose) ||
+                archivedViews.length > 0 ||
+                archivedRecords.length > 0) ? (
+                <details className="relative">
+                  <summary
+                    aria-label={messages.base.viewActions}
+                    className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden"
+                    data-testid="active-view-actions"
+                    title={messages.base.viewActions}
+                  >
+                    <MoreHorizontal size={15} />
+                  </summary>
+                  <div className="absolute right-0 z-50 mt-1 w-max min-w-48 max-w-72 rounded-md border border-border/70 bg-card p-1 shadow-md">
+                    {activeView && canPropose ? (
+                      <>
+                        <button
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground text-xs transition-colors hover:bg-accent"
+                          onClick={(event) => {
+                            setEditingViewMode("edit");
+                            event.currentTarget.closest("details")?.removeAttribute("open");
+                          }}
+                          type="button"
+                        >
+                          <PenLine size={13} />
+                          {messages.base.editView}
+                        </button>
+                        <button
+                          aria-describedby={activeViewIsLastView ? lastViewDeleteHintId : undefined}
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-xs transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
+                          data-testid="delete-view-menu-item"
+                          disabled={isDeletingView || activeViewIsLastView}
+                          onClick={(event) => {
+                            setConfirmDeleteView(activeView);
+                            event.currentTarget.closest("details")?.removeAttribute("open");
+                          }}
+                          title={
+                            activeViewIsLastView ? messages.base.lastViewCannotBeDeleted : undefined
+                          }
+                          type="button"
+                        >
+                          <Trash2 size={13} />
+                          {isDeletingView ? messages.common.deleting : messages.base.deleteView}
+                        </button>
+                        {activeViewIsLastView ? (
+                          <p
+                            className="max-w-64 px-2 pb-1 text-muted-foreground text-xs leading-snug"
+                            id={lastViewDeleteHintId}
+                          >
+                            {messages.base.lastViewCannotBeDeleted}
+                          </p>
+                        ) : null}
+                      </>
+                    ) : null}
+                    {archivedViews.length > 0 ? (
+                      <button
+                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground ${
+                          activeView && canPropose ? "mt-1 border-border/60 border-t pt-2" : ""
+                        }`}
+                        data-testid="archived-views-menu-item"
+                        onClick={(event) => {
+                          setShowArchivedViews(true);
+                          event.currentTarget.closest("details")?.removeAttribute("open");
+                        }}
+                        type="button"
+                      >
+                        <Archive size={13} />
+                        {fmt(messages.base.archivedViewsCount, {
+                          count: archivedViews.length,
+                          plural: archivedViews.length === 1 ? "" : "s",
+                        })}
+                      </button>
+                    ) : null}
+                    {archivedRecords.length > 0 ? (
+                      <button
+                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground ${
+                          activeView && canPropose && archivedViews.length === 0
+                            ? "mt-1 border-border/60 border-t pt-2"
+                            : ""
+                        }`}
+                        data-testid="archived-records-menu-item"
+                        onClick={(event) => {
+                          setShowArchivedRecords((v) => !v);
+                          event.currentTarget.closest("details")?.removeAttribute("open");
+                        }}
+                        type="button"
+                      >
+                        {showArchivedRecords ? <EyeOff size={13} /> : <Archive size={13} />}
+                        {showArchivedRecords
+                          ? messages.base.hideArchivedRecords
+                          : fmt(messages.base.showArchivedRecords, {
+                              count: archivedRecords.length,
+                            })}
+                      </button>
+                    ) : null}
+                  </div>
+                </details>
+              ) : null}
+              {base && canPropose && onImportRecords ? (
+                /* Secondary (bordered, not filled) so "New record" stays primary. */
+                <button
+                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/70 bg-card px-2.5 font-medium text-xs transition-colors hover:bg-accent"
+                  data-testid="import-records"
+                  onClick={() => setIsImportOpen(true)}
+                  type="button"
+                >
+                  <Upload size={13} />
+                  {messages.base.importRecords}
+                </button>
+              ) : null}
+              {base && canPropose ? (
+                <Link
+                  className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-foreground px-2.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85"
+                  href={mergeSearchIntoHref(
+                    withSourceView(`/base/${base.slug}/new`, sourceViewSlug),
+                    currentSearch,
+                  )}
+                >
+                  <Plus size={13} />
+                  {messages.base.newRecord}
+                </Link>
+              ) : null}
+            </div>
           </div>
         </div>
-      </div>
-      {activeView && !isAnon ? (
-        <ViewConfigToolbar
-          config={activeView.config}
-          fields={allFields}
-          onOpen={(section) => setViewEditorRequest({ section, source: "toolbar" })}
-          trailingControl={
-            recordFindControl ? (
+        {activeView && !isAnon ? (
+          <ViewConfigToolbar
+            config={activeView.config}
+            fields={allFields}
+            onOpen={(section) => setViewEditorRequest({ section, source: "toolbar" })}
+            trailingControl={
+              tableRecordFindControl ? (
+                <RecordFind
+                  control={tableRecordFindControl}
+                  fields={allFields}
+                  visibleSlugs={fields.map((field) => field.slug)}
+                />
+              ) : undefined
+            }
+          >
+            {activeView.type === "table" && canPropose ? (
+              <GridRowHeightControl
+                key={activeView.id}
+                disabled={quickUpdatingFieldId !== null}
+                value={
+                  isGridRowHeight(activeView.config.rowHeight)
+                    ? activeView.config.rowHeight
+                    : "medium"
+                }
+                onSubmit={async (height, mergeImmediately) => {
+                  await onUpdateView(
+                    activeView,
+                    { config: { rowHeight: height } },
+                    { mergeImmediately, preserveLocation: true },
+                  );
+                }}
+              />
+            ) : null}
+            {activeView.type === "table" && canPropose ? (
+              <GridGroupControl
+                key={`group:${activeView.id}`}
+                disabled={quickUpdatingFieldId !== null}
+                fields={getGroupableFields(allFields)}
+                hasStoredGrouping={Boolean(activeView.config.groupBy?.length)}
+                value={grouping}
+                onSubmit={async (groupBy, mergeImmediately) => {
+                  await onUpdateView(
+                    activeView,
+                    { config: { groupBy } },
+                    { mergeImmediately, preserveLocation: true },
+                  );
+                }}
+              />
+            ) : null}
+          </ViewConfigToolbar>
+        ) : base && !activeView ? (
+          // Only the view-less fallback (a Base with no saved view at all). A
+          // read-only visitor looking at a saved view is not missing one, and a
+          // Base now opens on its leftmost view, so they would otherwise be told
+          // to "open a saved view" while already on one.
+          <div
+            className="mb-3 flex h-7 min-w-0 items-center gap-2 [@media(pointer:coarse)]:h-11"
+            data-testid="view-control-toolbar-readonly"
+          >
+            <Columns3 className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
+              {messages.base.savedViewToolbarRequired}
+            </span>
+            {tableRecordFindControl ? (
               <RecordFind
-                control={recordFindControl}
+                control={tableRecordFindControl}
                 fields={allFields}
                 visibleSlugs={fields.map((field) => field.slug)}
               />
-            ) : undefined
-          }
-        >
-          {activeView.type === "table" && canPropose ? (
-            <GridRowHeightControl
-              key={activeView.id}
-              disabled={quickUpdatingFieldId !== null}
-              value={
-                isGridRowHeight(activeView.config.rowHeight)
-                  ? activeView.config.rowHeight
-                  : "medium"
-              }
-              onSubmit={async (height, mergeImmediately) => {
-                await onUpdateView(
-                  activeView,
-                  { config: { rowHeight: height } },
-                  { mergeImmediately, preserveLocation: true },
-                );
-              }}
-            />
-          ) : null}
-        </ViewConfigToolbar>
-      ) : base && !activeView ? (
-        // Only the view-less fallback (a Base with no saved view at all). A
-        // read-only visitor looking at a saved view is not missing one, and a
-        // Base now opens on its leftmost view, so they would otherwise be told
-        // to "open a saved view" while already on one.
-        <div
-          className="mb-3 flex h-7 min-w-0 items-center gap-2 [@media(pointer:coarse)]:h-11"
-          data-testid="view-control-toolbar-readonly"
-        >
-          <Columns3 className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
-            {messages.base.savedViewToolbarRequired}
-          </span>
-          {recordFindControl ? (
+            ) : null}
+          </div>
+        ) : tableRecordFindControl ? (
+          <div
+            className="mb-3 flex h-7 min-w-0 items-center [@media(pointer:coarse)]:h-11"
+            data-testid="view-control-toolbar-readonly"
+          >
             <RecordFind
-              control={recordFindControl}
+              control={tableRecordFindControl}
               fields={allFields}
               visibleSlugs={fields.map((field) => field.slug)}
             />
-          ) : null}
-        </div>
-      ) : recordFindControl ? (
-        <div
-          className="mb-3 flex h-7 min-w-0 items-center [@media(pointer:coarse)]:h-11"
-          data-testid="view-control-toolbar-readonly"
-        >
-          <RecordFind
-            control={recordFindControl}
-            fields={allFields}
-            visibleSlugs={fields.map((field) => field.slug)}
-          />
-        </div>
-      ) : null}
+          </div>
+        ) : null}
+      </div>
       <ViewConfigEditorDialog
         client={client}
         fields={allFields}
@@ -1734,6 +1980,7 @@ export function BusaBaseTable({
           base={base}
           fields={fields}
           onRestoreRecord={canPropose ? onRestoreRecord : undefined}
+          relationRecords={relationRecords}
           records={records}
           pagination={pagination}
           recordFind={recordFind}
@@ -1747,8 +1994,8 @@ export function BusaBaseTable({
           fields={fields}
           onMoveRecord={onMoveRecord}
           onOpenRecord={onOpenRecord}
-          onCollectionStatusChange={setKanbanStatus}
-          queryScope={kanbanScope}
+          onCollectionStatusChange={setCollectionStatus}
+          queryScope={collectionQueryScope}
           recordFind={recordFind}
         />
       ) : activeView?.type === "calendar" ? (
@@ -1757,8 +2004,11 @@ export function BusaBaseTable({
           base={base}
           client={client}
           fields={fields}
+          onCollectionStatusChange={setCollectionStatus}
           onOpenRecord={onOpenRecord}
           onPatchRecord={onPatchRecord}
+          queryScope={collectionQueryScope}
+          recordFind={recordFind}
         />
       ) : activeView?.type === "gantt" ? (
         <BusaBaseGantt
@@ -1766,254 +2016,282 @@ export function BusaBaseTable({
           base={base}
           client={client}
           fields={fields}
+          onCollectionStatusChange={setCollectionStatus}
           onPatchRecord={onPatchRecord}
+          queryScope={collectionQueryScope}
+          recordFind={recordFind}
         />
       ) : (
-        <div className="overflow-x-auto pb-5" data-base-table-scroll ref={horizontalScrollRef}>
-          {selectionEnabled && selectedRecords.length > 0 && !recordsPending ? (
-            <div
-              className="mb-2 flex items-center gap-3 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs"
-              data-testid="base-bulk-toolbar"
-            >
-              <span className="font-medium text-foreground">
-                {fmt(messages.base.selectedRecordsCount, { count: selectedRecords.length })}
-              </span>
-              <button
-                className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                onClick={() => setSelectedRecordIds(new Set())}
-                type="button"
-              >
-                {messages.base.clearSelection}
-              </button>
-              {/* Edit sits LEFT of delete so the destructive action stays
-                  rightmost, matching how the node menu keeps Delete last. */}
-              {onUpdateRecords && base ? (
-                <button
-                  className="ml-auto rounded-md border border-border/70 bg-card px-2.5 py-1 font-medium text-xs transition-colors hover:bg-accent"
-                  data-testid="bulk-edit-selected"
-                  onClick={() => setIsBulkEditOpen(true)}
-                  type="button"
-                >
-                  {messages.base.editSelectedRecords}
-                </button>
-              ) : null}
-              <div className={onUpdateRecords && base ? "" : "ml-auto"}>
-                <SplitSubmitButton
-                  changeRequestAction={{
-                    label: fmt(messages.base.submitDeleteRecordsRequest, {
-                      count: selectedRecords.length,
-                      plural: selectedRecords.length === 1 ? "" : "s",
-                    }),
-                    loadingLabel: messages.base.submittingDeleteRecordsRequest,
-                    isLoading: isBulkDeleting === "changeRequest",
-                    onSubmit: () => void runBulkDelete(false),
-                  }}
-                  dropdownPosition="below"
-                  hint={messages.base.bulkDeleteHint}
-                  immediateAction={{
-                    label: fmt(messages.base.deleteRecordsNow, { count: selectedRecords.length }),
-                    loadingLabel: messages.base.deletingRecordsNow,
-                    isLoading: isBulkDeleting === "immediate",
-                    onSubmit: () => void runBulkDelete(true),
-                  }}
-                />
-              </div>
-            </div>
-          ) : null}
-          {bulkDeleteError ? (
-            <div className="mb-2 text-rejected-strong text-xs">{bulkDeleteError}</div>
-          ) : null}
-          {onUpdateRecords && base ? (
-            <BulkEditRecordsDialog
+        <>
+          {grouping && groupedScope && base && activeView ? (
+            <GroupedGridDataSource
+              aggregates={summaryAggregates}
               base={base}
               client={client}
-              onOpenChange={setIsBulkEditOpen}
-              onSubmit={onUpdateRecords}
-              open={isBulkEditOpen}
-              records={selectedRecords}
+              find={recordFind?.input}
+              grouping={grouping}
+              key={groupedScope}
+              listMode="table"
+              onChange={setGroupedState}
+              scope={groupedScope}
+              viewId={activeView.id}
             />
-          ) : null}
-          {onImportRecords && base ? (
-            <ImportRecordsDialog
-              base={base}
-              onOpenChange={setIsImportOpen}
-              onSubmit={onImportRecords}
-              open={isImportOpen}
-            />
-          ) : null}
-          {canEditCells ? (
-            <>
-              <InlineEditNotice notice={gridEditing.notice} onDismiss={gridEditing.dismissNotice} />
-              <p className="sr-only" id={gridHelpId}>
-                {inlineEditCopy.gridHelp}
-              </p>
-            </>
           ) : null}
           <div
-            aria-busy={recordsPending}
-            aria-colcount={fields.length + Number(selectionEnabled)}
-            aria-describedby={canEditCells ? gridHelpId : undefined}
-            aria-rowcount={1 + records.length + (showArchivedRecords ? archivedRecords.length : 0)}
-            className="w-max min-w-full border-border/50 border-l border-t"
-            data-inline-editing={canEditCells ? "true" : undefined}
-            data-testid="base-records-grid"
-            data-row-height={activeView?.config.rowHeight ?? "medium"}
-            onKeyDown={canEditCells ? gridEditing.handleGridKeyDown : undefined}
-            ref={gridRef}
-            role="grid"
+            className={`overflow-x-auto ${showSummaryFooter ? "" : "pb-5"}`}
+            data-base-table-scroll
+            ref={horizontalScrollRef}
           >
-            <div
-              aria-rowindex={1}
-              className="grid h-9 items-stretch border-border/50 border-b bg-muted/45 text-muted-foreground text-xs"
-              role="row"
-              style={{ gridTemplateColumns: columnTemplate }}
-              tabIndex={-1}
-            >
-              {selectionEnabled ? (
-                <div
-                  className={`flex items-center justify-center ${baseTableSelectionStickyHeaderClassName}`}
-                  role="columnheader"
-                  tabIndex={-1}
+            {selectionEnabled && selectedRecords.length > 0 && !tablePending ? (
+              <div
+                className="mb-2 flex items-center gap-3 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs"
+                data-testid="base-bulk-toolbar"
+              >
+                <span className="font-medium text-foreground">
+                  {fmt(messages.base.selectedRecordsCount, { count: selectedRecords.length })}
+                </span>
+                <button
+                  className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  onClick={() => setSelectedRecordIds(new Set())}
+                  type="button"
                 >
-                  <input
-                    aria-label={messages.base.selectAllRecords}
-                    checked={allRecordsSelected}
-                    className="size-3.5 cursor-pointer accent-foreground"
-                    data-testid="base-select-all"
-                    disabled={recordsPending}
-                    onChange={toggleSelectAllRecords}
-                    type="checkbox"
+                  {messages.base.clearSelection}
+                </button>
+                {/* Edit sits LEFT of delete so the destructive action stays
+                  rightmost, matching how the node menu keeps Delete last. */}
+                {onUpdateRecords && base ? (
+                  <button
+                    className="ml-auto rounded-md border border-border/70 bg-card px-2.5 py-1 font-medium text-xs transition-colors hover:bg-accent"
+                    data-testid="bulk-edit-selected"
+                    onClick={() => setIsBulkEditOpen(true)}
+                    type="button"
+                  >
+                    {messages.base.editSelectedRecords}
+                  </button>
+                ) : null}
+                <div className={onUpdateRecords && base ? "" : "ml-auto"}>
+                  <SplitSubmitButton
+                    changeRequestAction={{
+                      label: fmt(messages.base.submitDeleteRecordsRequest, {
+                        count: selectedRecords.length,
+                        plural: selectedRecords.length === 1 ? "" : "s",
+                      }),
+                      loadingLabel: messages.base.submittingDeleteRecordsRequest,
+                      isLoading: isBulkDeleting === "changeRequest",
+                      onSubmit: () => void runBulkDelete(false),
+                    }}
+                    dropdownPosition="below"
+                    hint={messages.base.bulkDeleteHint}
+                    immediateAction={{
+                      label: fmt(messages.base.deleteRecordsNow, { count: selectedRecords.length }),
+                      loadingLabel: messages.base.deletingRecordsNow,
+                      isLoading: isBulkDeleting === "immediate",
+                      onSubmit: () => void runBulkDelete(true),
+                    }}
                   />
                 </div>
-              ) : null}
-              {fields.map((field, index) => (
-                <FieldColumnHeader
-                  actionsDisabled={quickUpdatingFieldId !== null}
-                  activeView={activeView}
-                  allFields={allFields}
-                  baseName={base?.name ?? records[0]?.base.name ?? ""}
-                  baseNodeId={base?.nodeId ?? records[0]?.base.nodeId ?? ""}
-                  baseSlug={base?.slug ?? records[0]?.base.slug ?? ""}
-                  busy={quickUpdatingFieldId === field.id}
-                  field={field}
-                  highlighted={field.slug === highlightedFieldSlug}
-                  isPrimary={field.id === primaryField?.id}
-                  hasSelectionColumn={selectionEnabled}
-                  canMoveLeft={
-                    field.id !== primaryField?.id && (primaryField ? index > 1 : index > 0)
-                  }
-                  canMoveRight={field.id !== primaryField?.id && index < fields.length - 1}
-                  customWidth={
-                    columnWidthDrafts[field.slug] ?? activeView?.config.fieldWidths?.[field.slug]
-                  }
-                  dragOver={dropTarget?.slug === field.slug}
-                  dragging={draggingFieldSlug === field.slug}
-                  key={field.id}
-                  name={resolveIString(field.name)}
-                  onDragEnd={() => {
-                    setDraggingFieldSlug(null);
-                    setDropTarget(null);
-                  }}
-                  onDragLeave={() => {
-                    if (dropTarget?.slug === field.slug) {
-                      setDropTarget(null);
+              </div>
+            ) : null}
+            {bulkDeleteError ? (
+              <div className="mb-2 text-rejected-strong text-xs">{bulkDeleteError}</div>
+            ) : null}
+            {onUpdateRecords && base ? (
+              <BulkEditRecordsDialog
+                base={base}
+                client={client}
+                onOpenChange={setIsBulkEditOpen}
+                onSubmit={onUpdateRecords}
+                open={isBulkEditOpen}
+                records={selectedRecords}
+              />
+            ) : null}
+            {onImportRecords && base ? (
+              <ImportRecordsDialog
+                base={base}
+                onOpenChange={setIsImportOpen}
+                onSubmit={onImportRecords}
+                open={isImportOpen}
+              />
+            ) : null}
+            {canEditCells ? (
+              <>
+                <InlineEditNotice
+                  notice={gridEditing.notice}
+                  onDismiss={gridEditing.dismissNotice}
+                />
+                <p className="sr-only" id={gridHelpId}>
+                  {inlineEditCopy.gridHelp}
+                </p>
+              </>
+            ) : null}
+            <div
+              aria-busy={tablePending}
+              aria-colcount={fields.length + Number(selectionEnabled)}
+              aria-describedby={canEditCells ? gridHelpId : undefined}
+              aria-rowcount={
+                1 + bodyItems.length + (showArchivedRecords ? archivedRecords.length : 0)
+              }
+              className="w-max min-w-full border-border/50 border-l border-t"
+              data-inline-editing={canEditCells ? "true" : undefined}
+              data-testid="base-records-grid"
+              data-row-height={activeView?.config.rowHeight ?? "medium"}
+              onKeyDown={canEditCells ? gridEditing.handleGridKeyDown : undefined}
+              ref={gridRef}
+              role="grid"
+            >
+              <div
+                aria-rowindex={1}
+                className="grid h-9 items-stretch border-border/50 border-b bg-muted/45 text-muted-foreground text-xs"
+                role="row"
+                style={{ gridTemplateColumns: columnTemplate }}
+                tabIndex={-1}
+              >
+                {selectionEnabled ? (
+                  <div
+                    className={`flex items-center justify-center ${baseTableSelectionStickyHeaderClassName}`}
+                    role="columnheader"
+                    tabIndex={-1}
+                  >
+                    <input
+                      aria-label={messages.base.selectAllRecords}
+                      checked={allRecordsSelected}
+                      className="size-3.5 cursor-pointer accent-foreground"
+                      data-testid="base-select-all"
+                      disabled={tablePending}
+                      onChange={toggleSelectAllRecords}
+                      type="checkbox"
+                    />
+                  </div>
+                ) : null}
+                {fields.map((field, index) => (
+                  <FieldColumnHeader
+                    actionsDisabled={quickUpdatingFieldId !== null}
+                    layoutEditable={canPropose}
+                    activeView={activeView}
+                    allFields={allFields}
+                    baseName={base?.name ?? records[0]?.base.name ?? ""}
+                    baseNodeId={base?.nodeId ?? records[0]?.base.nodeId ?? ""}
+                    baseSlug={base?.slug ?? records[0]?.base.slug ?? ""}
+                    busy={quickUpdatingFieldId === field.id}
+                    field={field}
+                    highlighted={field.slug === highlightedFieldSlug}
+                    isPrimary={field.id === primaryField?.id}
+                    hasSelectionColumn={selectionEnabled}
+                    canMoveLeft={
+                      field.id !== primaryField?.id && (primaryField ? index > 1 : index > 0)
                     }
-                  }}
-                  onDragOver={(placement) => {
-                    if (draggingFieldSlug && draggingFieldSlug !== field.slug) {
-                      if (field.id === primaryField?.id && placement === "before") {
+                    canMoveRight={field.id !== primaryField?.id && index < fields.length - 1}
+                    customWidth={
+                      columnWidthDrafts[field.slug] ?? activeView?.config.fieldWidths?.[field.slug]
+                    }
+                    dragOver={dropTarget?.slug === field.slug}
+                    dragging={draggingFieldSlug === field.slug}
+                    key={field.id}
+                    name={resolveIString(field.name)}
+                    onDragEnd={() => {
+                      setDraggingFieldSlug(null);
+                      setDropTarget(null);
+                    }}
+                    onDragLeave={() => {
+                      if (dropTarget?.slug === field.slug) {
                         setDropTarget(null);
+                      }
+                    }}
+                    onDragOver={(placement) => {
+                      if (draggingFieldSlug && draggingFieldSlug !== field.slug) {
+                        if (field.id === primaryField?.id && placement === "before") {
+                          setDropTarget(null);
+                          return;
+                        }
+                        setDropTarget({ placement, slug: field.slug });
+                      }
+                    }}
+                    onDragStart={() => {
+                      setDraggingFieldSlug(field.slug);
+                      setDropTarget(null);
+                    }}
+                    onDrop={(draggedSlug, placement) => {
+                      const sourceSlug = draggedSlug || draggingFieldSlug;
+                      setDraggingFieldSlug(null);
+                      setDropTarget(null);
+                      if (
+                        !activeView ||
+                        !sourceSlug ||
+                        sourceSlug === field.slug ||
+                        (field.id === primaryField?.id && placement === "before")
+                      ) {
                         return;
                       }
-                      setDropTarget({ placement, slug: field.slug });
-                    }
-                  }}
-                  onDragStart={() => {
-                    setDraggingFieldSlug(field.slug);
-                    setDropTarget(null);
-                  }}
-                  onDrop={(draggedSlug, placement) => {
-                    const sourceSlug = draggedSlug || draggingFieldSlug;
-                    setDraggingFieldSlug(null);
-                    setDropTarget(null);
-                    if (
-                      !activeView ||
-                      !sourceSlug ||
-                      sourceSlug === field.slug ||
-                      (field.id === primaryField?.id && placement === "before")
-                    ) {
-                      return;
-                    }
-                    setQuickUpdatingFieldId(
-                      allFields.find((item) => item.slug === sourceSlug)?.id ?? sourceSlug,
-                    );
-                    void quickUpdateView(
-                      moveViewField(
-                        activeView.config,
-                        allFields,
-                        sourceSlug,
-                        field.slug,
-                        placement,
-                      ),
-                    );
-                  }}
-                  onMove={(direction) => {
-                    if (!activeView) {
-                      return;
-                    }
-                    const target = fields[index + (direction === "left" ? -1 : 1)];
-                    if (!target) {
-                      return;
-                    }
-                    setQuickUpdatingFieldId(field.id);
-                    void quickUpdateView(
-                      moveViewField(
-                        activeView.config,
-                        allFields,
-                        field.slug,
-                        target.slug,
-                        direction === "left" ? "before" : "after",
-                      ),
-                    );
-                  }}
-                  onOpenViewEditor={(section, focusedFieldId) =>
-                    setViewEditorRequest({ focusedFieldId, section, source: "header" })
-                  }
-                  onQuickUpdate={async (config) => {
-                    setQuickUpdatingFieldId(field.id);
-                    return quickUpdateView(config);
-                  }}
-                  onResizeCancel={() =>
-                    setColumnWidthDrafts((current) => {
-                      const next = { ...current };
-                      delete next[field.slug];
-                      return next;
-                    })
-                  }
-                  onResizeCommit={(width) => {
-                    if (!activeView) {
-                      return;
-                    }
-                    setQuickUpdatingFieldId(field.id);
-                    void quickUpdateView(
-                      setViewFieldWidth(activeView.config, field.slug, width),
-                    ).then((success) => {
-                      if (!success) {
-                        setColumnWidthDrafts((current) => {
-                          const next = { ...current };
-                          delete next[field.slug];
-                          return next;
-                        });
+                      setQuickUpdatingFieldId(
+                        allFields.find((item) => item.slug === sourceSlug)?.id ?? sourceSlug,
+                      );
+                      void quickUpdateView(
+                        moveViewField(
+                          activeView.config,
+                          allFields,
+                          sourceSlug,
+                          field.slug,
+                          placement,
+                        ),
+                      );
+                    }}
+                    onMove={(direction) => {
+                      if (!activeView) {
+                        return;
                       }
-                    });
-                  }}
-                  onResizePreview={(width) =>
-                    setColumnWidthDrafts((current) => ({ ...current, [field.slug]: width }))
-                  }
-                  sticky={index === 0}
-                />
-              ))}
-              {/* Record-status column header disabled — see baseTableStatusCellClassName above.
+                      const target = fields[index + (direction === "left" ? -1 : 1)];
+                      if (!target) {
+                        return;
+                      }
+                      setQuickUpdatingFieldId(field.id);
+                      void quickUpdateView(
+                        moveViewField(
+                          activeView.config,
+                          allFields,
+                          field.slug,
+                          target.slug,
+                          direction === "left" ? "before" : "after",
+                        ),
+                      );
+                    }}
+                    onOpenViewEditor={(section, focusedFieldId) =>
+                      setViewEditorRequest({ focusedFieldId, section, source: "header" })
+                    }
+                    onQuickUpdate={async (config) => {
+                      setQuickUpdatingFieldId(field.id);
+                      return quickUpdateView(config);
+                    }}
+                    onResizeCancel={() =>
+                      setColumnWidthDrafts((current) => {
+                        const next = { ...current };
+                        delete next[field.slug];
+                        return next;
+                      })
+                    }
+                    onResizeCommit={(width) => {
+                      if (!activeView) {
+                        return;
+                      }
+                      setQuickUpdatingFieldId(field.id);
+                      void quickUpdateView(
+                        setViewFieldWidth(activeView.config, field.slug, width),
+                      ).then((success) => {
+                        if (!success) {
+                          setColumnWidthDrafts((current) => {
+                            const next = { ...current };
+                            delete next[field.slug];
+                            return next;
+                          });
+                        }
+                      });
+                    }}
+                    onResizePreview={(width) =>
+                      setColumnWidthDrafts((current) => ({ ...current, [field.slug]: width }))
+                    }
+                    sticky={index === 0}
+                  />
+                ))}
+                {/* Record-status column header disabled — see baseTableStatusCellClassName above.
               <div
                 aria-label={messages.base.recordStatus}
                 className={baseTableStatusHeaderClassName}
@@ -2023,187 +2301,221 @@ export function BusaBaseTable({
                 {messages.base.recordStatus}
               </div>
               */}
-            </div>
-            {recordsPending ? (
-              <BusaBaseTableRowsSkeleton
-                columnTemplate={columnTemplate}
-                hasSelectionColumn={selectionEnabled}
-                rowHeight={rowHeight}
-              />
-            ) : records.length === 0 ? (
-              <div role="rowgroup">
-                <div
-                  aria-rowindex={2}
-                  className="grid min-h-11 border-border/40 border-b"
-                  role="row"
-                  style={{ gridTemplateColumns: columnTemplate }}
-                  tabIndex={-1}
-                >
-                  <div
-                    aria-colspan={fields.length + Number(selectionEnabled)}
-                    className="flex items-center px-2 text-muted-foreground text-sm"
-                    role="gridcell"
-                    style={{
-                      gridColumn: `span ${fields.length + Number(selectionEnabled)}`,
-                    }}
-                    tabIndex={-1}
-                  >
-                    {recordFind?.hasQuery && !pagination?.error ? (
-                      <span
-                        className="flex items-center gap-2"
-                        data-testid="base-record-find-empty"
-                      >
-                        {findMessages.empty}
-                        <button
-                          className="underline underline-offset-2 hover:text-foreground"
-                          onClick={recordFind.clear}
-                          type="button"
-                        >
-                          {findMessages.clear}
-                        </button>
-                      </span>
-                    ) : pagination?.error ? null : (
-                      messages.base.emptyRecords
-                    )}
-                  </div>
-                </div>
               </div>
-            ) : shouldVirtualize ? (
-              <div
-                ref={listRef}
-                className="relative"
-                role="rowgroup"
-                style={{ height: rowVirtualizer.getTotalSize() }}
-              >
-                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                  const record = records[virtualRow.index];
-                  return (
-                    <BusaBaseRecordRow
-                      baseSlug={base?.slug}
-                      client={client}
-                      columnTemplate={columnTemplate}
-                      fields={fields}
-                      grid={gridEditingContext}
-                      key={record.id}
-                      onOpenRecord={onOpenRecord}
-                      onUploadAttachment={onUploadAttachment}
-                      onToggleSelected={toggleRecordSelected}
-                      record={record}
-                      relationRecords={relationRecords}
-                      rowIndex={virtualRow.index + 2}
-                      rowHeight={rowHeight}
-                      selectable={selectionEnabled}
-                      selected={selectedRecordIds.has(record.id)}
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        width: "100%",
-                        transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            ) : (
-              records.map((record, index) => (
-                <BusaBaseRecordRow
-                  baseSlug={base?.slug}
-                  client={client}
+              {tablePending ? (
+                <BusaBaseTableRowsSkeleton
                   columnTemplate={columnTemplate}
-                  fields={fields}
-                  grid={gridEditingContext}
-                  key={record.id}
-                  onOpenRecord={onOpenRecord}
-                  onUploadAttachment={onUploadAttachment}
-                  onToggleSelected={toggleRecordSelected}
-                  record={record}
-                  relationRecords={relationRecords}
-                  rowIndex={index + 2}
+                  hasSelectionColumn={selectionEnabled}
                   rowHeight={rowHeight}
-                  selectable={selectionEnabled}
-                  selected={selectedRecordIds.has(record.id)}
                 />
-              ))
-            )}
-            {showArchivedRecords && archivedRecords.length > 0
-              ? archivedRecords.map((record, archivedIndex) => (
+              ) : grouping && groupedData?.status === "error" ? (
+                <div role="rowgroup">
                   <div
-                    aria-rowindex={records.length + archivedIndex + 2}
-                    className="group grid items-stretch border-border/40 border-b bg-muted/10 text-sm opacity-60 transition-colors hover:opacity-100"
-                    data-record-id={record.id}
-                    key={record.id}
+                    aria-rowindex={2}
+                    className="grid min-h-11 border-border/40 border-b"
                     role="row"
-                    style={{ gridTemplateColumns: archivedColumnTemplate, height: rowHeight }}
+                    style={{ gridTemplateColumns: columnTemplate }}
                     tabIndex={-1}
                   >
-                    {selectionEnabled ? (
-                      <div
-                        className={baseTableSelectionStickyCellClassName}
-                        role="gridcell"
-                        tabIndex={-1}
-                      />
-                    ) : null}
-                    {fields.map((field, index) => (
-                      <RecordTableCell
-                        client={client}
-                        currentRecordHref={mergeSearchIntoHref(
-                          withSourceView(
-                            `/base/${base?.slug ?? record.base.slug}/${record.id}`,
-                            sourceViewSlug,
-                          ),
-                          currentSearch,
+                    <div
+                      aria-colspan={fields.length + Number(selectionEnabled)}
+                      className="flex items-center gap-2 px-2 text-rejected-strong text-sm"
+                      data-testid="grid-groups-error"
+                      role="gridcell"
+                      style={{ gridColumn: `span ${fields.length + Number(selectionEnabled)}` }}
+                      tabIndex={-1}
+                    >
+                      <span role="alert">
+                        {presentCoreError(
+                          messages,
+                          locale,
+                          groupedData.error,
+                          messages.shell.operationFailed,
                         )}
-                        field={field}
-                        hasSelectionColumn={selectionEnabled}
-                        index={index}
-                        key={field.id}
-                        onOpenRecord={onOpenRecord}
-                        record={record}
-                        records={relationRecords}
-                        rowHeight={rowHeight}
-                      />
-                    ))}
-                    <div className={baseTableStatusCellClassName} role="gridcell" tabIndex={-1}>
-                      <span className="inline-flex min-w-0 items-center gap-1.5 truncate rounded-md bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
-                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-55" />
-                        <span className="truncate">{messages.common.archived}</span>
                       </span>
-                      {onRestoreRecord && canPropose ? (
-                        <button
-                          aria-label={messages.common.restore}
-                          className="ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded border border-border/60 bg-card transition-colors hover:bg-accent disabled:opacity-50"
-                          disabled={restoringRecordId === record.id}
-                          onClick={() => {
-                            setRestoringRecordId(record.id);
-                            onRestoreRecord(record).finally(() => setRestoringRecordId(null));
-                          }}
-                          type="button"
-                          title={messages.common.restore}
-                        >
-                          <RotateCcw className="size-3" />
-                        </button>
-                      ) : null}
+                      <button
+                        className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                        onClick={groupedData.retry}
+                        type="button"
+                      >
+                        {messages.common.retry}
+                      </button>
                     </div>
                   </div>
-                ))
-              : null}
-            {showArchivedRecords && archivedPagination?.hasMore ? (
-              <div className="flex items-center justify-center pt-2">
-                <button
-                  className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
-                  disabled={archivedPagination.isLoadingMore}
-                  onClick={() => archivedPagination.loadMore()}
-                  type="button"
+                </div>
+              ) : bodyItems.length === 0 ? (
+                <div role="rowgroup">
+                  <div
+                    aria-rowindex={2}
+                    className="grid min-h-11 border-border/40 border-b"
+                    role="row"
+                    style={{ gridTemplateColumns: columnTemplate }}
+                    tabIndex={-1}
+                  >
+                    <div
+                      aria-colspan={fields.length + Number(selectionEnabled)}
+                      className="flex items-center px-2 text-muted-foreground text-sm"
+                      role="gridcell"
+                      style={{
+                        gridColumn: `span ${fields.length + Number(selectionEnabled)}`,
+                      }}
+                      tabIndex={-1}
+                    >
+                      {recordFind?.hasQuery && (grouping || !pagination?.error) ? (
+                        <span
+                          className="flex items-center gap-2"
+                          data-testid="base-record-find-empty"
+                        >
+                          {findMessages.empty}
+                          <button
+                            className="underline underline-offset-2 hover:text-foreground"
+                            onClick={recordFind.clear}
+                            type="button"
+                          >
+                            {findMessages.clear}
+                          </button>
+                        </span>
+                      ) : pagination?.error && !grouping ? null : (
+                        messages.base.emptyRecords
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : shouldVirtualize ? (
+                <div
+                  ref={listRef}
+                  className="relative"
+                  role="rowgroup"
+                  style={{ height: rowVirtualizer.getTotalSize() }}
                 >
-                  {archivedPagination.isLoadingMore
-                    ? messages.common.loading
-                    : messages.search.loadMore}
-                </button>
-              </div>
-            ) : null}
+                  {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                    const item = bodyItems[virtualRow.index];
+                    if (!item) return null;
+                    return renderBodyItem(item, virtualRow.index, {
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
+                    });
+                  })}
+                </div>
+              ) : (
+                bodyItems.map((item, index) => renderBodyItem(item, index))
+              )}
+              {showArchivedRecords && archivedRecords.length > 0
+                ? archivedRecords.map((record, archivedIndex) => (
+                    <div
+                      aria-rowindex={bodyItems.length + archivedIndex + 2}
+                      className="group grid items-stretch border-border/40 border-b bg-muted/10 text-sm opacity-60 transition-colors hover:opacity-100"
+                      data-record-id={record.id}
+                      key={record.id}
+                      role="row"
+                      style={{ gridTemplateColumns: archivedColumnTemplate, height: rowHeight }}
+                      tabIndex={-1}
+                    >
+                      {selectionEnabled ? (
+                        <div
+                          className={baseTableSelectionStickyCellClassName}
+                          role="gridcell"
+                          tabIndex={-1}
+                        />
+                      ) : null}
+                      {fields.map((field, index) => (
+                        <RecordTableCell
+                          client={client}
+                          currentRecordHref={mergeSearchIntoHref(
+                            withSourceView(
+                              `/base/${base?.slug ?? record.base.slug}/${record.id}`,
+                              sourceViewSlug,
+                            ),
+                            currentSearch,
+                          )}
+                          field={field}
+                          hasSelectionColumn={selectionEnabled}
+                          index={index}
+                          key={field.id}
+                          onOpenRecord={onOpenRecord}
+                          record={record}
+                          records={relationRecords}
+                          rowHeight={rowHeight}
+                        />
+                      ))}
+                      <div className={baseTableStatusCellClassName} role="gridcell" tabIndex={-1}>
+                        <span className="inline-flex min-w-0 items-center gap-1.5 truncate rounded-md bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-55" />
+                          <span className="truncate">{messages.common.archived}</span>
+                        </span>
+                        {onRestoreRecord && canPropose ? (
+                          <button
+                            aria-label={messages.common.restore}
+                            className="ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded border border-border/60 bg-card transition-colors hover:bg-accent disabled:opacity-50"
+                            disabled={restoringRecordId === record.id}
+                            onClick={() => {
+                              setRestoringRecordId(record.id);
+                              onRestoreRecord(record).finally(() => setRestoringRecordId(null));
+                            }}
+                            type="button"
+                            title={messages.common.restore}
+                          >
+                            <RotateCcw className="size-3" />
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))
+                : null}
+              {showArchivedRecords && archivedPagination?.hasMore ? (
+                <div className="flex items-center justify-center pt-2">
+                  <button
+                    className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+                    disabled={archivedPagination.isLoadingMore}
+                    onClick={() => archivedPagination.loadMore()}
+                    type="button"
+                  >
+                    {archivedPagination.isLoadingMore
+                      ? messages.common.loading
+                      : messages.search.loadMore}
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
-        </div>
+          {showSummaryFooter && activeView && base ? (
+            <GridSummaryFooter
+              allFields={allFields}
+              baseId={base.id}
+              canEdit={canPropose}
+              canMerge={hasApiKeyLevel(basePermissionLevel, "write")}
+              client={client}
+              columnTemplate={columnTemplate}
+              config={activeView.config}
+              fields={fields}
+              find={recordFind?.input}
+              hasSelectionColumn={selectionEnabled}
+              onSubmit={async (summaries, mergeImmediately) => {
+                await onUpdateView(
+                  activeView,
+                  { config: { fieldSummaries: summaries } },
+                  { mergeImmediately, preserveLocation: true },
+                );
+              }}
+              recordCount={
+                grouping
+                  ? groupedData
+                    ? { count: groupedData.total }
+                    : undefined
+                  : pagination
+                    ? pagination.isLoading
+                      ? undefined
+                      : { count: pagination.total, capped: pagination.totalCapped }
+                    : { count: records.length }
+              }
+              scrollSourceRef={horizontalScrollRef}
+              viewId={activeView.id}
+            />
+          ) : null}
+        </>
       )}
     </div>
   );
@@ -2767,15 +3079,18 @@ function RecordTableCell(props: RecordTableCellProps) {
       data-grid-cell={key}
       data-inline-editable={editable ? "true" : undefined}
       onClick={
-        editable && (editorKind === "member" || editorKind === "attachment")
+        editable &&
+        (editorKind === "member" || editorKind === "appUser" || editorKind === "attachment")
           ? (event) => {
+              if (!event.currentTarget.contains(event.target as Node)) return;
               if ((event.target as HTMLElement).closest("[data-inline-cell-editor]")) return;
               if (
                 editorKind === "attachment" &&
                 (event.target as HTMLElement).closest("a[href], button, input")
               )
                 return;
-              if (editorKind === "member") grid.startEditing(record, field);
+              if (editorKind === "member" || editorKind === "appUser")
+                grid.startEditing(record, field);
               else grid.activate({ recordId: record.id, fieldSlug: field.slug });
             }
           : undefined
@@ -2783,6 +3098,8 @@ function RecordTableCell(props: RecordTableCellProps) {
       onDoubleClick={
         editable && editorKind !== "checkbox" && editorKind !== "relation"
           ? (event) => {
+              // Portal events follow the React tree, but belong to the dialog, not this cell.
+              if (!event.currentTarget.contains(event.target as Node)) return;
               if ((event.target as HTMLElement).closest("a[href], [data-inline-cell-editor]")) {
                 return;
               }
@@ -2790,9 +3107,10 @@ function RecordTableCell(props: RecordTableCellProps) {
             }
           : undefined
       }
-      onFocus={(event) =>
-        grid.activate({ recordId: record.id, fieldSlug: field.slug }, event.currentTarget)
-      }
+      onFocus={(event) => {
+        if (!event.currentTarget.contains(event.target as Node)) return;
+        grid.activate({ recordId: record.id, fieldSlug: field.slug }, event.currentTarget);
+      }}
       role="gridcell"
       tabIndex={grid.tabStopKey === key ? 0 : -1}
     >
@@ -2988,6 +3306,7 @@ function RecordTableCellContent({
   const rawValue = record.headCommit.payload[field.slug];
   const chips = getFieldChipEntries(field, rawValue);
   const kind = fieldDisplayKind(field.type);
+  const highlight = useRecordFindHighlighter(field);
   // Only this record's existing preview links open the dialog. Field-specific
   // actions (URLs, relations, attachments and lookup sources) keep their targets.
   const openRecord = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -3163,7 +3482,7 @@ function RecordTableCellContent({
               onClick={openRecord}
               title={chip.label}
             >
-              <FieldBadge chip={chip} />
+              <FieldBadge chip={chip} highlight={highlight} />
             </Link>
           ),
         }))}
@@ -3300,7 +3619,7 @@ function RecordTableCellContent({
         target={external ? "_blank" : undefined}
         title={preview.text}
       >
-        <GridCellText rowHeight={rowHeight}>{preview.text}</GridCellText>
+        <GridCellText rowHeight={rowHeight}>{highlight(preview.text)}</GridCellText>
         {external ? <ExternalLink className="shrink-0" size={12} /> : null}
       </a>
     );
@@ -3425,11 +3744,48 @@ function RecordTableCellContent({
       ? buildTableCellPreview(formattedValue).text
       : formattedValue;
 
+  // Plain primary values match the editable grid; record expansion remains a
+  // separate action instead of making the field value look like a hyperlink.
+  if (index === 0) {
+    return (
+      <span className="flex min-w-0 items-center gap-2" title={value}>
+        <GridCellText
+          className="font-medium text-foreground"
+          rowHeight={rowHeight}
+          scalar={GRID_FIELD_PRESENTATION[field.type] === "scalar"}
+        >
+          {value ? highlight(value) : "-"}
+        </GridCellText>
+        {showOpenRecord ? (
+          onOpenRecord ? (
+            <button
+              className="shrink-0 text-[10px] text-muted-foreground hover:underline"
+              data-table-preview-bounded="true"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenRecord(record);
+              }}
+              type="button"
+            >
+              {messages.operation.viewFullContent}
+            </button>
+          ) : (
+            <Link
+              className="shrink-0 text-[10px] text-muted-foreground hover:underline"
+              data-table-preview-bounded="true"
+              href={currentRecordHref}
+            >
+              {messages.operation.viewFullContent}
+            </Link>
+          )
+        ) : null}
+      </span>
+    );
+  }
+
   return (
     <Link
-      className={`flex min-w-0 items-center gap-2 py-1 underline-offset-2 hover:underline ${
-        index === 0 ? "font-medium text-foreground" : "text-muted-foreground"
-      }`}
+      className="flex min-w-0 items-center gap-2 py-1 text-muted-foreground underline-offset-2 hover:underline"
       href={currentRecordHref}
       onClick={openRecord}
       title={
@@ -3439,26 +3795,13 @@ function RecordTableCellContent({
       }
       data-table-preview-bounded={showOpenRecord ? "true" : undefined}
     >
-      {index === 0 ? (
-        <span className="h-4 w-4 shrink-0 rounded border border-border/70 bg-muted/40" />
-      ) : null}
       <GridCellText rowHeight={rowHeight} scalar={GRID_FIELD_PRESENTATION[field.type] === "scalar"}>
-        {value || "-"}
+        {value ? highlight(value) : "-"}
       </GridCellText>
       {showOpenRecord ? (
-        <span
-          className={`${
-            index === 0 ? "" : "ml-auto"
-          } shrink-0 text-[10px] text-muted-foreground no-underline`}
-        >
+        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground no-underline">
           {messages.operation.viewFullContent}
         </span>
-      ) : null}
-      {index === 0 ? (
-        <ChevronRight
-          className="ml-auto shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-          size={13}
-        />
       ) : null}
     </Link>
   );

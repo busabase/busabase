@@ -6,8 +6,10 @@ import {
 } from "busabase-contract/domains/base/contract/base-schemas";
 import {
   gridRowHeightSchema,
+  viewFieldSummariesSchema,
   viewFilterConjunctionSchema,
   viewFiltersSchema,
+  viewGroupByListSchema,
 } from "busabase-contract/domains/base/contract/view-schemas";
 import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "busabase-contract/types";
 import { z } from "zod";
@@ -249,6 +251,8 @@ const viewConfigObjectSchema = z.object({
     .record(z.string().min(1), z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH))
     .optional(),
   rowHeight: gridRowHeightSchema.optional(),
+  groupBy: viewGroupByListSchema.optional(),
+  fieldSummaries: viewFieldSummariesSchema.optional(),
   coverFieldSlug: z.string().nullable().optional(),
   coverFit: z.enum(["cover", "fit"]).optional(),
   cardSize: z.enum(["small", "medium", "large"]).optional(),

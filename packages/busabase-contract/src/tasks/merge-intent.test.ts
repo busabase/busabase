@@ -26,6 +26,12 @@ const cases: TaskCase[] = [
     endpoint: "records.changeRequest",
   })),
   {
+    ...recordChangeTask,
+    label: "record revert",
+    input: { recordId: "rec_1", operation: "revert", toBeforeChangeRequestId: "crq_1" },
+    endpoint: "records.changeRequest",
+  },
+  {
     ...recordBulkUpdateTask,
     label: "record batch",
     input: { baseId: "bas_1", updates: [{ recordId: "rec_1", fields: { count: 99 } }] },

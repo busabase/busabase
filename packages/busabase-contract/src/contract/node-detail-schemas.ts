@@ -106,7 +106,9 @@ export const NODE_DETAIL_VARIANTS = {
   base: genericNodeDetailSchema("base"),
   form: genericNodeDetailSchema("form"),
   whiteboard: richNodeDetailSchema("whiteboard", WhiteboardDocumentSchema),
-  workflow: richNodeDetailSchema("workflow", WorkflowDocumentSchema),
+  workflow: richNodeDetailSchema("workflow", WorkflowDocumentSchema).extend({
+    viewerPermissionLevel: z.enum(["read", "changeRequest", "write", "manage"]).optional(),
+  }),
   html: richNodeDetailSchema("html", HtmlDocumentSchema),
 } satisfies Record<NodeType, unknown>;
 

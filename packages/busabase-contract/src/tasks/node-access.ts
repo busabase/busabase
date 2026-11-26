@@ -126,7 +126,8 @@ export const nodeShareTask: TaskDefinition<NodeShareInput> = {
       name: "password",
       kind: "string",
       appliesWhen: { param: "action", values: ["enable"] },
-      description: "Optional password gate for the link.",
+      description:
+        "Optional password gate for the link, 4–64 characters. `null` removes it; omit to keep the current one.",
     },
     {
       name: "expiresAt",

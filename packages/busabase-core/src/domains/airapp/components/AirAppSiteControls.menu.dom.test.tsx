@@ -103,3 +103,55 @@ it("finishes a side-panel publication and updates cached release state after its
     screen.getByRole("menuitem", { name: "Publish update" }).getAttribute("data-disabled"),
   ).not.toBeNull();
 });
+
+it("rechecks saved source edits while the runner is idle without fetching domain management", async () => {
+  let state: AirAppSiteStateVO = {
+    engine: "available",
+    publication: "live",
+    isPublic: true,
+    address: "https://app.sites.test",
+    previewUrl: "/api/airapp-preview/app/",
+    previewShareUrl: null,
+    previewVersion: "v1",
+    currentVersion: "v1",
+    liveVersion: "v1",
+    previewStale: false,
+    previewDeployedAt: null,
+    liveDeployedAt: null,
+    blockers: [],
+  };
+  const read = vi.fn(async () => state);
+  const readDomains = vi.fn(async () => ({ bindings: [] }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  clients.push(client);
+  const orpc = {
+    airapps: {
+      siteState: { queryOptions: () => ({ queryKey: ["site", "app"], queryFn: read }) },
+      siteDomains: {
+        queryOptions: () => ({ queryKey: ["domains", "app"], queryFn: readDomains }),
+      },
+      siteGoLive: { call: vi.fn() },
+    },
+  } as unknown as BusabaseQueryUtils;
+  const surface = (revision: string) => (
+    <CoreI18nProvider locale="en">
+      <QueryClientProvider client={client}>
+        <AirAppSiteGoLive
+          filesRevision={revision}
+          nodeId="app"
+          orpc={orpc}
+          runStatus="idle"
+          renderMenuAction={(_action, current) => <p>{current?.publication ?? "loading"}</p>}
+        />
+      </QueryClientProvider>
+    </CoreI18nProvider>
+  );
+  const view = render(surface("source-v1"));
+  await screen.findByText("live");
+  const readsBeforeEdit = read.mock.calls.length;
+  state = { ...state, currentVersion: "v2", publication: "live-with-changes", previewStale: true };
+  view.rerender(surface("source-v2"));
+  await screen.findByText("live-with-changes");
+  expect(read.mock.calls.length).toBe(readsBeforeEdit + 1);
+  expect(readDomains).not.toHaveBeenCalled();
+});

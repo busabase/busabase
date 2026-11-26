@@ -9,6 +9,10 @@ import { CoreI18nProvider } from "../../../i18n";
 import type { RecordCollectionStatus } from "../helpers/record-collection-status";
 import type { RecordFindState } from "../helpers/record-find-url";
 import { useRecordFind } from "../hooks/use-record-find";
+import {
+  getRecordFindHighlight,
+  RecordFindHighlightProvider,
+} from "../hooks/use-record-find-highlight";
 import { BusaBaseKanban } from "./base-kanban";
 import { RecordFind } from "./record-find-control";
 
@@ -116,6 +120,8 @@ function setup(
   listRecordsPage: (input: PageInput) => Promise<PageResult>,
   initial: RecordFindState = { query: "needle", fieldId: "" },
   groupRecords = vi.fn().mockResolvedValue({ total: 200, groups: [] }),
+  // The table provides this around every collection; cards only consume it.
+  withHighlight = false,
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.push(queryClient);
@@ -130,15 +136,21 @@ function setup(
       <QueryClientProvider client={queryClient}>
         <CoreI18nProvider locale="en">
           <RecordFind control={control} fields={base.fields} visibleSlugs={["title", "status"]} />
-          <BusaBaseKanban
-            activeView={view}
-            base={base}
-            client={api}
-            fields={base.fields}
-            onCollectionStatusChange={status}
-            onMoveRecord={onMoveRecord}
-            recordFind={control}
-          />
+          <RecordFindHighlightProvider
+            value={
+              withHighlight ? getRecordFindHighlight(control.input, base.fields, view.config) : null
+            }
+          >
+            <BusaBaseKanban
+              activeView={view}
+              base={base}
+              client={api}
+              fields={base.fields}
+              onCollectionStatusChange={status}
+              onMoveRecord={onMoveRecord}
+              recordFind={control}
+            />
+          </RecordFindHighlightProvider>
         </CoreI18nProvider>
       </QueryClientProvider>
     );
@@ -342,5 +354,29 @@ describe("Kanban shared record find", () => {
     await act(async () => finishSlow(page({ baseId: base.id }, [record("late-slow")])));
     expect(within(todo).queryByText("late-slow")).toBeNull();
     expect(within(todo).getByText("fast")).toBeTruthy();
+  });
+  it("marks the committed find in card titles and follows the next committed query", async () => {
+    const list = vi.fn(async (input: PageInput) =>
+      page(input, isTodo(input) ? [record("Haystack needle")] : []),
+    );
+    setup(list, { query: "needle", fieldId: "" }, undefined, true);
+    const todo = screen.getByTestId("kanban-column-todo");
+    await waitFor(() =>
+      expect(within(todo).getByTestId("kanban-column-count").textContent).toBe("1"),
+    );
+    const card = within(todo).getByText("needle", { selector: "mark" }).closest("[data-record-id]");
+    expect(card?.querySelector("[data-kanban-record-title]")?.textContent).toBe("Haystack needle");
+    expect([...(card?.querySelectorAll("mark") ?? [])].map((mark) => mark.textContent)).toEqual([
+      "needle",
+    ]);
+
+    // The marks follow the committed query: the title holds no "tod".
+    fireEvent.change(screen.getByTestId("base-record-find-input"), { target: { value: "tod" } });
+    await waitFor(() =>
+      expect(list.mock.calls.some(([input]) => input.find?.query === "tod")).toBe(true),
+    );
+    await waitFor(() =>
+      expect(within(todo).queryByText("needle", { selector: "mark" })).toBeNull(),
+    );
   });
 });

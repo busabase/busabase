@@ -20,9 +20,10 @@ import { Dialog, DialogTitle } from "kui/dialog";
 import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { useSearch } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
-import { presentCoreError } from "../../../i18n/localize-error";
+import { presentCoreError, VIEW_TOO_LARGE_MESSAGE } from "../../../i18n/localize-error";
+import { recordFindErrorMessage, recordFindMessages } from "../../../i18n/record-find";
 import {
   getCalendarDateRange,
   getCalendarDayRange,
@@ -30,11 +31,19 @@ import {
   getDateFieldOptions,
 } from "../../base/utils/date-value";
 import { resolveDateField } from "../../base/utils/view-field-resolution";
+import {
+  type CalendarMonth,
+  readCalendarMonth,
+  writeCalendarMonth,
+} from "../helpers/calendar-month-url";
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { retryRecordRead } from "../helpers/query-state";
+import type { RecordCollectionStatus } from "../helpers/record-collection-status";
 import { useSourceViewSlug } from "../helpers/source-view-context";
 import { withSourceView } from "../helpers/source-view-url";
+import type { RecordFindControl } from "../hooks/use-record-find";
+import { useDashboardOrpc } from "../orpc-context";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { rescheduledCalendarValue } from "./calendar-reschedule";
 import { DialogContent } from "./localized-dialog-content";
@@ -73,7 +82,7 @@ const DAY_PREVIEW_COUNT = 4;
 const DAY_LIST_PAGE_SIZE = 50;
 
 type DateRange = { gte: string; lt: string };
-type RecordsPage = { records: RecordVO[]; total: number; page: number; totalPages: number };
+type RecordsPage = Awaited<ReturnType<BusabaseDashboardApiClient["listRecordsPage"]>>;
 
 const calendarKeyboardCoordinates: KeyboardCoordinateGetter = (event, { context }) => {
   const offset = {
@@ -231,10 +240,12 @@ function CalendarDayDialog({
   dateField,
   day,
   knownTotal,
+  knownTotalCapped,
   loadedRecords,
   onClose,
   onOpenRecord,
   range,
+  recordFind,
   sourceViewSlug,
   viewId,
 }: {
@@ -245,32 +256,36 @@ function CalendarDayDialog({
   day: string;
   /** The count its cell already showed, until the list's own arrives. */
   knownTotal: number | undefined;
+  knownTotalCapped?: boolean;
   loadedRecords: RecordVO[] | null;
   onClose: () => void;
   onOpenRecord?: (record: RecordVO) => void;
   range: DateRange | null;
+  recordFind?: RecordFindControl;
   sourceViewSlug: string | null;
   viewId: string | undefined;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const currentSearch = useSearch();
+  const orpc = useDashboardOrpc();
   const listQuery = useInfiniteQuery({
     enabled: !loadedRecords && Boolean(baseId && range),
-    retry: retryRecordRead,
+    retry: recordFind?.hasQuery ? false : retryRecordRead,
     getNextPageParam: (last: RecordsPage) =>
       last.page < last.totalPages ? last.page + 1 : undefined,
     initialPageParam: 1,
     queryFn: ({ pageParam }) =>
       client.listRecordsPage({
         baseId,
+        find: recordFind?.input,
         dateRange: { fieldSlug: dateField.slug, gte: range?.gte ?? "", lt: range?.lt ?? "" },
         page: pageParam as number,
         pageSize: DAY_LIST_PAGE_SIZE,
         ...(viewId ? { viewId } : {}),
       }),
     queryKey: [
-      "busabase",
+      ...(orpc?.records.listPage.key() ?? ["busabase"]),
       "calendar-day",
       baseId,
       viewId ?? "",
@@ -278,12 +293,19 @@ function CalendarDayDialog({
       range?.gte ?? "",
       range?.lt ?? "",
       "list",
+      recordFind?.input,
     ],
   });
   const records = loadedRecords ?? (listQuery.data?.pages ?? []).flatMap((page) => page.records);
   const total = loadedRecords
     ? loadedRecords.length
     : (listQuery.data?.pages[0]?.total ?? knownTotal);
+  const totalCapped = !loadedRecords && (listQuery.data?.pages[0]?.totalCapped ?? knownTotalCapped);
+  const error = listQuery.error
+    ? (recordFindErrorMessage(locale, listQuery.error) ??
+      presentCoreError(messages, locale, listQuery.error, messages.shell.operationFailed))
+    : null;
+  const reachedPageLimit = !listQuery.hasNextPage && listQuery.data?.pages.at(-1)?.pagesCapped;
   const [year, month, date] = day.split("-").map(Number) as [number, number, number];
   const label = new Date(year, month - 1, date).toLocaleDateString(locale, {
     weekday: "short",
@@ -307,7 +329,10 @@ function CalendarDayDialog({
         <p className="text-muted-foreground text-xs tabular-nums">
           {total === undefined
             ? messages.common.loading
-            : fmt(messages.base.recordCount, { count: total, plural: total === 1 ? "" : "s" })}
+            : fmt(messages.base.recordCount, {
+                count: totalCapped ? `${total}+` : total,
+                plural: total === 1 ? "" : "s",
+              })}
         </p>
         <ul className="flex max-h-[60vh] flex-col gap-1 overflow-y-auto">
           {records.map((record) => (
@@ -339,12 +364,34 @@ function CalendarDayDialog({
             </li>
           ))}
         </ul>
+        {!loadedRecords && listQuery.isPending ? (
+          <p aria-live="polite" className="text-muted-foreground text-sm" role="status">
+            {messages.common.loading}
+          </p>
+        ) : null}
+        {error ? (
+          <p className="text-destructive text-sm" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {reachedPageLimit ? (
+          <p className="text-muted-foreground text-sm" role="status">
+            {presentCoreError(
+              messages,
+              locale,
+              new Error(VIEW_TOO_LARGE_MESSAGE),
+              messages.shell.operationFailed,
+            )}
+          </p>
+        ) : null}
         {listQuery.isError || listQuery.hasNextPage ? (
           <button
             className="inline-flex h-8 items-center justify-center rounded-md border border-border/70 px-3 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
-            disabled={listQuery.isFetchingNextPage}
+            disabled={listQuery.isFetching}
             onClick={() =>
-              void (listQuery.isError ? listQuery.refetch() : listQuery.fetchNextPage())
+              void (listQuery.isError && !listQuery.isFetchNextPageError
+                ? listQuery.refetch()
+                : listQuery.fetchNextPage())
             }
             type="button"
           >
@@ -365,28 +412,63 @@ export function BusaBaseCalendar({
   base,
   client,
   fields,
+  onCollectionStatusChange,
   onOpenRecord,
   onPatchRecord,
+  queryScope,
+  recordFind,
 }: {
   activeView: ViewVO | null;
   base: BaseVO | null;
   client: BusabaseDashboardApiClient;
   fields: BaseFieldVO[];
+  onCollectionStatusChange?: (status: RecordCollectionStatus) => void;
   onOpenRecord?: (record: RecordVO) => void;
   onPatchRecord?: (
     record: RecordVO,
     patch: Record<string, unknown>,
   ) => Promise<{ materialized: true } | { materialized: false; changeRequestId: string }>;
+  queryScope?: string;
+  recordFind?: RecordFindControl;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const currentSearch = useSearch();
+  const orpc = useDashboardOrpc();
+  const [location, navigate] = useLocation();
   const contextViewSlug = useSourceViewSlug();
   const sourceViewSlug = activeView?.slug ?? contextViewSlug;
   const dateField = resolveDateField(base, fields, activeView?.config.dateFieldSlug);
   const baseId = base?.id ?? "";
   const today = new Date();
-  const [cursor, setCursor] = useState({ year: today.getFullYear(), month: today.getMonth() });
+  const monthScope = `${baseId}:${activeView?.id ?? "all"}`;
+  const savedMonth = readCalendarMonth(currentSearch, monthScope);
+  const savedMonthKey = savedMonth ? `${savedMonth.year}:${savedMonth.month}` : "";
+  const [monthState, setMonthState] = useState(() => ({
+    scope: monthScope,
+    url: savedMonthKey,
+    value: savedMonth ?? { year: today.getFullYear(), month: today.getMonth() },
+  }));
+  // A URL restoration is authoritative, including returning to a month that
+  // used to be this component's local navigation source.
+  if (monthState.scope !== monthScope || monthState.url !== savedMonthKey) {
+    setMonthState({
+      scope: monthScope,
+      url: savedMonthKey,
+      value: savedMonth ?? { year: today.getFullYear(), month: today.getMonth() },
+    });
+  }
+  const cursor =
+    monthState.scope === monthScope && monthState.url === savedMonthKey
+      ? monthState.value
+      : (savedMonth ?? { year: today.getFullYear(), month: today.getMonth() });
+  const setCursor = (next: CalendarMonth | ((previous: CalendarMonth) => CalendarMonth)) => {
+    const value = typeof next === "function" ? next(cursor) : next;
+    setMonthState({ scope: monthScope, url: savedMonthKey, value });
+    navigate(`${location}?${writeCalendarMonth(currentSearch, value, monthScope)}`, {
+      replace: true,
+    });
+  };
   const [activeId, setActiveId] = useState<string | null>(null);
   const [pendingRecordId, setPendingRecordId] = useState<string | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
@@ -421,15 +503,42 @@ export function BusaBaseCalendar({
   // `listRecordsPageInputSchema`, and `getCalendarDateRange` for day values).
   // The server just compares.
   const range = getCalendarDateRange(dateField?.type, gridStart, gridEnd);
+  const scope =
+    queryScope ??
+    JSON.stringify([
+      baseId,
+      activeView?.id,
+      activeView?.config,
+      range.gte,
+      range.lt,
+      recordFind?.input,
+    ]);
+  const interactionScope = JSON.stringify([
+    scope,
+    range.gte,
+    range.lt,
+    recordFind?.input,
+    recordFind?.isPending,
+  ]);
+  const [openDayScope, setOpenDayScope] = useState(interactionScope);
+  const dragScope = useRef<string | null>(null);
+  const findMessages = recordFindMessages[locale];
+  useEffect(() => {
+    dragScope.current = null;
+    setActiveId(null);
+    setOpenDay(null);
+    setOpenDayScope(interactionScope);
+  }, [interactionScope]);
   const rangeQuery = useInfiniteQuery({
     enabled: Boolean(baseId) && Boolean(dateField),
-    retry: retryRecordRead,
+    retry: recordFind?.hasQuery ? false : retryRecordRead,
     getNextPageParam: (last: { page: number; totalPages: number }) =>
       last.page < last.totalPages ? last.page + 1 : undefined,
     initialPageParam: 1,
     queryFn: ({ pageParam }) =>
       client.listRecordsPage({
         baseId,
+        find: recordFind?.input,
         dateRange: {
           fieldSlug: dateField?.slug ?? "",
           gte: range.gte,
@@ -440,13 +549,15 @@ export function BusaBaseCalendar({
         ...(activeView?.id ? { viewId: activeView.id } : {}),
       }),
     queryKey: [
-      "busabase",
+      ...(orpc?.records.listPage.key() ?? ["busabase"]),
       "calendar-range",
       baseId,
       activeView?.id ?? "",
       dateField?.slug ?? "",
       range.gte,
       range.lt,
+      scope,
+      recordFind?.input,
     ],
   });
 
@@ -457,10 +568,23 @@ export function BusaBaseCalendar({
   // never shows a stale month's records while this runs.
   const busy = (rangeQuery.data?.pages[0]?.totalPages ?? 0) > MAX_DRAINED_PAGES;
   useEffect(() => {
-    if (!busy && rangeQuery.hasNextPage && !rangeQuery.isFetchingNextPage) {
+    if (
+      !busy &&
+      !recordFind?.isPending &&
+      !rangeQuery.isError &&
+      rangeQuery.hasNextPage &&
+      !rangeQuery.isFetchingNextPage
+    ) {
       void rangeQuery.fetchNextPage();
     }
-  }, [busy, rangeQuery.hasNextPage, rangeQuery.isFetchingNextPage, rangeQuery.fetchNextPage]);
+  }, [
+    busy,
+    recordFind?.isPending,
+    rangeQuery.isError,
+    rangeQuery.hasNextPage,
+    rangeQuery.isFetchingNextPage,
+    rangeQuery.fetchNextPage,
+  ]);
   // A busier month — tens of thousands of records in a very large Base — is
   // never read whole: each day asks for its first records and its own count.
   const dateOptions = getDateFieldOptions(dateField?.options);
@@ -471,11 +595,12 @@ export function BusaBaseCalendar({
   const dayQueries = useQueries({
     queries: dateField
       ? dayRanges.map((dayRange) => ({
-          enabled: Boolean(dayRange),
-          retry: retryRecordRead,
+          enabled: Boolean(dayRange) && !recordFind?.isPending,
+          retry: recordFind?.hasQuery ? false : retryRecordRead,
           queryFn: () =>
             client.listRecordsPage({
               baseId,
+              find: recordFind?.input,
               dateRange: {
                 fieldSlug: dateField.slug,
                 gte: dayRange?.gte ?? "",
@@ -486,7 +611,7 @@ export function BusaBaseCalendar({
               ...(activeView?.id ? { viewId: activeView.id } : {}),
             }),
           queryKey: [
-            "busabase",
+            ...(orpc?.records.listPage.key() ?? ["busabase"]),
             "calendar-day",
             baseId,
             activeView?.id ?? "",
@@ -494,25 +619,73 @@ export function BusaBaseCalendar({
             dayRange?.gte ?? "",
             dayRange?.lt ?? "",
             "preview",
+            scope,
+            recordFind?.input,
           ],
         }))
       : [],
   });
 
+  const rangeRecords = (rangeQuery.data?.pages ?? []).flatMap((page) => page.records);
+  const records = busy
+    ? dayQueries.flatMap((dayQuery) => dayQuery.data?.records ?? [])
+    : rangeRecords;
+  // Errors stop automatic pagination. Keep loaded cards, but never present
+  // an incomplete month as a final empty result or allow a stale reschedule.
+  const monthError = rangeQuery.error ?? dayQueries.find((dayQuery) => dayQuery.error)?.error;
+  const isLoadingMonth = Boolean(
+    dateField &&
+      (recordFind?.isPending ||
+        rangeQuery.isFetching ||
+        (!monthError &&
+          (rangeQuery.isPending ||
+            (busy
+              ? dayQueries.some((dayQuery) => dayQuery.isPending || dayQuery.isFetching)
+              : rangeQuery.hasNextPage)))),
+  );
+  // The displayed dates' records still arriving. A background refresh of a
+  // month already on screen is not loading: it must neither drop a drop the
+  // reader is making nor flash a loading label over the grid.
+  const isReadingMonth = Boolean(
+    dateField &&
+      (recordFind?.isPending ||
+        rangeQuery.isLoading ||
+        rangeQuery.isFetchingNextPage ||
+        (!monthError &&
+          (rangeQuery.isPending ||
+            (busy ? dayQueries.some((dayQuery) => dayQuery.isPending) : rangeQuery.hasNextPage)))),
+  );
+  const monthPage = rangeQuery.data?.pages[0];
+  const collectionTotal = dateField && !monthError ? monthPage?.total : undefined;
+  const collectionTotalCapped = monthPage?.totalCapped;
+  useEffect(() => {
+    onCollectionStatusChange?.({
+      scope,
+      total: collectionTotal,
+      totalCapped: collectionTotalCapped,
+      isFetching: isLoadingMonth,
+      isError: Boolean(monthError),
+    });
+  }, [
+    scope,
+    collectionTotal,
+    collectionTotalCapped,
+    isLoadingMonth,
+    monthError,
+    onCollectionStatusChange,
+  ]);
   if (!dateField) {
     return (
       <div className="px-2 py-6 text-muted-foreground text-sm">{messages.base.calendarNoDate}</div>
     );
   }
-
-  const rangeRecords = (rangeQuery.data?.pages ?? []).flatMap((page) => page.records);
-  const records = busy
-    ? dayQueries.flatMap((dayQuery) => dayQuery.data?.records ?? [])
-    : rangeRecords;
   // A `read` grant on the Base may look at the calendar but not reschedule it.
   const canReschedule =
     dateField.type === "date" &&
     Boolean(onPatchRecord) &&
+    !recordFind?.isPending &&
+    !isReadingMonth &&
+    !monthError &&
     !isAnon &&
     hasApiKeyLevel(permissionLevel, "changeRequest");
 
@@ -540,14 +713,6 @@ export function BusaBaseCalendar({
   };
   const baseSlug = base?.slug ?? records[0]?.base.slug ?? "";
   const activeRecord = activeId ? records.find((record) => record.id === activeId) : null;
-  // True until the month's slice has been fully drained — see the effect above.
-  const isLoadingMonth =
-    rangeQuery.isPending ||
-    (busy
-      ? dayQueries.some((dayQuery) => dayQuery.isPending)
-      : rangeQuery.hasNextPage || rangeQuery.isFetchingNextPage);
-  // A month or day too large to read in time says so instead of looking empty.
-  const monthError = rangeQuery.error ?? dayQueries.find((dayQuery) => dayQuery.error)?.error;
   const retryMonth = () => {
     if (rangeQuery.isError) void rangeQuery.refetch();
     for (const dayQuery of dayQueries) {
@@ -576,7 +741,7 @@ export function BusaBaseCalendar({
 
   return (
     <div className="pb-5">
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <button
           aria-label={messages.base.calendarPrevMonth}
           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -615,7 +780,7 @@ export function BusaBaseCalendar({
         </button>
         {/* Never silent: a spinner while the month's slice loads, so an
             in-progress fetch can't be mistaken for a genuinely empty month. */}
-        {isLoadingMonth ? (
+        {isReadingMonth ? (
           <span className="text-muted-foreground text-xs">{messages.common.loading}</span>
         ) : null}
         {pendingRecordId ? (
@@ -624,15 +789,21 @@ export function BusaBaseCalendar({
           </span>
         ) : null}
       </div>
+      {recordFind ? (
+        <p className="mb-3 text-muted-foreground text-xs" data-testid="calendar-find-scope">
+          {findMessages.calendarScope}
+        </p>
+      ) : null}
       {dropError ? (
         <div className="mb-3 text-destructive text-sm" role="alert">
           {dropError}
         </div>
       ) : null}
-      {monthError ? (
+      {monthError && !recordFind?.isPending ? (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-destructive" role="alert">
-            {presentCoreError(messages, locale, monthError, messages.shell.operationFailed)}
+            {recordFindErrorMessage(locale, monthError) ??
+              presentCoreError(messages, locale, monthError, messages.shell.operationFailed)}
           </span>
           <button
             className="rounded-md border border-border/70 px-2 py-1 font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
@@ -640,6 +811,22 @@ export function BusaBaseCalendar({
             type="button"
           >
             {messages.base.paginationRetry}
+          </button>
+        </div>
+      ) : null}
+      {recordFind?.hasQuery && !isReadingMonth && !monthError && collectionTotal === 0 ? (
+        <div
+          className="mb-3 flex flex-wrap items-center gap-2 text-muted-foreground text-sm"
+          data-testid="base-record-find-empty"
+          role="status"
+        >
+          {findMessages.calendarEmpty}
+          <button
+            className="underline underline-offset-2 hover:text-foreground"
+            onClick={recordFind.clear}
+            type="button"
+          >
+            {findMessages.clear}
           </button>
         </div>
       ) : null}
@@ -660,12 +847,21 @@ export function BusaBaseCalendar({
           const hits = pointerWithin(args);
           return hits.length ? hits : rectIntersection(args);
         }}
-        onDragCancel={() => setActiveId(null)}
+        onDragCancel={() => {
+          dragScope.current = null;
+          setActiveId(null);
+        }}
         onDragEnd={({ active, over }) => {
           setActiveId(null);
-          if (over) void dropOnDay(String(active.id), String(over.id));
+          if (over && dragScope.current === interactionScope) {
+            void dropOnDay(String(active.id), String(over.id));
+          }
+          dragScope.current = null;
         }}
-        onDragStart={({ active }) => setActiveId(String(active.id))}
+        onDragStart={({ active }) => {
+          dragScope.current = interactionScope;
+          setActiveId(String(active.id));
+        }}
         sensors={sensors}
       >
         <div
@@ -684,7 +880,11 @@ export function BusaBaseCalendar({
             const key = dayKey(day);
             const inMonth = day.getMonth() === cursor.month;
             const dayPage = busy ? dayQueries[index]?.data : undefined;
-            const dayRecords = dayPage ? dayPage.records : (recordsByDay.get(key) ?? []);
+            const dayRecords = recordFind?.isPending
+              ? []
+              : dayPage
+                ? dayPage.records
+                : (recordsByDay.get(key) ?? []);
             const dayTotal = dayPage ? dayPage.total : dayRecords.length;
             return (
               <CalendarDayCell
@@ -715,17 +915,23 @@ export function BusaBaseCalendar({
                       record={record}
                     />
                   ))}
-                  {dayTotal > DAY_PREVIEW_COUNT ? (
+                  {dayTotal > DAY_PREVIEW_COUNT && !recordFind?.isPending ? (
                     <button
                       aria-label={fmt(messages.base.recordCount, {
-                        count: dayTotal,
+                        count: dayPage?.totalCapped ? `${dayTotal}+` : dayTotal,
                         plural: dayTotal === 1 ? "" : "s",
                       })}
                       className="self-start rounded px-1 text-muted-foreground text-xs hover:bg-accent hover:text-foreground"
-                      onClick={() => setOpenDay(key)}
+                      disabled={isReadingMonth || Boolean(monthError)}
+                      onClick={() => {
+                        setOpenDayScope(interactionScope);
+                        setOpenDay(key);
+                      }}
                       type="button"
                     >
-                      +{dayTotal - Math.min(dayRecords.length, DAY_PREVIEW_COUNT)}
+                      {dayPage?.totalCapped
+                        ? `${dayTotal}+`
+                        : `+${dayTotal - Math.min(dayRecords.length, DAY_PREVIEW_COUNT)}`}
                     </button>
                   ) : null}
                 </div>
@@ -733,7 +939,7 @@ export function BusaBaseCalendar({
             );
           })}
         </div>
-        {openDay ? (
+        {openDay && openDayScope === interactionScope && !recordFind?.isPending ? (
           <CalendarDayDialog
             baseId={baseId}
             baseSlug={baseSlug}
@@ -745,10 +951,16 @@ export function BusaBaseCalendar({
                 ? dayQueries[days.findIndex((day) => dayKey(day) === openDay)]?.data?.total
                 : undefined
             }
+            knownTotalCapped={
+              busy
+                ? dayQueries[days.findIndex((day) => dayKey(day) === openDay)]?.data?.totalCapped
+                : false
+            }
             loadedRecords={busy ? null : (recordsByDay.get(openDay) ?? [])}
             onClose={() => setOpenDay(null)}
             onOpenRecord={onOpenRecord}
             range={getCalendarDayRange(dateField.type, dateOptions, openDay)}
+            recordFind={recordFind}
             sourceViewSlug={sourceViewSlug}
             viewId={activeView?.id}
           />

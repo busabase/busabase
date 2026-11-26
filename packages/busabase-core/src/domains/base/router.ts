@@ -20,6 +20,7 @@ import {
   createRestoreChangeRequest,
   createRestoreFieldChangeRequest,
   createRestoreViewChangeRequest,
+  createRevertChangeRequest,
   createUpdateChangeRequest,
   createUpdateFieldChangeRequest,
   createUpdateViewChangeRequest,
@@ -40,6 +41,7 @@ import {
   listRecordsPaged,
   listViews,
   previewFieldConversion,
+  previewRecordRevert,
 } from "./handlers";
 
 // Base domain oRPC handler slices (bases / records / views); aggregated in router.ts.
@@ -117,6 +119,7 @@ export const baseRouter = {
           input.submittedBy,
           input.message,
           input.autoMerge,
+          input.name,
         );
       case "reorder":
         return createReorderFieldsChangeRequest(
@@ -192,8 +195,15 @@ export const recordRouter = {
           input.message,
           input.autoMerge,
         );
+      case "revert": {
+        const { recordId, operation: _op, ...rest } = input;
+        return createRevertChangeRequest(recordId, rest);
+      }
     }
   }),
+  revertPreview: os.records.revertPreview.handler(async ({ input }) =>
+    previewRecordRevert(input.recordId, input.toBeforeChangeRequestId),
+  ),
   listChangeRequests: os.records.listChangeRequests.handler(async ({ input }) =>
     listRecordChangeRequests(input.recordId, { limit: input.limit }),
   ),

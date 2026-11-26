@@ -1,6 +1,11 @@
 import "server-only";
 
 import { type DefaultTreeAdapterMap, defaultTreeAdapter, parse, serialize } from "parse5";
+import {
+  AIRAPP_BROWSER_CONSOLE_CHANNEL,
+  AIRAPP_BROWSER_CONSOLE_LEVELS,
+  AIRAPP_BROWSER_CONSOLE_MESSAGE_LIMIT,
+} from "../utils/browser-console";
 import { getLocalPreviewUpstream } from "./local-preview-registry";
 
 const HOP_BY_HOP_REQUEST_HEADERS = new Set([
@@ -29,6 +34,8 @@ const PREVIEW_RETRYABLE_STATUSES = new Set([502, 503, 504]);
 const PREVIEW_MAX_GET_ATTEMPTS = 5;
 const PREVIEW_RETRY_DELAY_MS = 500;
 const PREVIEW_VERSION_HEADER = "x-busabase-preview-version";
+const PREVIEW_DEPLOYMENT_HEADER = "x-busabase-preview-deployment";
+const PREVIEW_PROTOCOL_HEADER = "x-busabase-preview-protocol";
 const unavailablePreviewVersion = () =>
   new Response("This preview is still updating. Refresh the Site preview and try again shortly.", {
     status: 503,
@@ -61,6 +68,47 @@ const previewRedirectLocation = (location: string, nodeId: string): string => {
 const previewBridgeScript = (previewPrefix: string): string =>
   [
     "(() => {",
+    "  if (window.parent && window.parent !== window && window.console) {",
+    `    const channel = ${JSON.stringify(AIRAPP_BROWSER_CONSOLE_CHANNEL)};`,
+    `    const messageLimit = ${AIRAPP_BROWSER_CONSOLE_MESSAGE_LIMIT};`,
+    "    const format = (value, depth = 0, seen = new WeakSet()) => {",
+    '      if (typeof value === "string") return value.slice(0, 2048);',
+    '      if (value === null || typeof value === "number" || typeof value === "boolean") return value;',
+    "      if (value instanceof Error) return String(value.stack || value.message).slice(0, messageLimit);",
+    '      if (typeof value !== "object") return String(value).slice(0, 2048);',
+    '      if (seen.has(value)) return "[Circular]";',
+    '      if (depth >= 3) return "[Object]";',
+    "      seen.add(value);",
+    "      if (Array.isArray(value)) return value.slice(0, 20).map((item) => format(item, depth + 1, seen));",
+    "      const result = Object.create(null);",
+    "      let count = 0;",
+    "      for (const key in value) {",
+    "        if (!Object.prototype.hasOwnProperty.call(value, key)) continue;",
+    '        if (count++ >= 20) { result["…"] = "[Truncated]"; break; }',
+    '        try { result[key] = format(value[key], depth + 1, seen); } catch { result[key] = "[Unreadable]"; }',
+    "      }",
+    "      return result;",
+    "    };",
+    "    const sendConsole = (level, args) => {",
+    "      try {",
+    "        const message = args.slice(0, 16).map((value) => {",
+    "          const formatted = format(value);",
+    '          return typeof formatted === "string" ? formatted : JSON.stringify(formatted);',
+    '        }).join(" ").slice(0, messageLimit);',
+    "        window.parent.postMessage({ channel, level, message }, window.location.origin);",
+    "      } catch {}",
+    "    };",
+    `    for (const level of ${JSON.stringify(AIRAPP_BROWSER_CONSOLE_LEVELS)}) {`,
+    "      const native = window.console[level];",
+    '      if (typeof native !== "function") continue;',
+    "      window.console[level] = (...args) => {",
+    "        sendConsole(level, args);",
+    "        return native.apply(window.console, args);",
+    "      };",
+    "    }",
+    '    window.addEventListener?.("error", (event) => sendConsole("error", [event.error || event.message]));',
+    '    window.addEventListener?.("unhandledrejection", (event) => sendConsole("error", ["Unhandled rejection:", event.reason]));',
+    "  }",
     `  const previewPrefix = ${JSON.stringify(previewPrefix)};`,
     "  const rewriteUrl = (value) => {",
     "    const raw = String(value);",
@@ -281,6 +329,8 @@ export async function proxyLocalPreview(
   const requestUrl = new URL(req.url);
   const search = requestUrl.search;
   const targetHeaders = new Headers(upstreamEntry.headers);
+  const expectedProtocol = targetHeaders.get(PREVIEW_PROTOCOL_HEADER);
+  const expectedDeployment = targetHeaders.get(PREVIEW_DEPLOYMENT_HEADER);
   const requestedVersions = requestUrl.searchParams.getAll("__busabase_site_version");
   const previewVersion =
     targetHeaders.get(PREVIEW_VERSION_HEADER) ??
@@ -331,7 +381,11 @@ export async function proxyLocalPreview(
     // An accepted provider upload can still route to the previous Worker for a
     // short time. Never let that 200 body stand in for the requested version,
     // including during rollout from a legacy gate with no version marker.
-    if (previewVersion && upstream.headers.get(PREVIEW_VERSION_HEADER) !== previewVersion) {
+    if (
+      (previewVersion && upstream.headers.get(PREVIEW_VERSION_HEADER) !== previewVersion) ||
+      (expectedProtocol && upstream.headers.get(PREVIEW_PROTOCOL_HEADER) !== expectedProtocol) ||
+      (expectedDeployment && upstream.headers.get(PREVIEW_DEPLOYMENT_HEADER) !== expectedDeployment)
+    ) {
       await upstream.body?.cancel().catch(() => undefined);
       if (attempt === maxAttempts) return unavailablePreviewVersion();
       await new Promise((resolve) => setTimeout(resolve, PREVIEW_RETRY_DELAY_MS));

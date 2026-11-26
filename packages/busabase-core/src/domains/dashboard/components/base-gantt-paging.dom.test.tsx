@@ -11,7 +11,10 @@ import { SubmitPermissionProvider } from "./split-submit-button";
 // The timeline never drains the Base. A view of up to 500 rows is drawn whole
 // (five pages, loaded on their own). A larger one is read a period at a time:
 // the rows whose span overlaps it, one page at first, then "Load more".
-vi.mock("wouter", () => ({ useSearch: () => "" }));
+vi.mock("wouter", () => ({
+  useSearch: () => "",
+  useLocation: () => ["/base/tasks/gantt", vi.fn()],
+}));
 vi.mock("openlib/ui/dashboard", () => ({
   SPALink: ({ children, ...props }: { children: ReactNode; href: string }) => (
     <a {...props}>{children}</a>
@@ -156,9 +159,9 @@ describe("Gantt rows", () => {
   it("draws a view of up to 500 rows whole, as before", async () => {
     const { client, listRecordsPage } = makeClient({ total: 250, inPeriod: 0 });
     renderGantt(client);
-    // Three pages of 100 load one after another. A 1s wait gives up at 200
-    // when the suite is busy (the coverage run).
-    await waitFor(() => expect(screen.getAllByRole("link")).toHaveLength(250), { timeout: 5_000 });
+    await waitFor(() => expect(screen.getAllByRole("link")).toHaveLength(250), {
+      timeout: 5_000,
+    });
     expect(screen.queryByTestId("gantt-period")).toBeNull();
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
     expect(periodCalls(listRecordsPage)).toHaveLength(0);
@@ -248,6 +251,33 @@ describe("Gantt rows", () => {
         fieldType: "date",
         direction: "asc",
       });
+    },
+  );
+
+  it.each(["month", "week"] as const)(
+    "keeps a one-day record readable at the %s scale",
+    async (scale) => {
+      const oneDayTask = record(1);
+      oneDayTask.headCommit.payload = {
+        title: "One-day launch",
+        start: THIS_MONTH_DAY(2),
+        end: THIS_MONTH_DAY(2),
+      };
+      const client = {
+        listRecordsPage: vi.fn(async () => ({
+          records: [oneDayTask],
+          total: 1,
+          totalPages: 1,
+          page: 1,
+        })),
+      } as unknown as BusabaseDashboardApiClient;
+      renderGantt(client, {
+        activeView: { ...view, config: { ...view.config, ganttScale: scale } },
+      });
+
+      const bar = await screen.findByTestId(`gantt-bar-${oneDayTask.id}`);
+      expect(bar.style.width).toBe("72px");
+      expect(bar.textContent).toContain("One-day launch");
     },
   );
 

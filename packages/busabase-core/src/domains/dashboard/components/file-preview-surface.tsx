@@ -7,7 +7,10 @@ import { Button } from "kui/button";
 import { Download } from "lucide-react";
 import { useEffect } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
-import { buildAssetDownloadUrl } from "../../assets/utils/asset-content-url";
+import {
+  useAssetContentUrlResolver,
+  useAssetDownloadUrlBuilder,
+} from "../../assets/hooks/asset-content-url-context";
 import {
   FILE_NODE_TEXT_PREVIEW_MAX_LINES,
   type FileNodeTextAsset,
@@ -42,9 +45,10 @@ export function isFileFullscreenMime(mimeType: string) {
  */
 export function FileDownloadButton({ assetId, fileName }: { assetId: string; fileName: string }) {
   const label = useCoreI18n().nodeDetail.downloadFile;
+  const buildDownloadUrl = useAssetDownloadUrlBuilder();
   return (
     <Button asChild size="icon-sm" title={label} variant="outline">
-      <a aria-label={label} download={fileName} href={buildAssetDownloadUrl(assetId, fileName)}>
+      <a aria-label={label} download={fileName} href={buildDownloadUrl(assetId, fileName)}>
         <Download aria-hidden className="size-3.5" />
       </a>
     </Button>
@@ -112,15 +116,24 @@ function TextFilePreviewSurface({
  * images, video playback position, and PDF document state survive the round trip.
  */
 export function FilePreviewSurface(props: FilePreviewSurfaceProps) {
-  const { mimeType, name, textSource, url } = props;
+  const resolveAssetUrl = useAssetContentUrlResolver();
+  const { mimeType, name, textSource } = props;
+  const assetId = props.assetId ?? textSource?.asset.id;
+  const url = assetId && resolveAssetUrl ? resolveAssetUrl(assetId) : props.url;
+  const resolvedProps = { ...props, url };
   const hostViewer = useAssetHostViewer({ mimeType, name, url });
   // A host viewer claiming the file (e.g. a CSV as a table) goes first.
   const textKind = textSource && !hostViewer ? fileNodeTextKind(textSource.asset) : null;
   if (textSource && textKind) {
-    return <TextFilePreviewSurface {...props} kind={textKind} source={textSource} />;
+    return <TextFilePreviewSurface {...resolvedProps} kind={textKind} source={textSource} />;
   }
   return (
-    <FilePreviewFrame {...props} hostViewer={Boolean(hostViewer)} text={null} textLoading={false} />
+    <FilePreviewFrame
+      {...resolvedProps}
+      hostViewer={Boolean(hostViewer)}
+      text={null}
+      textLoading={false}
+    />
   );
 }
 
@@ -223,6 +236,11 @@ function FilePreviewFrame({
             mimeType={mimeType}
             name={name}
             url={url}
+            viewerOptions={
+              mimeType === "application/pdf"
+                ? { fitToContainer: true, pdfScrollMode: "continuous" }
+                : undefined
+            }
           />
         </div>
       )}

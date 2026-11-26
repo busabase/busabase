@@ -1,11 +1,10 @@
 "use client";
 
-import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
-import { Download, Expand, ExternalLink, RotateCcw } from "lucide-react";
+import { Expand, RotateCcw } from "lucide-react";
 import { Fragment, type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
-import { buildAssetDownloadUrl } from "../../assets/utils/asset-content-url";
+import { useAssetContentUrlResolver } from "../../assets/hooks/asset-content-url-context";
 import {
   attachmentGridLayout,
   attachmentGridThumbnailSize,
@@ -14,8 +13,8 @@ import { getAttachmentRefs, getSafeAttachmentUrl } from "../helpers/field";
 import { attachmentFileType } from "../utils/attachment-file-type";
 import { attachmentTextKind } from "../utils/text-attachment";
 import { AttachmentFileIcon } from "./attachment-file-icon";
-import { AttachmentViewer } from "./attachment-viewer";
-import { DialogContent } from "./localized-dialog-content";
+import { AttachmentFileList } from "./attachment-file-list";
+import { AttachmentPreviewDialog } from "./attachment-preview-dialog";
 
 type Attachment = ReturnType<typeof getAttachmentRefs>[number];
 
@@ -119,8 +118,7 @@ export function AttachmentValuePreview({
   compact = false,
   className = "",
   renderTrigger,
-  resolveUrl = getSafeAttachmentUrl,
-  minimalChrome = false,
+  resolveUrl: resolveUrlOverride,
   thumbnailOnly = false,
   presentation = "flow",
   rowHeight = 48,
@@ -143,14 +141,14 @@ export function AttachmentValuePreview({
   ) => ReactNode;
   /** Override only for trusted local files; stored fields keep the safe URL resolver. */
   resolveUrl?: (item: Attachment) => string | null;
-  /**
-   * Drop the generic "File preview" subtitle and the single-file switcher
-   * chip that otherwise repeats the dialog title. Opt-in so existing
-   * dashboard/record-detail callers keep their current dialog unchanged.
-   */
   minimalChrome?: boolean;
 }) {
   const messages = useCoreI18n();
+  const resolveAssetUrl = useAssetContentUrlResolver();
+  const resolveUrl =
+    resolveUrlOverride ??
+    ((item: Attachment) =>
+      item.assetId && resolveAssetUrl ? resolveAssetUrl(item.assetId) : getSafeAttachmentUrl(item));
   const attachments = getAttachmentRefs(value);
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -181,8 +179,6 @@ export function AttachmentValuePreview({
   });
   const opener = useRef<HTMLElement | null>(null);
   const selectedEntry = entries.find((entry) => entry.key === selectedKey) ?? entries[0];
-  const selected = selectedEntry?.item;
-  const selectedUrl = selected ? resolveUrl(selected) : null;
   const thumbnailSize = attachmentGridThumbnailSize(rowHeight, width, attachments.length);
   const controlHeight = Math.min(32, Math.max(16, rowHeight - 8));
   const layout = attachmentGridLayout(
@@ -330,6 +326,9 @@ export function AttachmentValuePreview({
                 data-attachment-expand
                 data-attachment-overflow
                 onClick={(event) => event.stopPropagation()}
+                onMouseDown={(event) => {
+                  if (event.button === 0) event.preventDefault();
+                }}
                 ref={expandTrigger}
                 style={{
                   height: controlHeight,
@@ -358,6 +357,9 @@ export function AttachmentValuePreview({
                 setSelectedKey(entries[visible.length]?.key ?? null);
                 setOpen(true);
               }}
+              onMouseDown={(event) => {
+                if (event.button === 0) event.preventDefault();
+              }}
               type="button"
             >
               {`+${attachments.length - visible.length}`}
@@ -370,6 +372,9 @@ export function AttachmentValuePreview({
                 className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 data-attachment-expand
                 onClick={(event) => event.stopPropagation()}
+                onMouseDown={(event) => {
+                  if (event.button === 0) event.preventDefault();
+                }}
                 ref={expandTrigger}
                 title={`${messages.shell.expand}: ${messages.nodeDetail.filePreviewTitle} (Shift+Space)`}
                 type="button"
@@ -397,140 +402,32 @@ export function AttachmentValuePreview({
                 {attachments.length} {messages.common.items}
               </span>
             </div>
-            <div className="grid max-h-[min(24rem,60vh)] gap-1 overflow-y-auto">
-              {entries.map(({ item, key }) => {
-                const url = resolveUrl(item);
-                return (
-                  <button
-                    aria-label={item.fileName}
-                    className="flex min-w-0 items-center gap-2 rounded p-1.5 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    data-attachment-cell-item
-                    key={key}
-                    onClick={(event) => openAttachment(event, key)}
-                    title={item.fileName}
-                    type="button"
-                  >
-                    <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded border bg-muted/40">
-                      {url && !attachmentTextKind(item) && item.mimeType.startsWith("image/") ? (
-                        <img alt="" className="size-full object-contain" loading="lazy" src={url} />
-                      ) : (
-                        <AttachmentFileIcon
-                          fileName={item.fileName}
-                          mimeType={item.mimeType}
-                          size={32}
-                        />
-                      )}
-                    </span>
-                    <span className="min-w-0 break-all">{item.fileName}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <AttachmentFileList
+              active={expanded}
+              className="max-h-[min(24rem,60vh)]"
+              entries={entries.map((entry) => ({ ...entry, url: resolveUrl(entry.item) }))}
+              onSelect={(entry, event) => openAttachment(event, entry.key)}
+            />
           </PopoverContent>
         ) : null}
       </Popover>
-      <Dialog onOpenChange={setOpen} open={open}>
-        <DialogContent
-          {...(minimalChrome ? { "aria-describedby": undefined } : {})}
-          className="flex max-h-[90dvh] max-w-4xl flex-col overflow-y-auto"
-          data-testid="attachment-preview-dialog"
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            (opener.current?.isConnected
-              ? opener.current
-              : (expandTrigger.current ?? container.current)
-            )?.focus({
-              preventScroll: true,
-            });
-            openingFromExpanded.current = false;
-          }}
-        >
-          <DialogHeader className="min-w-0 shrink-0">
-            <DialogTitle className="line-clamp-2 break-all pr-6" title={selected?.fileName}>
-              {selected?.fileName ?? messages.nodeDetail.filePreviewTitle}
-            </DialogTitle>
-            {minimalChrome ? null : (
-              <DialogDescription>{messages.nodeDetail.filePreviewTitle}</DialogDescription>
-            )}
-          </DialogHeader>
-          {attachments.length > 1 ? (
-            <p
-              className="shrink-0 text-muted-foreground text-xs tabular-nums"
-              data-attachment-position
-              aria-live="polite"
-            >
-              {entries.indexOf(selectedEntry) + 1} / {attachments.length}
-            </p>
-          ) : null}
-          {minimalChrome && attachments.length <= 1 ? null : (
-            <div className="flex max-h-28 min-w-0 shrink-0 flex-wrap gap-1.5 overflow-y-auto">
-              {entries.map(({ item, key }, index) => (
-                <button
-                  aria-pressed={key === selectedEntry?.key}
-                  className={`inline-flex max-w-full items-center gap-1.5 rounded border px-2 py-1 text-xs ${key === selectedEntry?.key ? "border-primary bg-primary/10" : "hover:bg-accent"}`}
-                  data-attachment-index={index}
-                  key={key}
-                  onClick={() => setSelectedKey(key)}
-                  title={item.fileName}
-                  type="button"
-                >
-                  <AttachmentFileIcon fileName={item.fileName} mimeType={item.mimeType} />
-                  <span className="truncate">{item.fileName}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {selected ? (
-            <AttachmentFilePreviewBody item={selected} key={selectedEntry.key} url={selectedUrl} />
-          ) : (
-            <p className="text-muted-foreground text-sm">
-              {messages.nodeDetail.filePreviewUnavailable}
-            </p>
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-/**
- * One file's preview plus its open / download links — the body of the
- * attachment preview dialog, shared with the `drive` field's folder tree so a
- * file opens the same way wherever it is listed. `url` is the already-resolved
- * safe address (`getSafeAttachmentUrl`); null renders the "unavailable" note.
- */
-export function AttachmentFilePreviewBody({ item, url }: { item: Attachment; url: string | null }) {
-  const messages = useCoreI18n();
-  if (!url) {
-    return (
-      <p className="text-muted-foreground text-sm">{messages.nodeDetail.filePreviewUnavailable}</p>
-    );
-  }
-  return (
-    <>
-      <AttachmentViewer
-        key={JSON.stringify([item.id, url, item.fileName, item.mimeType, item.size])}
-        file={{ name: item.fileName, mimeType: item.mimeType, url, size: item.size }}
+      <AttachmentPreviewDialog
+        entries={entries.map((entry) => ({ ...entry, url: resolveUrl(entry.item) }))}
+        selectedKey={selectedEntry?.key ?? null}
+        onSelect={setSelectedKey}
+        onOpenChange={setOpen}
+        open={open}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          (opener.current?.isConnected
+            ? opener.current
+            : (expandTrigger.current ?? container.current)
+          )?.focus({
+            preventScroll: true,
+          });
+          openingFromExpanded.current = false;
+        }}
       />
-      <div className="flex shrink-0 flex-wrap gap-3 text-sm">
-        <a
-          className="inline-flex items-center gap-1 text-primary hover:underline"
-          href={url}
-          rel="noreferrer"
-          target="_blank"
-        >
-          <ExternalLink aria-hidden className="size-4" />
-          {messages.nodeDetail.openFileInNewTab}
-        </a>
-        <a
-          className="inline-flex items-center gap-1 text-primary hover:underline"
-          download={item.fileName}
-          href={item.assetId ? buildAssetDownloadUrl(item.assetId, item.fileName) : url}
-        >
-          <Download aria-hidden className="size-4" />
-          {messages.nodeDetail.downloadFile}
-        </a>
-      </div>
     </>
   );
 }

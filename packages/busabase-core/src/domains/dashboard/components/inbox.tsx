@@ -22,6 +22,7 @@ import {
 import { formatListTime, formatUserRefLabel } from "../helpers/format";
 import {
   getLocationPath,
+  INBOX_PAGE_SIZES,
   INBOX_VIEW_KEYS,
   type InboxPageSize,
   type InboxQueueContext,
@@ -352,6 +353,7 @@ function InboxList({
           onPageSizeChange={(next) => {
             setPagination(1, next);
           }}
+          pageSizeOptions={INBOX_PAGE_SIZES}
           onRetry={() => {
             void (isMentions ? mentionsQuery.refetch() : snapshotQuery.refetch());
           }}

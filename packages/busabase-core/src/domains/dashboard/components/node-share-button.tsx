@@ -20,6 +20,8 @@ import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { formatDayKey, localDateToCalendarDay } from "../../base/utils/date-value";
 import {
   expiryIsoForPreset,
+  generateSharePassword,
+  isSharePasswordLengthValid,
   nearestSharedAncestor,
   publicPreviewUrl,
   type ShareExpiryPreset,
@@ -160,11 +162,14 @@ export function NodeShareDialog({
     }
   };
 
-  // Local drafts for the optional fields — a new password is only sent when the
-  // user typed one (empty box = leave the stored password untouched); expiry is
-  // a local `YYYY-MM-DDTHH:mm` string (from DayTimePicker) converted to ISO on submit.
+  // Local drafts for the optional fields. The password draft only exists while
+  // "Change" is open — turning protection on generates the password instead;
+  // expiry is a local `YYYY-MM-DDTHH:mm` string (from DayTimePicker) converted
+  // to ISO on submit.
+  const [passwordEditing, setPasswordEditing] = useState(false);
   const [passwordDraft, setPasswordDraft] = useState("");
   const [copied, setCopied] = useState(false);
+  const [linkAndPasswordCopied, setLinkAndPasswordCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<"share" | "embed">(canShareToWeb ? "share" : "embed");
   const [expiryPreset, setExpiryPreset] = useState<ShareExpiryPreset>("never");
   const [customExpiry, setCustomExpiry] = useState("");
@@ -245,15 +250,41 @@ export function NodeShareDialog({
     }
   };
 
-  const handlePassword = async (password: string | null) => {
+  // `null` removes the password. Returns whether it saved, so the editor only
+  // closes on success and a rejected value stays in the box to be fixed.
+  const handlePassword = async (password: string | null): Promise<boolean> => {
     try {
       await setShare.mutateAsync({ nodeId, scope: "public", password });
-      setPasswordDraft("");
       await invalidate();
       toast.success(t.updated);
+      return true;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t.failed);
+      return false;
     }
+  };
+
+  // Feishu-style: switching protection on does not ask the owner to invent a
+  // password — it generates one and shows it, ready to copy with the link.
+  const handlePasswordToggle = async (next: boolean) => {
+    setPasswordEditing(false);
+    setPasswordDraft("");
+    await handlePassword(next ? generateSharePassword() : null);
+  };
+
+  const startPasswordEdit = () => {
+    setPasswordDraft(share?.password ?? "");
+    setPasswordEditing(true);
+  };
+
+  const cancelPasswordEdit = () => {
+    setPasswordEditing(false);
+    setPasswordDraft("");
+  };
+
+  const savePasswordDraft = async () => {
+    if (!isSharePasswordLengthValid(passwordDraft)) return;
+    if (await handlePassword(passwordDraft)) cancelPasswordEdit();
   };
 
   const handleExpiry = async (preset: ShareExpiryPreset, customValue = customExpiry) => {
@@ -287,7 +318,25 @@ export function NodeShareDialog({
     }
   };
 
+  // One paste carries everything a recipient needs; the password stays out of
+  // the URL so it never lands in browser history or server logs.
+  const handleCopyLinkAndPassword = async () => {
+    if (!publicUrl || !share?.password) return;
+    try {
+      await navigator.clipboard.writeText(
+        fmt(t.linkAndPasswordClipboard, { url: publicUrl, password: share.password }),
+      );
+      setLinkAndPasswordCopied(true);
+      toast.success(t.linkAndPasswordCopied);
+      setTimeout(() => setLinkAndPasswordCopied(false), 1500);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t.failed);
+    }
+  };
+
   const busy = setShare.isPending;
+  const passwordDraftInvalid =
+    passwordDraft.length > 0 && !isSharePasswordLengthValid(passwordDraft);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen && hasUncopiedEmbedSecret && !window.confirm(t.closeUncopiedEmbedConfirm)) {
@@ -568,43 +617,137 @@ export function NodeShareDialog({
                         </div>
                       )}
 
-                      {/* Password — the value is never displayed; only a "set" state. */}
-                      <div className="space-y-1.5">
-                        <Label className="font-medium text-sm" htmlFor="node-share-password">
-                          {t.passwordLabel}
-                        </Label>
-                        <div className="flex items-center gap-2">
-                          <Input
-                            className="h-8 flex-1"
-                            id="node-share-password"
-                            onChange={(e) => setPasswordDraft(e.target.value)}
-                            placeholder={t.passwordPlaceholder}
-                            type="password"
-                            value={passwordDraft}
-                          />
-                          <Button
-                            disabled={busy || !passwordDraft}
-                            onClick={() => handlePassword(passwordDraft)}
-                            size="sm"
-                            type="button"
+                      {/* Password. Shown in plaintext to the people who can open
+                  this dialog (node managers — the server returns it to no one
+                  else), so the link and its password can be sent together at
+                  any time, not only at the moment it was set. */}
+                      <div className="space-y-2" data-testid="node-share-password">
+                        <div className="flex items-start justify-between gap-3">
+                          <Label
+                            className="flex flex-col gap-1"
+                            htmlFor="node-share-password-switch"
                           >
-                            {t.passwordLabel}
-                          </Button>
-                          {share?.hasPassword && (
-                            <Button
-                              disabled={busy}
-                              onClick={() => handlePassword(null)}
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                            >
-                              {t.passwordClear}
-                            </Button>
-                          )}
+                            <span className="font-medium text-sm">{t.passwordProtectionLabel}</span>
+                            <span className="text-muted-foreground text-xs">
+                              {t.passwordProtectionHint}
+                            </span>
+                          </Label>
+                          <Switch
+                            checked={share?.hasPassword ?? false}
+                            data-testid="node-share-password-switch"
+                            disabled={busy}
+                            id="node-share-password-switch"
+                            onCheckedChange={handlePasswordToggle}
+                          />
                         </div>
-                        <p className="text-muted-foreground text-xs">
-                          {share?.hasPassword ? t.passwordSet : t.passwordHint}
-                        </p>
+
+                        {share?.hasPassword &&
+                          (passwordEditing ? (
+                            <div className="space-y-1.5">
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  aria-describedby="node-share-password-length"
+                                  aria-invalid={passwordDraftInvalid}
+                                  aria-label={t.passwordLabel}
+                                  autoComplete="off"
+                                  autoFocus
+                                  className="h-8 flex-1 font-mono"
+                                  data-testid="node-share-password-input"
+                                  id="node-share-password"
+                                  onChange={(e) => setPasswordDraft(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") void savePasswordDraft();
+                                  }}
+                                  type="text"
+                                  value={passwordDraft}
+                                />
+                                <Button
+                                  data-testid="node-share-password-save"
+                                  disabled={busy || !isSharePasswordLengthValid(passwordDraft)}
+                                  onClick={() => void savePasswordDraft()}
+                                  size="sm"
+                                  type="button"
+                                >
+                                  {t.passwordSave}
+                                </Button>
+                                <Button
+                                  data-testid="node-share-password-cancel"
+                                  disabled={busy}
+                                  onClick={cancelPasswordEdit}
+                                  size="sm"
+                                  type="button"
+                                  variant="outline"
+                                >
+                                  {t.passwordCancel}
+                                </Button>
+                              </div>
+                              <p
+                                className={
+                                  passwordDraftInvalid
+                                    ? "text-destructive text-xs"
+                                    : "text-muted-foreground text-xs"
+                                }
+                                id="node-share-password-length"
+                              >
+                                {t.passwordLengthHint}
+                              </p>
+                            </div>
+                          ) : share.password !== null ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <code
+                                className="rounded-md bg-muted px-2 py-1 font-mono text-sm tracking-widest"
+                                data-testid="node-share-password-value"
+                              >
+                                {share.password}
+                              </code>
+                              <Button
+                                data-testid="node-share-password-edit"
+                                disabled={busy}
+                                onClick={startPasswordEdit}
+                                size="sm"
+                                type="button"
+                                variant="outline"
+                              >
+                                {t.passwordChange}
+                              </Button>
+                              {publicUrl && (
+                                <Button
+                                  data-testid="node-share-copy-link-and-password"
+                                  onClick={handleCopyLinkAndPassword}
+                                  size="sm"
+                                  type="button"
+                                >
+                                  {linkAndPasswordCopied ? (
+                                    <Check className="size-4" />
+                                  ) : (
+                                    <Copy className="size-4" />
+                                  )}
+                                  {t.copyLinkAndPassword}
+                                </Button>
+                              )}
+                            </div>
+                          ) : (
+                            // Locked before passwords became retrievable: only
+                            // the hash exists, so there is nothing to show.
+                            <div className="flex items-start justify-between gap-3">
+                              <p
+                                className="text-muted-foreground text-xs"
+                                data-testid="node-share-password-legacy"
+                              >
+                                {t.passwordLegacy}
+                              </p>
+                              <Button
+                                data-testid="node-share-password-edit"
+                                disabled={busy}
+                                onClick={startPasswordEdit}
+                                size="sm"
+                                type="button"
+                                variant="outline"
+                              >
+                                {t.passwordChange}
+                              </Button>
+                            </div>
+                          ))}
                       </div>
 
                       {/* Expiry */}

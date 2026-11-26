@@ -2,13 +2,15 @@
 
 import { Dialog, DialogContent, DialogTitle } from "kui/dialog";
 import { Play } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { TemplateDetailImage } from "./template-detail-image";
 
 interface TemplateVideoPreviewProps {
   src: string;
   /** The clip's own poster, or the screenshot `templateVideoTiles` fell back to. */
   poster?: string;
+  /** A composed tile image; the player still receives the original `poster`. */
+  posterImage?: ReactNode;
   title: string;
   playLabel: string;
   /** Names the clip in the player dialog. */
@@ -37,6 +39,7 @@ interface TemplateVideoPreviewProps {
 export function TemplateVideoPreview({
   src,
   poster,
+  posterImage,
   title,
   playLabel,
   clipTitle,
@@ -53,7 +56,7 @@ export function TemplateVideoPreview({
         className="group relative block w-full overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         {poster ? (
-          <TemplateDetailImage src={poster} alt={title} />
+          (posterImage ?? <TemplateDetailImage src={poster} alt={title} />)
         ) : (
           <div className="aspect-[16/10] w-full bg-muted" />
         )}

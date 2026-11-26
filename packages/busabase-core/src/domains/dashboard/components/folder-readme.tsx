@@ -4,6 +4,7 @@ import { markdownPreviewSource } from "openlib/utils/markdown-preview";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { useCoreI18n } from "../../../i18n";
+import { useResolvedAssetBody } from "../../assets/hooks/asset-content-url-context";
 import { HtmlPreviewSurface } from "../../rich-node/components/html-detail-view";
 import { mdComponents } from "./field-preview";
 import { usePreviewFullscreen } from "./preview-fullscreen";
@@ -24,8 +25,9 @@ interface Props {
  * is written through `PUT /nodes/{id}/content` (`kind: "folder"`, with
  * `bodyFormat: "html"` for an HTML page), by an agent or the API.
  */
-export function FolderReadme({ body, bodyFormat, node }: Props) {
+export function FolderReadme({ body: storedBody, bodyFormat, node }: Props) {
   const messages = useCoreI18n();
+  const body = useResolvedAssetBody(storedBody);
   return (
     <section
       aria-label={messages.nodeDetail.folderReadme}

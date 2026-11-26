@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "kui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
+import { Popover, PopoverTrigger } from "kui/popover";
 import { ToggleGroup, ToggleGroupItem } from "kui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
 import { cn } from "kui/utils";
@@ -16,8 +16,9 @@ import {
   Smartphone,
   X,
 } from "lucide-react";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
+import { ShareQrCode, ShareQrPopoverContent } from "../../dashboard/components/share-qr-code";
 import type { AirAppPreviewViewport } from "../hooks/use-airapp-preview-state";
 import type { AirAppRunnerKind } from "./runners/types";
 
@@ -36,6 +37,12 @@ export const absolutePreviewUrl = (url: string | null, origin: string): string |
   }
 };
 
+/** Keep the readable host visible while the full exact URL stays selected and copyable. */
+export const selectPreviewUrl = (input: HTMLInputElement): void => {
+  input.select();
+  input.scrollLeft = 0;
+};
+
 const isLoopback = (url: string): boolean => {
   const host = new URL(url).hostname;
   return (
@@ -52,6 +59,9 @@ interface AirAppPreviewToolsProps {
   refreshing?: boolean;
   refreshDisabled?: boolean;
   refreshLabel?: string;
+  shareable?: boolean;
+  sharingDisabled?: boolean;
+  previewAvailable?: boolean;
 }
 
 export function AirAppPreviewTools({
@@ -63,6 +73,9 @@ export function AirAppPreviewTools({
   refreshing = false,
   refreshDisabled = false,
   refreshLabel,
+  shareable = false,
+  sharingDisabled = false,
+  previewAvailable = Boolean(url),
 }: AirAppPreviewToolsProps) {
   const messages = useCoreI18n();
   const copy = messages.airapp.previewTools;
@@ -71,6 +84,7 @@ export function AirAppPreviewTools({
   const [copyFailedUrl, setCopyFailedUrl] = useState<string | null>(null);
   const absolute =
     typeof window === "undefined" ? null : absolutePreviewUrl(url, window.location.origin);
+  const accessDisabled = !absolute || refreshing || sharingDisabled;
 
   return (
     <TooltipProvider delayDuration={350}>
@@ -82,8 +96,14 @@ export function AirAppPreviewTools({
           <input
             aria-label={copy.link}
             className="h-10 min-w-28 flex-1 rounded-sm bg-transparent px-2 font-mono text-foreground text-xs outline-none selection:bg-primary/20 focus-visible:ring-2 focus-visible:ring-ring sm:h-8"
-            disabled={!absolute || refreshing}
-            onFocus={(event) => event.currentTarget.select()}
+            disabled={accessDisabled}
+            dir="ltr"
+            onFocus={(event) => selectPreviewUrl(event.currentTarget)}
+            onClick={(event) => selectPreviewUrl(event.currentTarget)}
+            onMouseUp={(event) => event.preventDefault()}
+            onBlur={(event) => {
+              event.currentTarget.scrollLeft = 0;
+            }}
             placeholder={copy.link}
             readOnly
             value={absolute ?? ""}
@@ -108,7 +128,7 @@ export function AirAppPreviewTools({
                     : copy.copyLink
                 }
                 className="size-10 shrink-0 text-muted-foreground hover:text-foreground sm:size-8"
-                disabled={!absolute || refreshing}
+                disabled={accessDisabled}
                 onClick={async () => {
                   if (!absolute) return;
                   try {
@@ -135,7 +155,7 @@ export function AirAppPreviewTools({
               <Button
                 aria-label={copy.newWindow}
                 className="size-10 shrink-0 text-muted-foreground hover:text-foreground sm:size-8"
-                disabled={!absolute || refreshing}
+                disabled={accessDisabled}
                 onClick={() => {
                   if (absolute) window.open(absolute, "_blank", "noopener,noreferrer,popup");
                 }}
@@ -146,13 +166,16 @@ export function AirAppPreviewTools({
                 <ExternalLink aria-hidden="true" className="size-3.5" />
               </Button>
             </PreviewToolTip>
-            <Popover onOpenChange={setPhoneOpen} open={Boolean(absolute && phoneOpen)}>
+            <Popover
+              onOpenChange={setPhoneOpen}
+              open={Boolean(absolute && phoneOpen && !sharingDisabled)}
+            >
               <PreviewToolTip label={copy.phone} suppressed={phoneOpen}>
                 <PopoverTrigger asChild>
                   <Button
                     aria-label={copy.phone}
                     className="size-10 shrink-0 text-muted-foreground hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground sm:size-8"
-                    disabled={!absolute || refreshing}
+                    disabled={accessDisabled}
                     size="icon-sm"
                     type="button"
                     variant="ghost"
@@ -162,7 +185,12 @@ export function AirAppPreviewTools({
                 </PopoverTrigger>
               </PreviewToolTip>
               {absolute && phoneOpen ? (
-                <PreviewPhonePopup kind={kind} onClose={() => setPhoneOpen(false)} url={absolute} />
+                <PreviewPhonePopup
+                  kind={kind}
+                  onClose={() => setPhoneOpen(false)}
+                  shareable={shareable}
+                  url={absolute}
+                />
               ) : null}
             </Popover>
             {onRefresh ? (
@@ -174,7 +202,7 @@ export function AirAppPreviewTools({
                   aria-label={refreshLabel ?? messages.airapp.site.publish.refreshPreview}
                   aria-busy={refreshing}
                   className="size-10 shrink-0 rounded-full text-muted-foreground hover:text-foreground sm:size-8"
-                  disabled={!absolute || refreshing || refreshDisabled}
+                  disabled={!previewAvailable || refreshing || refreshDisabled}
                   onClick={onRefresh}
                   size="icon-sm"
                   type="button"
@@ -196,7 +224,7 @@ export function AirAppPreviewTools({
         <ToggleGroup
           aria-label={copy.viewport}
           className="grid shrink-0 grid-cols-2 gap-0.5 rounded-md bg-muted/50 p-0.5"
-          disabled={!absolute || refreshing}
+          disabled={!previewAvailable || refreshing}
           onValueChange={(device) => {
             if (device === "desktop" || device === "mobile") setViewport(device);
           }}
@@ -220,6 +248,9 @@ export function AirAppPreviewTools({
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+        {shareable && !phoneOpen ? (
+          <p className="w-full text-muted-foreground text-xs leading-relaxed">{copy.sharedLink}</p>
+        ) : null}
         {copyFailedUrl === absolute && absolute ? (
           <p className="w-full text-muted-foreground text-xs" role="status">
             {messages.airapp.site.releases.copyFailed}
@@ -252,21 +283,23 @@ function PreviewToolTip({
   );
 }
 
-function PreviewPhonePopup(props: { url: string; kind: AirAppRunnerKind; onClose: () => void }) {
+function PreviewPhonePopup(props: {
+  url: string;
+  kind: AirAppRunnerKind;
+  shareable?: boolean;
+  onClose: () => void;
+}) {
   const titleId = useId();
   const descriptionId = useId();
   return (
-    <PopoverContent
+    <ShareQrPopoverContent
       align="end"
       aria-describedby={descriptionId}
       aria-labelledby={titleId}
-      className="max-h-[var(--radix-popover-content-available-height)] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto p-3 motion-reduce:animate-none"
-      collisionPadding={12}
       data-airapp-preview-phone=""
-      sideOffset={8}
     >
       <PreviewPhoneContent {...props} descriptionId={descriptionId} titleId={titleId} />
-    </PopoverContent>
+    </ShareQrPopoverContent>
   );
 }
 
@@ -276,41 +309,18 @@ export function PreviewPhoneContent({
   onClose,
   titleId,
   descriptionId,
+  shareable = false,
 }: {
   url: string;
   kind: AirAppRunnerKind;
   onClose?: () => void;
   titleId?: string;
   descriptionId?: string;
+  shareable?: boolean;
 }) {
   const messages = useCoreI18n();
   const copy = messages.airapp.previewTools;
   const browserOnly = kind === "browser";
-  const [qr, setQr] = useState<{ url: string; image: string } | null>(null);
-  const [qrError, setQrError] = useState(false);
-
-  useEffect(() => {
-    if (browserOnly) return;
-    let cancelled = false;
-    setQrError(false);
-    const generate = async () => {
-      try {
-        const { default: QRCode } = await import("qrcode");
-        const image = await QRCode.toDataURL(url, {
-          errorCorrectionLevel: "M",
-          margin: 4,
-          width: 512,
-        });
-        if (!cancelled) setQr({ url, image });
-      } catch {
-        if (!cancelled) setQrError(true);
-      }
-    };
-    void generate();
-    return () => {
-      cancelled = true;
-    };
-  }, [url, browserOnly]);
 
   return (
     <div className="space-y-3">
@@ -332,27 +342,14 @@ export function PreviewPhoneContent({
         ) : null}
       </div>
       {!browserOnly ? (
-        qr?.url === url ? (
-          <img
-            alt={messages.share.qrAlt}
-            className="mx-auto aspect-square w-48 max-w-full rounded-sm"
-            data-airapp-preview-qr=""
-            height={192}
-            src={qr.image}
-            width={192}
-          />
-        ) : qrError ? (
-          <p className="text-destructive text-sm" role="alert">
-            {messages.share.qrFailed}
-          </p>
-        ) : (
-          <div aria-label={copy.loadingQr} className="grid h-48 place-items-center" role="status">
-            <Loader2 aria-hidden="true" className="size-5 animate-spin text-muted-foreground" />
-          </div>
-        )
+        <ShareQrCode
+          imageData={{ "data-airapp-preview-qr": "" }}
+          loadingLabel={copy.loadingQr}
+          url={url}
+        />
       ) : null}
       <p className="text-muted-foreground text-xs leading-relaxed" id={descriptionId}>
-        {browserOnly ? copy.browserOnly : copy.signIn}
+        {browserOnly ? copy.browserOnly : shareable ? copy.sharedLink : copy.signIn}
       </p>
       {!browserOnly && isLoopback(url) ? (
         <p className="rounded-sm bg-muted/40 p-2 text-muted-foreground text-xs leading-relaxed">

@@ -55,6 +55,8 @@ export type VaultItemInput = z.infer<typeof VaultItemInputSchema>;
 
 export const UpdateVaultSettingsInputSchema = z.object({
   items: z.array(VaultItemInputSchema).max(200),
+  /** Cloud: explicit acknowledgement of the current Site deletion impact. */
+  confirmationToken: z.string().max(4096).optional(),
 });
 export type UpdateVaultSettingsDTO = z.infer<typeof UpdateVaultSettingsInputSchema>;
 

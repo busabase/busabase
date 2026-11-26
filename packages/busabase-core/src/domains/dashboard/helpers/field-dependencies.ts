@@ -37,6 +37,8 @@ export function getFieldDependencies(
       config.fieldOrderSlugs?.includes(field.slug) ||
       config.hiddenFieldSlugs?.includes(field.slug) ||
       config.fieldWidths?.[field.slug] !== undefined ||
+      config.fieldSummaries?.[field.slug] !== undefined ||
+      config.groupBy?.some(matchesViewField) ||
       [
         config.coverFieldSlug,
         config.stackByFieldSlug,

@@ -184,6 +184,7 @@ export interface NodeVO {
   position: number;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string | null;
   baseId: string | null;
   children: NodeVO[];
   /**
@@ -226,6 +227,7 @@ export type {
   GridRowHeight,
   LookupComputedVO,
   RecordLinkVO,
+  RecordRevertPreviewVO,
   RecordVO,
   ViewConfigVO,
   ViewFilterConditionVO,
@@ -233,18 +235,31 @@ export type {
   ViewFilterGroupVO,
   ViewFilterOperator,
   ViewFilterVO,
+  ViewGroupByVO,
   ViewSortVO,
+  ViewSummaryFunction,
   ViewType,
   ViewVO,
 } from "../domains/base/types";
 export {
+  ALWAYS_SET_FIELD_TYPES,
+  CHECKBOX_VIEW_SUMMARY_FUNCTIONS,
+  FILLED_VIEW_SUMMARY_FUNCTIONS,
   GRID_ROW_HEIGHT_PRESETS,
   GRID_ROW_HEIGHTS,
+  GROUPABLE_FIELD_TYPES,
   getGridRowHeight,
+  getViewSummaryFunctions,
   isGridRowHeight,
+  isViewSummaryFunction,
+  isViewSummaryFunctionAllowed,
   LOOKUP_SOURCE_LIMIT,
+  NUMERIC_AGGREGATE_FIELD_TYPES,
+  NUMERIC_VIEW_SUMMARY_FUNCTIONS,
   VIEW_FIELD_MAX_WIDTH,
   VIEW_FIELD_MIN_WIDTH,
+  VIEW_GROUP_MAX_LEVELS,
+  VIEW_SUMMARY_FUNCTIONS,
 } from "../domains/base/types";
 
 export type {

@@ -1,21 +1,23 @@
 import type { BusabaseTaskClient, TaskDefinition } from "./types";
 
 /**
- * Changing an existing record: update, delete (archive), or restore — one task
- * with an `operation`, rather than three `records_*_change_request` tools whose
- * names differ by one word in the middle.
+ * Changing an existing record: update, delete (archive), restore, or revert
+ * — one task with an `operation`, rather than four `records_*_change_request`
+ * tools whose names differ by one word in the middle.
  *
  * Worth stating plainly in the tool description because the wire semantics are
  * not what the names suggest: `delete` archives (reversible), it does not erase.
  */
 
-const OPERATIONS = ["update", "delete", "restore"] as const;
+const OPERATIONS = ["update", "delete", "restore", "revert"] as const;
 type RecordOperation = (typeof OPERATIONS)[number];
 
 export interface RecordChangeInput {
   recordId: string;
   operation: RecordOperation;
   fields?: unknown;
+  toBeforeChangeRequestId?: string;
+  expectedPlanFingerprint?: string;
   message?: string;
   submittedBy?: string;
   autoMerge?: boolean;
@@ -36,14 +38,20 @@ const mergeIntent = (input: RecordChangeInput): { autoMerge?: boolean } => {
 export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
   name: "record_change_request",
   cliPath: ["records", "change-request"],
-  summary: "Propose a change to an existing record (update / delete / restore)",
+  summary: "Propose a change to an existing record (update / delete / restore / revert)",
   guidance:
     "If this job may already have a playbook, call playbooks search first. " +
-    "Review is permission-aware for all three operations, decided server-side: the change merges " +
+    "Review is permission-aware for every operation, decided server-side: the change merges " +
     "immediately when your key has write access on the Base's node and lands as a pending " +
     "ChangeRequest otherwise — check the response's `materialized` field to see which happened. " +
     "Pass `requireReview` (or explicit `autoMerge: false`) when the user asks to only propose and wait for a person — a write-capable key would otherwise publish immediately. " +
     "`delete` ARCHIVES the record — it is reversible with `restore`, not an erase. " +
+    "To undo changes — the user says a change was wrong, or asks to undo or revert one — use `revert` " +
+    "with `toBeforeChangeRequestId` (an id from records_list_change_requests) instead of re-applying old " +
+    "values by hand: it returns the record to its state just before that change request by undoing it and " +
+    "every later one in one new change request. Call records_revert_preview first to show the user what " +
+    "it will undo, then pass its `planFingerprint` as `expectedPlanFingerprint` so the revert is refused if the " +
+    "record changed in between. " +
     "For update, `fields` is keyed by field slug and only needs the fields you are changing; " +
     "if you set the Base's PRIMARY (first) field, keep it a short human-readable title.",
   annotations: { readOnly: false, destructive: false },
@@ -61,6 +69,20 @@ export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
       kind: "json",
       appliesWhen: { param: "operation", values: ["update"] },
       description: 'New values keyed by field slug, e.g. {"status":"published"} (update only).',
+    },
+    {
+      name: "toBeforeChangeRequestId",
+      kind: "string",
+      appliesWhen: { param: "operation", values: ["revert"] },
+      description:
+        "Revert only: a merged change request from this record's history. It and every later change to the record are undone.",
+    },
+    {
+      name: "expectedPlanFingerprint",
+      kind: "string",
+      appliesWhen: { param: "operation", values: ["revert"] },
+      description:
+        "Revert only: the `planFingerprint` from records_revert_preview. The revert is refused (409 plan_changed) if the record changed since that preview.",
     },
     {
       name: "message",
@@ -86,10 +108,11 @@ export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
     'busabase-cli records change-request --record-id rec_1 --operation update --fields-json \'{"status":"published"}\'',
     'busabase-cli records change-request --record-id rec_1 --operation update --fields-json \'{"status":"published"}\' --require-review',
     "busabase-cli records change-request --record-id rec_1 --operation delete",
+    "busabase-cli records change-request --record-id rec_1 --operation revert --to-before-change-request-id crq_1",
   ],
   execute: async (client: BusabaseTaskClient, input: RecordChangeInput) => {
     // Straight pass-through: `records.changeRequest` carries the same
-    // update/delete/restore discriminator this task exposes.
+    // update/delete/restore/revert discriminator this task exposes.
     type RecordInput = Parameters<BusabaseTaskClient["records"]["changeRequest"]>[0];
     const common = {
       recordId: input.recordId,
@@ -114,6 +137,21 @@ export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
         ...common,
         operation: "delete",
         deleteMode: "archive",
+        ...mergeIntent(input),
+      } as RecordInput);
+    }
+    if (input.operation === "revert") {
+      if (!input.toBeforeChangeRequestId) {
+        throw new Error('operation "revert" requires `toBeforeChangeRequestId`.');
+      }
+      // The same server-side revert the dashboard's History panel submits.
+      return client.records.changeRequest({
+        ...common,
+        operation: "revert",
+        toBeforeChangeRequestId: input.toBeforeChangeRequestId,
+        ...(input.expectedPlanFingerprint
+          ? { expectedPlanFingerprint: input.expectedPlanFingerprint }
+          : {}),
         ...mergeIntent(input),
       } as RecordInput);
     }

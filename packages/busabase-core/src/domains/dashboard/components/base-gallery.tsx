@@ -8,10 +8,10 @@ import type {
 } from "busabase-contract/types";
 import { ImageOff, Paperclip, RotateCcw } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
-import { isFileFieldType } from "../../base/field-types";
+import { isFileFieldType, isPeopleFieldType } from "../../base/field-types";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { resolveCoverField } from "../../base/utils/view-field-resolution";
 import { getRecordTitle } from "../helpers/change-request";
@@ -22,8 +22,12 @@ import { useSourceViewSlug } from "../helpers/source-view-context";
 import { withSourceView } from "../helpers/source-view-url";
 import type { RecordsPagination } from "../helpers/view-types";
 import type { RecordFindControl } from "../hooks/use-record-find";
+import {
+  RecordFindHighlightedText,
+  useRecordFindHighlighter,
+} from "../hooks/use-record-find-highlight";
 import { CoverVideo } from "./cover-video";
-import { LookupFieldValue } from "./field-preview";
+import { FieldValuePreview, LookupFieldValue } from "./field-preview";
 import { RecordCollectionFeedback } from "./record-collection-feedback";
 
 // Card min-width per size preset — column count is left to CSS `auto-fill`
@@ -35,9 +39,32 @@ const CARD_MIN_WIDTH: Record<GalleryCardSize, string> = {
   large: "300px",
 };
 
+function CardField({
+  field,
+  showFieldLabels,
+  children,
+}: {
+  field: BaseFieldVO;
+  showFieldLabels: boolean;
+  children: ReactNode;
+}) {
+  const resolveIString = useIString();
+  return (
+    <div className="min-w-0 text-xs" data-field-slug={field.slug}>
+      {showFieldLabels ? (
+        <div className="truncate text-[10px] text-muted-foreground uppercase tracking-wide">
+          {resolveIString(field.name)}
+        </div>
+      ) : null}
+      {children}
+    </div>
+  );
+}
+
 function GalleryCard({
   record,
   fields,
+  relationRecords,
   coverField,
   coverFit,
   showFieldLabels,
@@ -47,6 +74,7 @@ function GalleryCard({
 }: {
   record: RecordVO;
   fields: BaseFieldVO[];
+  relationRecords: RecordVO[];
   coverField: BaseFieldVO | null;
   coverFit: GalleryCoverFit;
   showFieldLabels: boolean;
@@ -56,7 +84,6 @@ function GalleryCard({
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
-  const resolveIString = useIString();
   const currentSearch = useSearch();
   const sourceViewSlug = useSourceViewSlug();
   const title = getRecordTitle(record, messages);
@@ -64,7 +91,9 @@ function GalleryCard({
   const coverMedia = coverField ? pickCoverMedia(record.headCommit.payload[coverField.slug]) : null;
   const coverClassName = `h-full w-full transition-transform duration-150 ease-out motion-reduce:transition-none motion-safe:pointer-fine:group-hover:scale-105 ${coverFit === "fit" ? "object-contain" : "object-cover"}`;
   // The primary field is the card title — don't repeat it in the body.
-  const primaryFieldSlug = getPrimaryField(record.base)?.slug;
+  const primaryField = getPrimaryField(record.base);
+  const primaryFieldSlug = primaryField?.slug;
+  const highlightTitle = useRecordFindHighlighter(primaryField);
   const bodyFields = fields.filter(
     (field) => field.slug !== primaryFieldSlug && field.slug !== coverField?.slug,
   );
@@ -125,42 +154,41 @@ function GalleryCard({
           )}
           title={title}
         >
-          {title}
+          {highlightTitle(title)}
         </Link>
         {bodyFields.map((field) => {
+          const rawValue = record.headCommit.payload[field.slug];
+          if (field.type === "relation" || isPeopleFieldType(field.type)) {
+            return (
+              <CardField field={field} showFieldLabels={showFieldLabels} key={field.id}>
+                <FieldValuePreview
+                  field={field}
+                  fieldUsers={record.fieldUsers}
+                  records={relationRecords}
+                  value={rawValue}
+                />
+              </CardField>
+            );
+          }
           if (field.type === "lookup") {
             return (
-              <div className="min-w-0 text-xs" key={field.id}>
-                {showFieldLabels ? (
-                  <div className="truncate text-[10px] text-muted-foreground uppercase tracking-wide">
-                    {resolveIString(field.name)}
-                  </div>
-                ) : null}
+              <CardField field={field} showFieldLabels={showFieldLabels} key={field.id}>
                 <LookupFieldValue
                   computed={record.computedFields?.[field.slug]}
                   field={field}
                   fieldUsers={record.fieldUsers}
-                  value={record.headCommit.payload[field.slug]}
+                  records={relationRecords}
+                  value={rawValue}
                 />
-              </div>
+              </CardField>
             );
           }
-          const preview = getFieldPreviewText(
-            field,
-            record.headCommit.payload[field.slug],
-            messages,
-            locale,
-          );
+          const preview = getFieldPreviewText(field, rawValue, messages, locale);
           if (!preview || preview === "-") {
             return null;
           }
           return (
-            <div className="min-w-0" key={field.id}>
-              {showFieldLabels ? (
-                <div className="truncate text-[10px] text-muted-foreground uppercase tracking-wide">
-                  {resolveIString(field.name)}
-                </div>
-              ) : null}
+            <CardField field={field} showFieldLabels={showFieldLabels} key={field.id}>
               <div className="truncate text-muted-foreground text-xs" title={preview}>
                 {isFileFieldType(field.type) ? (
                   <span className="inline-flex items-center gap-1">
@@ -168,10 +196,10 @@ function GalleryCard({
                     {preview}
                   </span>
                 ) : (
-                  preview
+                  <RecordFindHighlightedText field={field} text={preview} />
                 )}
               </div>
-            </div>
+            </CardField>
           );
         })}
         {faded && onRestore ? (
@@ -199,6 +227,7 @@ export function BusaBaseGallery({
   base,
   fields,
   records,
+  relationRecords = records,
   archivedRecords = [],
   showArchivedRecords = false,
   onRestoreRecord,
@@ -209,6 +238,8 @@ export function BusaBaseGallery({
   base: BaseVO | null;
   fields: BaseFieldVO[];
   records: RecordVO[];
+  /** Loaded relation targets used to render relation field titles on cards. */
+  relationRecords?: RecordVO[];
   archivedRecords?: RecordVO[];
   showArchivedRecords?: boolean;
   onRestoreRecord?: (record: RecordVO) => Promise<void>;
@@ -259,6 +290,7 @@ export function BusaBaseGallery({
           coverFit={coverFit}
           fields={fields}
           key={record.id}
+          relationRecords={relationRecords}
           record={record}
           showFieldLabels={showFieldLabels}
         />
@@ -273,6 +305,7 @@ export function BusaBaseGallery({
               fields={fields}
               key={record.id}
               onRestore={onRestoreRecord ? () => void onRestoreRecord(record) : undefined}
+              relationRecords={relationRecords}
               record={record}
               showFieldLabels={showFieldLabels}
             />

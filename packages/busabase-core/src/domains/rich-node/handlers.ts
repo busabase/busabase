@@ -34,7 +34,7 @@ import {
 } from "../../logic/commit-payload-schemas";
 import { insertCommit } from "../../logic/commits";
 import { id, now } from "../../logic/kernel";
-import { assertNodePermission } from "../../logic/node-acl";
+import { assertNodePermission, getEffectiveNodeLevel } from "../../logic/node-acl";
 import { resolveVisibleNodeOfTypes } from "../../logic/node-resolve";
 import { registerNodeRuntime } from "../../logic/node-runtime";
 import { assertNodeStorageId } from "../../logic/node-storage-key";
@@ -184,13 +184,13 @@ export const getWhiteboardDetail = async (
   document: await readRichNodeDocument(node.id, "whiteboard"),
 });
 
-export const getWorkflowDetail = async (
-  node: NodePO,
-): Promise<{ type: "workflow"; node: NodeVO; document: WorkflowDocument }> => ({
-  type: "workflow",
-  node: await resolveNodeVO(node),
-  document: await readRichNodeDocument(node.id, "workflow"),
-});
+export const getWorkflowDetail = async (node: NodePO) =>
+  ({
+    type: "workflow",
+    node: await resolveNodeVO(node),
+    document: await readRichNodeDocument(node.id, "workflow"),
+    viewerPermissionLevel: (await getEffectiveNodeLevel(node.id)) ?? "read",
+  }) as const;
 
 export const getHtmlDetail = async (
   node: NodePO,

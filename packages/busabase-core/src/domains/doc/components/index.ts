@@ -1,4 +1,9 @@
-export { DocEditor, type DocEditorProps, type DocOutlineItem } from "./doc-editor";
+export {
+  DocEditor,
+  type DocEditorHandle,
+  type DocEditorProps,
+  type DocOutlineItem,
+} from "./doc-editor";
 export {
   areDocOutlinesEqual,
   DocTableOfContents,

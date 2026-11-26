@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { InstallEventVO, InstallPlanVO } from "busabase-contract/domains/install/types";
 import * as React from "react";
@@ -432,7 +432,7 @@ describe("InstallFromGithubModal independent multilingual folders", () => {
       fireEvent.click(screen.getByRole("button", { name: messages.install }));
       if (field === "name") {
         expect(await screen.findByText(messages.folderNameRequired)).toBeTruthy();
-        expect(document.activeElement).toBe(input);
+        await waitFor(() => expect(document.activeElement).toBe(input));
         expect(input.getAttribute("aria-invalid")).toBe("true");
       } else {
         expect(await screen.findByText(messages.installUnknown)).toBeTruthy();

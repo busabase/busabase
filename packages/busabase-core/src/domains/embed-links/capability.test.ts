@@ -3,6 +3,7 @@ import {
   decodeEmbedCapability,
   EMBED_SECURITY_HEADERS,
   embedCapabilityCookieName,
+  embedResponseHeaders,
   embedSecurityHeaders,
   encodeEmbedCapability,
   parseEmbedBootstrap,
@@ -24,6 +25,14 @@ describe("embed capability bootstrap", () => {
       id: idA,
       secret,
     });
+    expect(parseEmbedIframeCapability(`/embed/${idA}/node`, secret, "iframe")).toEqual({
+      id: idA,
+      secret,
+    });
+    // Asset reads take their token themselves; they are not an embed page.
+    expect(
+      parseEmbedIframeCapability(`/embed/${idA}/assets/astabc/raw`, secret, "iframe"),
+    ).toBeNull();
     expect(parseEmbedIframeCapability(`/embed/${idA}/detail`, secret, "iframe")).toBeNull();
     expect(parseEmbedIframeCapability(`/embed/change-request/${idA}`, secret, "iframe")).toBeNull();
     expect(parseEmbedBootstrap(`/embed/${idA}`, secret, "iframe")).toBeNull();
@@ -54,6 +63,9 @@ describe("embed capability bootstrap", () => {
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
       "x-frame-options": "DENY",
+      "cross-origin-embedder-policy": "credentialless",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "cross-origin",
     });
   });
 
@@ -63,6 +75,9 @@ describe("embed capability bootstrap", () => {
       "content-security-policy": "frame-ancestors *",
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
+      "cross-origin-embedder-policy": "credentialless",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "cross-origin",
     });
     expect(
       embedSecurityHeaders({
@@ -74,10 +89,33 @@ describe("embed capability bootstrap", () => {
       "content-security-policy": "frame-ancestors https://agent.example http://localhost:4173",
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
+      "cross-origin-embedder-policy": "credentialless",
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-resource-policy": "cross-origin",
     });
     expect(embedSecurityHeaders({ mode: "top-level-only", allowedOrigins: [] })).toHaveProperty(
       "x-frame-options",
       "DENY",
     );
   });
+
+  it.each(["", "/node", "/airapp", "/record-detail", "/change-request"])(
+    "permits the entry and typed content in an isolated publisher without broadening the frame policy: %s",
+    (suffix) => {
+      const headers = new Headers(
+        embedResponseHeaders(`/embed/${idA}${suffix}`, {
+          mode: "origins",
+          allowedOrigins: ["https://publisher.example"],
+        }),
+      );
+      expect(headers.get("cross-origin-embedder-policy")).toBe("credentialless");
+      expect(headers.get("cross-origin-resource-policy")).toBe("cross-origin");
+      expect(headers.get("cross-origin-opener-policy")).toBe("same-origin");
+      expect(headers.get("content-security-policy")).toBe(
+        "frame-ancestors https://publisher.example",
+      );
+      expect(headers.get("cache-control")).toContain("no-store");
+      expect(headers.has("access-control-allow-origin")).toBe(false);
+    },
+  );
 });

@@ -1,4 +1,8 @@
 import type { EmbedLinkVO } from "busabase-contract/contract/embed-link-schemas";
+import {
+  SHARE_PASSWORD_MAX_LENGTH,
+  SHARE_PASSWORD_MIN_LENGTH,
+} from "busabase-contract/contract/schemas";
 
 export type ShareExpiryPreset = "never" | "1-day" | "7-days" | "30-days" | "custom";
 
@@ -61,3 +65,38 @@ export const nearestSharedAncestor = <T extends { nodeId: string }>(
   }
   return null;
 };
+
+const GENERATED_SHARE_PASSWORD_DIGITS = 6;
+const GENERATED_SHARE_PASSWORD_RANGE = 10 ** GENERATED_SHARE_PASSWORD_DIGITS;
+// The largest multiple of the range that fits in a uint32. Draws at or above it
+// are thrown away and redrawn, because folding them in with `%` would make the
+// low codes (000000–967295) slightly likelier than the rest — modulo bias. A
+// redraw happens for ~0.02% of draws, so the loop is effectively one pass.
+const GENERATED_SHARE_PASSWORD_LIMIT =
+  Math.floor(2 ** 32 / GENERATED_SHARE_PASSWORD_RANGE) * GENERATED_SHARE_PASSWORD_RANGE;
+
+/**
+ * A fresh share password: six digits, uniformly random, from the platform's
+ * CSPRNG (`crypto.getRandomValues`, in browsers and Node alike). Digits rather
+ * than words because the code is meant to be read out or retyped from a chat
+ * message; the unlock route's failed-attempt limit is what makes six enough.
+ */
+export const generateSharePassword = (
+  getRandomValues: (array: Uint32Array<ArrayBuffer>) => unknown = (array) =>
+    globalThis.crypto.getRandomValues(array),
+): string => {
+  const draw = new Uint32Array(1);
+  let value: number;
+  do {
+    getRandomValues(draw);
+    value = draw[0] ?? GENERATED_SHARE_PASSWORD_LIMIT;
+  } while (value >= GENERATED_SHARE_PASSWORD_LIMIT);
+  return String(value % GENERATED_SHARE_PASSWORD_RANGE).padStart(
+    GENERATED_SHARE_PASSWORD_DIGITS,
+    "0",
+  );
+};
+
+/** The same length bounds `nodes.share.set` enforces, for inline validation. */
+export const isSharePasswordLengthValid = (password: string): boolean =>
+  password.length >= SHARE_PASSWORD_MIN_LENGTH && password.length <= SHARE_PASSWORD_MAX_LENGTH;

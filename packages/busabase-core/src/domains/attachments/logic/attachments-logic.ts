@@ -265,6 +265,43 @@ export const deleteBrandingLogoByUrl = async (
   return { deletedRows, deletedObjects };
 };
 
+export interface BrandingLogoBytes {
+  bytes: Buffer;
+  mimeType: string;
+}
+
+/**
+ * Read back the bytes behind a branding logo URL this app minted.
+ *
+ * Same ownership rule as `deleteBrandingLogoByUrl` — a URL resolves only when
+ * it is the public URL of a branding attachment row — so a host can derive
+ * icon sizes from the stored object through its own storage adapter instead of
+ * fetching its own public URL over the network (which a container often
+ * cannot reach). `null` for any other URL.
+ */
+export const readBrandingLogoBytes = async (
+  db: BusabaseDatabase,
+  logoUrl: string,
+): Promise<BrandingLogoBytes | null> => {
+  const url = logoUrl.trim();
+  if (!url) return null;
+
+  const candidates = await db
+    .select({ storageKey: attachments.storageKey, mimeType: attachments.mimeType })
+    .from(attachments)
+    .where(
+      and(
+        eq(attachments.context, BRANDING_ATTACHMENT_CONTEXT),
+        eq(attachments.userId, BRANDING_USER_ID),
+      ),
+    );
+  const owned = candidates.find(
+    (row: { storageKey: string }) => storage.getPublicUrl(row.storageKey) === url,
+  );
+  if (!owned) return null;
+  return { bytes: await storage.getObject(owned.storageKey), mimeType: owned.mimeType };
+};
+
 /**
  * Node-avatar (icon) uploads — a THIRD, separate attachment scope alongside
  * the Asset library and the branding logo above. Like a branding logo, a node

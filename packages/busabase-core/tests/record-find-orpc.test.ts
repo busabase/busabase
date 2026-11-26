@@ -215,6 +215,20 @@ describe(`current-view record find (${process.env.RECORD_FIND_TEST_POSTGRES_URL 
     expect((await find("hidden-destination")).total).toBe(0);
   });
 
+  it("searches only the fields a saved View shows unless a hidden field is chosen", async () => {
+    const curatedViewId = await createView("find-curated-columns", {
+      filters: [],
+      sorts: [{ fieldSlug: "title", direction: "asc" }],
+      visibleFieldSlugs: ["title", "status"],
+    });
+    expect((await find("尾部关键词", undefined, { viewId: curatedViewId })).total).toBe(0);
+    expect((await find("尾部关键词", "notes", { viewId: curatedViewId })).total).toBe(1);
+    expect((await find("needle437", undefined, { viewId: curatedViewId })).total).toBe(1);
+    expect((await find("待交付", undefined, { viewId: curatedViewId })).total).toBe(250);
+    // Without a View there are no hidden columns: every common field is searched.
+    expect((await find("尾部关键词")).total).toBe(1);
+  });
+
   it("uses option labels, and keeps source-only fields outside common find", async () => {
     expect((await find("待交付")).total).toBe(250);
     expect((await find("重点", "tags")).total).toBe(100);

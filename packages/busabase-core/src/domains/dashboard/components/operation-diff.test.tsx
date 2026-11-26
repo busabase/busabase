@@ -1,5 +1,6 @@
 import type { ChangeRequestVO, OperationVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
+import { gridGroupSummaryMessages } from "../../../i18n/grid-group-summary";
 import { gridRowHeightMessages } from "../../../i18n/grid-row-height";
 import { coreMessagesEn } from "../../../i18n/messages";
 import { describeViewConfig, getOperationFieldChanges } from "./operation-diff";
@@ -215,4 +216,42 @@ it("describes grouped filter precedence and conjunction-only changes", () => {
   ).find((rule) => rule.kind === "filter");
   expect(andRule?.label).toMatch(/Title.* AND \(Status.* OR Status.*\)/);
   expect(andRule?.key).not.toEqual(orRule?.key);
+});
+
+it("describes table grouping and column summaries readably, in the host locale", () => {
+  const withFields = {
+    ...changeRequest,
+    base: {
+      ...(changeRequest as ChangeRequestVO).base,
+      fields: [
+        { id: "fld_stage", slug: "stage", name: "Stage", type: "select" },
+        { id: "fld_done", slug: "done", name: "Done", type: "checkbox" },
+        { id: "fld_amount", slug: "amount", name: "Amount", type: "number" },
+      ],
+    },
+  } as unknown as ChangeRequestVO;
+  const config = {
+    filters: [],
+    sorts: [],
+    groupBy: [{ fieldSlug: "done", direction: "desc" }],
+    fieldSummaries: { amount: "sum", done: "percent_checked" },
+  };
+  const rules = describeViewConfig(withFields, config, coreMessagesEn).filter(
+    (rule) => rule.kind === "group" || rule.kind === "summary",
+  );
+  expect(rules.map((rule) => rule.label)).toEqual([
+    "Group by · Done · Checked first",
+    "Summary · Amount · Sum",
+    "Summary · Done · Percent checked",
+  ]);
+  const zh = describeViewConfig(
+    withFields,
+    config,
+    coreMessagesEn,
+    undefined,
+    undefined,
+    false,
+    gridGroupSummaryMessages["zh-CN"],
+  ).filter((rule) => rule.kind === "summary");
+  expect(zh.map((rule) => rule.label)).toContain("汇总 · Done · 勾选率");
 });

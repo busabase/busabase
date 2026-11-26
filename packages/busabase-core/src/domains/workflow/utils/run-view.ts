@@ -6,7 +6,7 @@ import type {
 } from "busabase-contract/domains/workflow/run";
 
 /** How a step looks in the selected run, for the canvas highlight. */
-export type WorkflowRunStepState = "done" | "paused" | "failed";
+export type WorkflowRunStepState = "done" | "paused" | "waiting_approval" | "failed";
 
 /** Poll fast while the server is still working on a run. */
 export const WORKFLOW_RUN_ACTIVE_POLL_MS = 2_000;
@@ -111,7 +111,7 @@ export const orderedWorkflowRunSteps = (outputs: WorkflowRun["outputs"]): Workfl
 
 /**
  * Per-step state of one run, for highlighting the canvas: every finished step
- * is `done`, the step a Wait/approval is parked on is `paused`, and the step a
+ * is `done`, a waiting step is `paused` or `waiting_approval`, and the step a
  * failed run stopped at is `failed`.
  */
 export const workflowRunStepStates = (
@@ -120,7 +120,9 @@ export const workflowRunStepStates = (
   const states = new Map<string, WorkflowRunStepState>();
   if (!run) return states;
   for (const id of Object.keys(run.outputs)) states.set(id, "done");
-  if (run.pause && isWorkflowRunPaused(run.status)) states.set(run.pause.nodeId, "paused");
+  if (run.pause && isWorkflowRunPaused(run.status)) {
+    states.set(run.pause.nodeId, run.status === "waiting_approval" ? "waiting_approval" : "paused");
+  }
   if (run.status === "failed" && run.cursorNodeId) states.set(run.cursorNodeId, "failed");
   return states;
 };

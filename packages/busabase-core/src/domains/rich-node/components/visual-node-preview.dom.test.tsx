@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 import { coreMessagesByLocale } from "../../../i18n/catalog";
 import { isPinnableNode } from "../../dashboard/components/side-panel-sources";
+import { SubmitPermissionProvider } from "../../dashboard/components/split-submit-button";
 import { TopbarNodeActionsSlot, TopbarNodeInfoButton } from "../../dashboard/components/topbar";
 import { DashboardVisitorProvider } from "../../dashboard/visitor-context";
 import { WorkflowDetailView, WorkflowSidePanelPreview } from "./graph-detail-view";
@@ -85,7 +86,9 @@ vi.mock("@xyflow/react", async () => {
       const [nodes, setNodes] = React.useState(initial);
       return [nodes, setNodes, vi.fn()] as const;
     },
+    useNodesInitialized: () => true,
     useReactFlow: () => ({
+      getNode: vi.fn(),
       fitView: vi.fn(async () => true),
       getViewport: vi.fn(() => ({ x: 0, y: 0, zoom: 0.4 })),
       setViewport: vi.fn(async () => true),
@@ -201,6 +204,69 @@ afterEach(() => {
 });
 
 describe("visual node preview parity", () => {
+  it("uses the workflow's effective permission when it is narrower than the workspace", async () => {
+    const readOnlyOrpc = {
+      ...orpc,
+      nodes: {
+        ...orpc.nodes,
+        get: {
+          queryOptions: () => ({
+            queryKey: ["readonly-workflow"],
+            queryFn: async () => ({ ...workflowDetail, viewerPermissionLevel: "read" }),
+          }),
+        },
+      },
+    } as unknown as BusabaseQueryUtils;
+    render(
+      <Providers>
+        <SubmitPermissionProvider permissionLevel="write">
+          <WorkflowDetailView orpc={readOnlyOrpc} slug={workflowDetail.node.id} />
+          <TopbarNodeActionsSlot />
+        </SubmitPermissionProvider>
+      </Providers>,
+    );
+    const editor = await screen.findByTestId("workflow-editor");
+    expect(editor.getAttribute("data-draggable")).toBe("false");
+    expect(
+      (
+        screen.getByRole("button", {
+          name: coreMessagesByLocale.en.richNodes.addStep,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+  });
+  it.each(["read", "changeRequest"] as const)(
+    "respects %s workflow editing permission",
+    async (level) => {
+      const messages = coreMessagesByLocale.en;
+      render(
+        <Providers>
+          <SubmitPermissionProvider permissionLevel={level}>
+            <WorkflowDetailView orpc={orpc} slug={workflowDetail.node.id} />
+            <TopbarNodeActionsSlot />
+          </SubmitPermissionProvider>
+        </Providers>,
+      );
+      const editor = await screen.findByTestId("workflow-editor");
+      const add = screen.getByRole("button", {
+        name: messages.richNodes.addStep,
+      }) as HTMLButtonElement;
+      const remove = screen.getByRole("button", {
+        name: messages.richNodes.deleteSelection,
+      }) as HTMLButtonElement;
+      const readOnly = level === "read";
+      expect(add.disabled).toBe(readOnly);
+      expect(remove.disabled).toBe(readOnly);
+      expect(editor.getAttribute("data-draggable")).toBe(String(!readOnly));
+      expect(editor.getAttribute("data-connectable")).toBe(String(!readOnly));
+      expect(
+        (screen.getByLabelText(messages.richNodes.label) as HTMLInputElement).closest("fieldset")
+          ?.disabled,
+      ).toBe(readOnly);
+      fireEvent.click(add);
+      expect(editor.getAttribute("data-node-count")).toBe(readOnly ? "1" : "2");
+    },
+  );
   it("keeps the same Whiteboard editor mounted through URL-backed fullscreen", async () => {
     window.history.replaceState(null, "", "/whiteboard/product-launch-whiteboard?demo=node-types");
     const messages = coreMessagesByLocale.en;

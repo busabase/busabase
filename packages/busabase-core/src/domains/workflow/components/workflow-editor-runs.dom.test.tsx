@@ -18,6 +18,12 @@ import {
 } from "../../dashboard/visitor-context";
 import { WorkflowDetailView } from "../../rich-node/components/graph-detail-view";
 
+const canvasMock = vi.hoisted(() => ({
+  nodes: [] as { id: string; position: { x: number; y: number }; selected?: boolean }[],
+  setViewport: vi.fn(async () => true),
+  initialized: true,
+}));
+
 // Render each step through its real node component so the run highlight is
 // observable; the rest of React Flow is irrelevant here.
 vi.mock("@xyflow/react", async () => {
@@ -33,20 +39,33 @@ vi.mock("@xyflow/react", async () => {
       nodes,
       nodeTypes,
     }: {
-      nodes: { id: string; type: string; data: unknown }[];
+      nodes: {
+        id: string;
+        type: string;
+        data: unknown;
+        position: { x: number; y: number };
+        selected?: boolean;
+      }[];
       nodeTypes: Record<string, ComponentType<{ id: string; data: unknown; selected: boolean }>>;
-    }) => (
-      <div data-testid="workflow-editor">
-        {nodes.map((node) => {
-          const NodeComponent = nodeTypes[node.type];
-          return NodeComponent ? (
-            <div data-flow-node={node.id} key={node.id}>
-              <NodeComponent data={node.data} id={node.id} selected={false} />
-            </div>
-          ) : null;
-        })}
-      </div>
-    ),
+    }) => {
+      canvasMock.nodes = nodes;
+      return (
+        <div data-testid="workflow-editor">
+          {nodes.map((node) => {
+            const NodeComponent = nodeTypes[node.type];
+            return NodeComponent ? (
+              <div
+                data-flow-node={node.id}
+                data-flow-selected={String(Boolean(node.selected))}
+                key={node.id}
+              >
+                <NodeComponent data={node.data} id={node.id} selected={false} />
+              </div>
+            ) : null;
+          })}
+        </div>
+      );
+    },
     ReactFlowProvider: ({ children }: { children: ReactNode }) => children,
     useEdgesState: (initial: unknown[]) => {
       const [edges, setEdges] = React.useState(initial);
@@ -56,10 +75,15 @@ vi.mock("@xyflow/react", async () => {
       const [nodes, setNodes] = React.useState(initial);
       return [nodes, setNodes, vi.fn()] as const;
     },
+    useNodesInitialized: () => canvasMock.initialized,
     useReactFlow: () => ({
+      getNode: (id: string) => {
+        const node = canvasMock.nodes.find((entry) => entry.id === id);
+        return node ? { ...node, measured: { width: 224, height: 78 } } : undefined;
+      },
       fitView: vi.fn(async () => true),
       getViewport: vi.fn(() => ({ x: 0, y: 0, zoom: 1 })),
-      setViewport: vi.fn(async () => true),
+      setViewport: canvasMock.setViewport,
     }),
   };
 });
@@ -208,6 +232,9 @@ const stepNode = (container: HTMLElement, id: string) =>
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
+  canvasMock.setViewport.mockClear();
+  canvasMock.initialized = true;
   listRuns.mockClear();
   listBases.mockClear();
   saveContent.mockClear();
@@ -215,6 +242,50 @@ afterEach(() => {
 });
 
 describe("workflow editor Runs tab", () => {
+  it("selects and reveals a newly added step without refitting the whole graph", async () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(400);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(300);
+    const { container } = renderEditor("member");
+    const add = await screen.findByRole("button", { name: messages.richNodes.addStep });
+    expect(canvasMock.setViewport).not.toHaveBeenCalled();
+    fireEvent.click(add);
+    await waitFor(() => expect(canvasMock.setViewport).toHaveBeenCalledTimes(1));
+    expect(canvasMock.setViewport).toHaveBeenCalledWith(
+      { x: -360, y: 24, zoom: 1 },
+      { duration: 250 },
+    );
+    expect(container.querySelectorAll('[data-flow-selected="true"]')).toHaveLength(1);
+    expect(canvasMock.nodes).toHaveLength(3);
+    expect(canvasMock.nodes[2]?.selected).toBe(true);
+    expect(canvasMock.nodes[2]?.position).toEqual({ x: 512, y: 0 });
+  });
+
+  it("waits for measurements and honors reduced motion when revealing the step", async () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(400);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(300);
+    const matchMedia = window.matchMedia;
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      ...matchMedia(query),
+      matches: query === "(prefers-reduced-motion: reduce)",
+    }));
+    const { container } = renderEditor("member");
+    const add = await screen.findByRole("button", { name: messages.richNodes.addStep });
+    canvasMock.initialized = false;
+    fireEvent.click(add);
+    expect(canvasMock.nodes).toHaveLength(3);
+    expect(canvasMock.setViewport).not.toHaveBeenCalled();
+    canvasMock.initialized = true;
+    // A normal editor update observes the measurement-ready transition.
+    const runsTab = container.querySelector('[data-workflow-aside-tab="runs"]');
+    if (!runsTab) throw new Error("Runs tab missing");
+    fireEvent.mouseDown(runsTab, { button: 0, ctrlKey: false });
+    await waitFor(() => expect(canvasMock.setViewport).toHaveBeenCalledTimes(1));
+    expect(canvasMock.setViewport).toHaveBeenCalledWith(
+      { x: -360, y: 24, zoom: 1 },
+      { duration: 0 },
+    );
+  });
+
   it("keeps a custom trigger event selectable and offers a Base only for record events", async () => {
     const { container } = renderEditor("member");
     const eventSelect = await waitFor(() => {

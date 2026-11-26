@@ -61,18 +61,21 @@ function renderSetup(
   onCreateField = vi.fn().mockResolvedValue(undefined),
   onUpdateField = vi.fn().mockResolvedValue(undefined),
   originViewId?: string,
+  onConvertFieldType?: Parameters<typeof BaseSetupView>[0]["onConvertFieldType"],
+  editingBase = base,
 ) {
   const element = (level = permission) => (
     <CoreI18nProvider locale="en">
       <SubmitPermissionProvider permissionLevel={level}>
         <BaseSetupView
-          base={base}
-          bases={[base]}
+          base={editingBase}
+          bases={[editingBase]}
           draftScope="space:viewer"
           originViewId={originViewId}
           orpc={orpc}
           onCreateField={onCreateField}
           onUpdateField={onUpdateField}
+          onConvertFieldType={onConvertFieldType}
         />
       </SubmitPermissionProvider>
     </CoreI18nProvider>
@@ -261,5 +264,91 @@ describe("formula field settings recovery and permissions", () => {
     expect(save).toHaveBeenCalledOnce();
     await act(async () => finish?.());
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+});
+
+describe("field conversion with a new display name", () => {
+  it.each(["plain", "localized"] as const)(
+    "does not include a normalization-only %s name in a conversion",
+    async (kind) => {
+      const conversionBase: BaseVO = {
+        ...base,
+        fields: base.fields.map((item) =>
+          item.id === "fld_price"
+            ? { ...item, name: kind === "plain" ? " price " : { en: " price ", "zh-CN": "" } }
+            : item,
+        ),
+      };
+      const convert = vi.fn().mockResolvedValue(undefined);
+      renderSetup("manage", undefined, undefined, undefined, convert, conversionBase);
+      fireEvent.click(screen.getByRole("button", { name: "Rename price" }));
+      const dialog = screen.getByRole("dialog");
+      fireEvent.change(within(dialog).getByRole("combobox"), { target: { value: "text" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Request type change" }));
+      await waitFor(() =>
+        expect(convert).toHaveBeenCalledWith(
+          conversionBase,
+          "fld_price",
+          "text",
+          "null_on_missing",
+          {},
+        ),
+      );
+    },
+  );
+
+  it.each(["plain", "localized"] as const)(
+    "does not include a normalization-only %s name in a field update",
+    async (kind) => {
+      const editingBase: BaseVO = {
+        ...base,
+        fields: base.fields.map((item) =>
+          item.id === "fld_subtotal"
+            ? { ...item, name: kind === "plain" ? " subtotal " : { en: " subtotal ", "zh-CN": "" } }
+            : item,
+        ),
+      };
+      const update = vi.fn().mockResolvedValue(undefined);
+      renderSetup("manage", undefined, update, undefined, undefined, editingBase);
+      fireEvent.click(screen.getByRole("button", { name: "Rename subtotal" }));
+      setExpression("{price} * 4");
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      fireEvent.click(screen.getByRole("button", { name: "Save now" }));
+      await waitFor(() =>
+        expect(update).toHaveBeenCalledWith(
+          editingBase,
+          "fld_subtotal",
+          { formula: { expression: "{price} * 4" } },
+          { mergeImmediately: true },
+        ),
+      );
+    },
+  );
+
+  it("keeps the dialog open and refuses an empty name during conversion", async () => {
+    const convert = vi.fn().mockResolvedValue(undefined);
+    renderSetup("manage", undefined, undefined, undefined, convert);
+    fireEvent.click(screen.getByRole("button", { name: "Rename price" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByDisplayValue("price"), { target: { value: "   " } });
+    fireEvent.change(within(dialog).getByRole("combobox"), { target: { value: "text" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Request type change" }));
+    await within(dialog).findByText("Field name is required.");
+    expect(convert).not.toHaveBeenCalled();
+  });
+
+  it("submits the edited name together with the conversion instead of losing it", async () => {
+    const convert = vi.fn().mockResolvedValue(undefined);
+    renderSetup("manage", undefined, undefined, undefined, convert);
+    fireEvent.click(screen.getByRole("button", { name: "Rename price" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByDisplayValue("price"), { target: { value: "Amount" } });
+    fireEvent.change(within(dialog).getByRole("combobox"), { target: { value: "text" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Request type change" }));
+    await waitFor(() =>
+      expect(convert).toHaveBeenCalledWith(base, "fld_price", "text", "null_on_missing", {
+        name: "Amount",
+      }),
+    );
   });
 });

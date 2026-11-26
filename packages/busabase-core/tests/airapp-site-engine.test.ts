@@ -4,6 +4,7 @@ import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import type {
   AirAppSiteDomainsVO,
+  AirAppSiteEnvironmentVO,
   AirAppSiteReleasesVO,
 } from "busabase-contract/domains/airapp/contract";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -14,6 +15,7 @@ import type {
   AirAppSiteHost,
   AirAppSiteRecord,
 } from "../src/domains/airapp/utils/site-host";
+import { grantNodePrincipal } from "../src/logic/node-acl";
 import { busabaseRouter } from "../src/router";
 
 /**
@@ -36,6 +38,7 @@ const siteFiles = (home = "<h1>one</h1>") => [
 /** An in-memory provider that remembers what it was told to do. */
 const createFakeHost = (overrides: Partial<AirAppSiteHost> = {}) => {
   const records = new Map<string, AirAppSiteRecord>();
+  let environmentRevision: string | null = null;
   const empty = (): AirAppSiteRecord => ({
     address: "https://site-x.sites.test",
     previewVersion: null,
@@ -45,7 +48,10 @@ const createFakeHost = (overrides: Partial<AirAppSiteHost> = {}) => {
     liveDeployedAt: null,
     previewUpstream: null,
   });
-  const read = (nodeId: string) => records.get(nodeId) ?? empty();
+  const read = (nodeId: string) => ({
+    ...(records.get(nodeId) ?? empty()),
+    environmentRevision,
+  });
   const calls = {
     deployPreview: [] as AirAppSiteDeployInput[],
     goLive: [] as AirAppSiteDeployInput[],
@@ -61,6 +67,7 @@ const createFakeHost = (overrides: Partial<AirAppSiteHost> = {}) => {
       const next = {
         ...read(input.nodeId),
         previewVersion: input.version,
+        previewEnvironmentRevision: environmentRevision,
         previewDeployedAt: new Date(),
         previewUpstream: {
           target: "https://site-x-preview.sites.test",
@@ -75,6 +82,7 @@ const createFakeHost = (overrides: Partial<AirAppSiteHost> = {}) => {
       const next = {
         ...read(input.nodeId),
         liveVersion: input.version,
+        liveEnvironmentRevision: environmentRevision,
         isPublic: true,
         liveDeployedAt: new Date(),
       };
@@ -95,7 +103,13 @@ const createFakeHost = (overrides: Partial<AirAppSiteHost> = {}) => {
     },
     ...overrides,
   };
-  return { host, calls };
+  return {
+    host,
+    calls,
+    setEnvironmentRevision: (revision: string | null) => {
+      environmentRevision = revision;
+    },
+  };
 };
 
 describe("AirApp site engine", () => {
@@ -150,6 +164,392 @@ describe("AirApp site engine", () => {
     });
     return result;
   };
+
+  describe("Space Vault environment", () => {
+    const environment: AirAppSiteEnvironmentVO = {
+      available: true,
+      sources: [{ id: "vault-payment", key: "PAYMENT_TOKEN", kind: "secret" }],
+      bindings: [
+        {
+          envName: "PAYMENT_API_KEY",
+          vaultItemId: "vault-payment",
+          sourceKey: "PAYMENT_TOKEN",
+          kind: "secret",
+          status: "ready",
+        },
+      ],
+    };
+
+    const memberScope = {
+      actorId: "vault-member",
+      isSpaceManager: false,
+      permissionLevel: "changeRequest" as const,
+    };
+    const prepareLockedPreview = async () => {
+      const nodeId = await createApp();
+      const fake = createFakeHost();
+      fake.setEnvironmentRevision("env-one");
+      await runWithBusabaseContext(
+        { airAppSiteHost: fake.host, actorId: "vault-owner", isSpaceManager: true },
+        async () => {
+          await grantNodePrincipal(
+            nodeId,
+            { principalType: "user", principalId: memberScope.actorId, role: "write" },
+            "vault-owner",
+          );
+          await client.airapps.siteDeployPreview({ nodeId });
+        },
+      );
+      const readSite = fake.host.readSite.bind(fake.host);
+      fake.host.readSite = async (id) => ({
+        ...(await readSite(id)),
+        environmentDeploymentLock: { reason: "SPACE_VAULT_MANAGE_REQUIRED" },
+      });
+      return { ...fake, nodeId };
+    };
+
+    it("lets a member reuse an owner's current Vault preview without another upload", async () => {
+      const { nodeId, host, calls } = await prepareLockedPreview();
+      await expect(getLocalPreviewUpstream(nodeId, memberScope.actorId)).resolves.toBeUndefined();
+      const ownerUpstream = await getLocalPreviewUpstream(nodeId, "vault-owner");
+      expect(ownerUpstream).toBeDefined();
+      await runWithBusabaseContext({ airAppSiteHost: host, ...memberScope }, async () => {
+        expect(await client.airapps.siteDeployPreview({ nodeId })).toMatchObject({
+          outcome: "ok",
+          state: {
+            previewUrl: `/api/airapp-preview/${nodeId}/`,
+            previewStale: false,
+            previewEnvironmentStale: false,
+            environmentDeploymentLock: { reason: "SPACE_VAULT_MANAGE_REQUIRED" },
+          },
+        });
+      });
+      expect(calls.deployPreview).toHaveLength(1);
+      await expect(getLocalPreviewUpstream(nodeId, memberScope.actorId)).resolves.toEqual(
+        ownerUpstream,
+      );
+      await expect(getLocalPreviewUpstream(nodeId, "other-member")).resolves.toBeUndefined();
+    });
+
+    it.each(["files", "environment", "upstream", "first-preview"] as const)(
+      "refuses a member's Vault upload when %s requires deployment",
+      async (changed) => {
+        const { nodeId, host, calls, setEnvironmentRevision } = await prepareLockedPreview();
+        if (changed === "files") await editFile(nodeId, "public/index.html", "<h1>two</h1>");
+        if (changed === "environment") setEnvironmentRevision("env-two");
+        if (changed === "upstream" || changed === "first-preview") {
+          const readSite = host.readSite.bind(host);
+          host.readSite = async (id) => ({
+            ...(await readSite(id)),
+            previewUpstream: null,
+            ...(changed === "first-preview" ? { previewVersion: null } : {}),
+          });
+        }
+        await runWithBusabaseContext({ airAppSiteHost: host, ...memberScope }, async () => {
+          await expect(client.airapps.siteDeployPreview({ nodeId })).rejects.toMatchObject({
+            code: "FORBIDDEN",
+            data: { reason: "SPACE_VAULT_MANAGE_REQUIRED" },
+          });
+        });
+        expect(calls.deployPreview).toHaveLength(1);
+        await expect(getLocalPreviewUpstream(nodeId, memberScope.actorId)).resolves.toBeUndefined();
+      },
+    );
+
+    it("reports an invalid bundle before considering a member's Vault deployment lock", async () => {
+      const { nodeId, host, calls } = await prepareLockedPreview();
+      await editFile(nodeId, "worker.js", "export default {");
+      await runWithBusabaseContext({ airAppSiteHost: host, ...memberScope }, async () => {
+        const result = await client.airapps.siteDeployPreview({ nodeId });
+        expect(result.outcome).toBe("blocked");
+        expect(result.state.blockers.length).toBeGreaterThan(0);
+      });
+      expect(calls.deployPreview).toHaveLength(1);
+      await expect(getLocalPreviewUpstream(nodeId, memberScope.actorId)).resolves.toBeUndefined();
+    });
+
+    it("keeps older hosts available without exposing an environment editor", async () => {
+      const nodeId = await createApp();
+      const { host } = createFakeHost();
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        expect(await client.airapps.siteEnvironment({ nodeId })).toEqual({
+          available: false,
+          sources: [],
+          bindings: [],
+        });
+        expect(await client.airapps.siteState({ nodeId })).toMatchObject({
+          previewEnvironmentStale: false,
+          liveEnvironmentStale: false,
+        });
+        await expect(
+          client.airapps.siteSaveEnvironment({ nodeId, bindings: [] }),
+        ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+      });
+    });
+
+    it("loads metadata and sends only normalized references to the host", async () => {
+      const nodeId = await createApp();
+      const readEnvironment = vi.fn(async () => environment);
+      const saveEnvironment = vi.fn(async () => environment);
+      const { host } = createFakeHost({ readEnvironment, saveEnvironment });
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        expect(await client.airapps.siteEnvironment({ nodeId })).toEqual(environment);
+        expect(
+          await client.airapps.siteSaveEnvironment({
+            nodeId,
+            bindings: [{ envName: " PAYMENT_API_KEY ", vaultItemId: "vault-payment" }],
+          }),
+        ).toEqual(environment);
+      });
+      expect(readEnvironment).toHaveBeenCalledExactlyOnceWith(nodeId);
+      expect(saveEnvironment).toHaveBeenCalledExactlyOnceWith(nodeId, [
+        { envName: "PAYMENT_API_KEY", vaultItemId: "vault-payment" },
+      ]);
+    });
+
+    it.each(["doc", "base"] as const)(
+      "rejects %s environment reads and every save mode before reaching the host",
+      async (type) => {
+        const slug = `non-site-${type}-${++nextSlug}`;
+        let nodeId: string;
+        if (type === "doc") {
+          const created = await client.docs.create({
+            slug,
+            name: slug,
+            body: "Document",
+            autoMerge: true,
+          });
+          if (!("node" in created)) throw new Error("Expected a materialized document");
+          nodeId = created.node.id;
+        } else {
+          const created = await client.bases.create({
+            slug,
+            name: slug,
+            fields: [],
+            autoMerge: true,
+          });
+          if (!("nodeId" in created)) throw new Error("Expected a materialized Base");
+          nodeId = created.nodeId;
+        }
+        const readEnvironment = vi.fn(async () => environment);
+        const saveEnvironment = vi.fn(async () => environment);
+        const saveEnvironmentWithValues = vi.fn(async () => ({ ...environment, directValues: [] }));
+        const { host, calls } = createFakeHost({
+          readEnvironment,
+          saveEnvironment,
+          saveEnvironmentWithValues,
+        });
+        await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+          await expect(client.airapps.siteEnvironment({ nodeId })).rejects.toMatchObject({
+            code: "BAD_REQUEST",
+          });
+          await expect(
+            client.airapps.siteSaveEnvironment({ nodeId, bindings: [] }),
+          ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+          await expect(
+            client.airapps.siteSaveEnvironment({
+              nodeId,
+              bindings: [],
+              directValues: [{ envName: "TOKEN", kind: "secret", value: "synthetic" }],
+            }),
+          ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+          delete host.saveEnvironmentWithValues;
+          await expect(
+            client.airapps.siteSaveEnvironment({ nodeId, bindings: [] }),
+          ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+        });
+        expect(readEnvironment).not.toHaveBeenCalled();
+        expect(saveEnvironment).not.toHaveBeenCalled();
+        expect(saveEnvironmentWithValues).not.toHaveBeenCalled();
+        expect(calls.deployPreview).toHaveLength(0);
+        expect(calls.goLive).toHaveLength(0);
+      },
+    );
+
+    it("requires an explicit host capability before forwarding direct input", async () => {
+      const nodeId = await createApp();
+      const saveEnvironment = vi.fn(async () => environment);
+      const { host } = createFakeHost({ saveEnvironment });
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        await expect(
+          client.airapps.siteSaveEnvironment({
+            nodeId,
+            bindings: [],
+            directValues: [{ envName: "TOKEN", kind: "secret", value: "private" }],
+          }),
+        ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+      });
+      expect(saveEnvironment).not.toHaveBeenCalled();
+      const saveEnvironmentWithValues = vi.fn(async () => ({ ...environment, directValues: [] }));
+      host.saveEnvironmentWithValues = saveEnvironmentWithValues;
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        await client.airapps.siteSaveEnvironment({ nodeId, bindings: [] });
+        expect(saveEnvironmentWithValues).toHaveBeenLastCalledWith(nodeId, { bindings: [] });
+        const directValues = [{ envName: "TOKEN", kind: "secret" as const, value: "" }];
+        await client.airapps.siteSaveEnvironment({ nodeId, bindings: [], directValues });
+        expect(saveEnvironmentWithValues).toHaveBeenLastCalledWith(nodeId, {
+          bindings: [],
+          directValues,
+        });
+      });
+    });
+
+    it("denies readers, credential ceilings and cross-space requests before the host", async () => {
+      const nodeId = await createApp();
+      const readEnvironment = vi.fn(async () => environment);
+      const saveEnvironment = vi.fn(async () => environment);
+      const { host } = createFakeHost({ readEnvironment, saveEnvironment });
+      for (const scope of [
+        { isSpaceManager: false, permissionLevel: "read" as const },
+        { permissionLevel: "manage" as const, credentialPermissionCeiling: "read" as const },
+        { spaceId: "another-space" },
+        // Even a node manager cannot use workspace credentials on a read-only request.
+        { isSpaceManager: true, permissionLevel: "read" as const },
+      ]) {
+        await runWithBusabaseContext({ airAppSiteHost: host, ...scope }, async () => {
+          await expect(client.airapps.siteEnvironment({ nodeId })).rejects.toBeTruthy();
+          await expect(
+            client.airapps.siteSaveEnvironment({ nodeId, bindings: [] }),
+          ).rejects.toBeTruthy();
+        });
+      }
+      expect(readEnvironment).not.toHaveBeenCalled();
+      expect(saveEnvironment).not.toHaveBeenCalled();
+    });
+
+    it("does not describe saved bindings as an outdated deployment before the first preview or publication", async () => {
+      const nodeId = await createApp();
+      const { host, calls, setEnvironmentRevision } = createFakeHost({
+        readEnvironment: async () => environment,
+      });
+      host.saveEnvironment = async () => {
+        setEnvironmentRevision("configured-before-any-deployment");
+        return environment;
+      };
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        await client.airapps.siteSaveEnvironment({
+          nodeId,
+          bindings: [{ envName: "PAYMENT_API_KEY", vaultItemId: "vault-payment" }],
+        });
+        expect(await client.airapps.siteState({ nodeId })).toMatchObject({
+          previewVersion: null,
+          liveVersion: null,
+          previewEnvironmentStale: false,
+          liveEnvironmentStale: false,
+          publication: "not-live",
+        });
+      });
+      expect(calls.deployPreview).toHaveLength(0);
+      expect(calls.goLive).toHaveLength(0);
+    });
+
+    it("marks only an existing preview outdated when its environment changes before first publication", async () => {
+      const nodeId = await createApp();
+      const { host, setEnvironmentRevision } = createFakeHost();
+      setEnvironmentRevision("preview-environment-one");
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        const preview = await client.airapps.siteDeployPreview({ nodeId });
+        setEnvironmentRevision("preview-environment-two");
+        expect(await client.airapps.siteState({ nodeId })).toMatchObject({
+          previewVersion: preview.state.previewVersion,
+          liveVersion: null,
+          previewEnvironmentStale: true,
+          liveEnvironmentStale: false,
+          publication: "not-live",
+        });
+        // The first publication still resolves the latest values without requiring
+        // another preview when the reviewed files have not changed.
+        expect(await client.airapps.siteGoLive({ nodeId })).toMatchObject({
+          outcome: "ok",
+          state: {
+            liveVersion: preview.state.previewVersion,
+            previewEnvironmentStale: true,
+            liveEnvironmentStale: false,
+            publication: "live",
+          },
+        });
+      });
+    });
+
+    it("refreshes an unchanged preview after only its environment changes", async () => {
+      const nodeId = await createApp();
+      const { host, calls, setEnvironmentRevision } = createFakeHost();
+      setEnvironmentRevision("env-one");
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        const first = await client.airapps.siteDeployPreview({ nodeId });
+        await client.airapps.siteDeployPreview({ nodeId });
+        expect(calls.deployPreview).toHaveLength(1);
+        setEnvironmentRevision("env-two");
+        expect(await client.airapps.siteState({ nodeId })).toMatchObject({
+          currentVersion: first.state.currentVersion,
+          previewStale: false,
+          previewEnvironmentStale: true,
+        });
+        expect(await client.airapps.siteDeployPreview({ nodeId })).toMatchObject({
+          outcome: "ok",
+          state: { previewVersion: first.state.previewVersion, previewEnvironmentStale: false },
+        });
+        await client.airapps.siteDeployPreview({ nodeId });
+      });
+      expect(calls.deployPreview).toHaveLength(2);
+    });
+
+    it("publishes latest Vault values without repeating the same file preview", async () => {
+      const nodeId = await createApp();
+      const { host, calls, setEnvironmentRevision } = createFakeHost();
+      setEnvironmentRevision("env-one");
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        const preview = await client.airapps.siteDeployPreview({ nodeId });
+        await client.airapps.siteGoLive({ nodeId });
+        setEnvironmentRevision("env-two");
+        expect(await client.airapps.siteState({ nodeId })).toMatchObject({
+          currentVersion: preview.state.currentVersion,
+          previewStale: false,
+          previewEnvironmentStale: true,
+          liveEnvironmentStale: true,
+          publication: "live-with-changes",
+        });
+        expect(await client.airapps.siteGoLive({ nodeId })).toMatchObject({
+          outcome: "ok",
+          state: {
+            liveVersion: preview.state.previewVersion,
+            previewEnvironmentStale: true,
+            liveEnvironmentStale: false,
+            publication: "live",
+          },
+        });
+        setEnvironmentRevision("env-three");
+        await editFile(nodeId, "worker.js", `${WORKER}\n// changed files`);
+        expect(await client.airapps.siteGoLive({ nodeId })).toMatchObject({
+          outcome: "preview-stale",
+          state: { previewStale: true, liveEnvironmentStale: true },
+        });
+      });
+      expect(calls.deployPreview).toHaveLength(1);
+      expect(calls.goLive).toHaveLength(2);
+    });
+
+    it("restores the deployed environment when only the public switch changes", async () => {
+      const nodeId = await createApp();
+      const { host, calls, setEnvironmentRevision } = createFakeHost();
+      setEnvironmentRevision("env-one");
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        await client.airapps.siteDeployPreview({ nodeId });
+        await client.airapps.siteGoLive({ nodeId });
+        await client.airapps.siteUnpublish({ nodeId });
+        setEnvironmentRevision("env-two");
+        expect(await client.airapps.siteRepublish({ nodeId })).toMatchObject({
+          outcome: "ok",
+          state: { isPublic: true, publication: "live-with-changes", liveEnvironmentStale: true },
+        });
+      });
+      expect(calls.goLive).toHaveLength(1);
+      expect(calls.setPublic).toEqual([
+        [nodeId, false],
+        [nodeId, true],
+      ]);
+    });
+  });
 
   describe("preview", () => {
     it("deploys what the node's files say, and registers it for this viewer", async () => {
@@ -355,6 +755,67 @@ describe("AirApp site engine", () => {
         expect((await client.airapps.siteState({ nodeId })).publication).toBe("live");
       });
     });
+
+    it.each(["public/index.html", "worker.js"] as const)(
+      "requires a fresh preview after changing only the website title in %s",
+      async (filePath) => {
+        const document = (title: string) =>
+          `<html><head><title>${title}</title></head><body><h1>Products</h1></body></html>`;
+        const content = (title: string) =>
+          filePath === "worker.js"
+            ? `export default { fetch() { return new Response(${JSON.stringify(document(title))}, { headers: { "content-type": "text/html" } }); } };`
+            : document(title);
+        const nodeId = await createApp(
+          siteFiles().map((file) =>
+            file.path === filePath ? { ...file, content: content("Original shop") } : file,
+          ),
+        );
+        const { host, calls } = createFakeHost();
+        await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+          const original = await client.airapps.siteDeployPreview({ nodeId });
+          await client.airapps.siteGoLive({ nodeId });
+          await editFile(nodeId, filePath, content("Updated shop"));
+
+          const edited = await client.airapps.siteState({ nodeId });
+          expect(edited.currentVersion).not.toBe(original.state.previewVersion);
+          expect(edited).toMatchObject({
+            previewVersion: original.state.previewVersion,
+            liveVersion: original.state.previewVersion,
+            previewStale: true,
+            publication: "live-with-changes",
+          });
+          expect((await client.airapps.siteGoLive({ nodeId })).outcome).toBe("preview-stale");
+          expect(calls.goLive).toHaveLength(1);
+
+          const refreshed = await client.airapps.siteDeployPreview({ nodeId });
+          expect(refreshed.state).toMatchObject({
+            currentVersion: edited.currentVersion,
+            previewVersion: edited.currentVersion,
+            liveVersion: original.state.previewVersion,
+            previewStale: false,
+            publication: "live-with-changes",
+          });
+          const uploaded = calls.deployPreview.at(-1)?.bundle;
+          const uploadedContent =
+            filePath === "worker.js"
+              ? uploaded?.workerCode
+              : new TextDecoder().decode(
+                  uploaded?.assets.find((asset) => asset.path === "/index.html")?.content,
+                );
+          expect(uploadedContent).toContain("<title>Updated shop</title>");
+          expect(uploadedContent).not.toContain("<title>Original shop</title>");
+
+          const published = await client.airapps.siteGoLive({ nodeId });
+          expect(published).toMatchObject({
+            outcome: "ok",
+            state: { liveVersion: edited.currentVersion, publication: "live", previewStale: false },
+          });
+          expect(calls.goLive.at(-1)?.bundle).toEqual(uploaded);
+        });
+        expect(calls.deployPreview).toHaveLength(2);
+        expect(calls.goLive).toHaveLength(2);
+      },
+    );
   });
 
   describe("the public switch", () => {
@@ -417,6 +878,95 @@ describe("AirApp site engine", () => {
       return { ...createFakeHost({ readReleases, rollback }), readReleases, rollback };
     };
 
+    it("keeps locked metadata, history and current previews readable while refusing publication and rollback", async () => {
+      const nodeId = await createApp();
+      const { host, calls, rollback } = releaseHost();
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        await client.airapps.siteDeployPreview({ nodeId });
+        await client.airapps.siteGoLive({ nodeId });
+        const readSite = host.readSite.bind(host);
+        host.readSite = async (id) => ({
+          ...(await readSite(id)),
+          environmentDeploymentLock: { reason: "SPACE_VAULT_MANAGE_REQUIRED" },
+        });
+        expect((await client.airapps.siteState({ nodeId })).environmentDeploymentLock).toEqual({
+          reason: "SPACE_VAULT_MANAGE_REQUIRED",
+        });
+        expect((await client.airapps.siteReleases({ nodeId })).versions[0].canRollback).toBe(false);
+        expect((await client.airapps.siteDeployPreview({ nodeId })).outcome).toBe("ok");
+        for (const operation of [
+          () => client.airapps.siteGoLive({ nodeId }),
+          () => client.airapps.siteRepublish({ nodeId }),
+          () => client.airapps.siteRollback({ nodeId, version: "saved-v1" }),
+        ])
+          await expect(operation()).rejects.toMatchObject({
+            code: "FORBIDDEN",
+            data: { reason: "SPACE_VAULT_MANAGE_REQUIRED" },
+          });
+        expect(calls.deployPreview).toHaveLength(1);
+        expect(calls.goLive).toHaveLength(1);
+        expect(calls.setPublic).toHaveLength(0);
+        expect(rollback).not.toHaveBeenCalled();
+        await client.airapps.siteUnpublish({ nodeId });
+        expect(calls.setPublic).toEqual([[nodeId, false]]);
+      });
+    });
+
+    it("keeps log reads available for lapsed plans without rebuilding the draft", async () => {
+      const nodeId = await createApp();
+      await editFile(nodeId, "worker.js", "export default {");
+      const readLogs = vi.fn(async (_nodeId: string, version: string) => ({
+        available: true,
+        version,
+        from: "2026-11-17T00:00:00.000Z",
+        to: "2026-11-17T01:00:00.000Z",
+        entries: [],
+        truncated: false,
+      }));
+      const { host } = createFakeHost({ readLogs });
+      await runWithBusabaseContext(
+        {
+          airAppSiteHost: host,
+          resolveAirAppEngineLock: async () => ({ lockedEngines: ["site"], planLabel: "Plus" }),
+        },
+        async () => {
+          expect(await client.airapps.siteLogs({ nodeId, version: "saved-v1" })).toMatchObject({
+            available: true,
+            version: "saved-v1",
+          });
+        },
+      );
+      expect(readLogs).toHaveBeenCalledOnce();
+      expect(readLogs.mock.calls[0]?.slice(0, 2)).toEqual([nodeId, "saved-v1"]);
+    });
+
+    it("returns unavailable logs for older hosts", async () => {
+      const nodeId = await createApp();
+      const { host } = createFakeHost();
+      await runWithBusabaseContext({ airAppSiteHost: host }, async () => {
+        expect(await client.airapps.siteLogs({ nodeId, version: "v1" })).toMatchObject({
+          available: false,
+          entries: [],
+          truncated: false,
+        });
+      });
+    });
+
+    it("denies readers and cross-space log reads before contacting the provider", async () => {
+      const nodeId = await createApp();
+      const readLogs = vi.fn();
+      const { host } = createFakeHost({ readLogs });
+      for (const scope of [
+        { isSpaceManager: false, permissionLevel: "read" as const },
+        { spaceId: "other-space" },
+      ]) {
+        await runWithBusabaseContext({ airAppSiteHost: host, ...scope }, async () => {
+          await expect(client.airapps.siteLogs({ nodeId, version: "v1" })).rejects.toBeTruthy();
+        });
+      }
+      expect(readLogs).not.toHaveBeenCalled();
+    });
+
     it("keeps older hosts compatible and refuses unsupported rollback", async () => {
       const nodeId = await createApp();
       const { host } = createFakeHost();
@@ -450,6 +1000,80 @@ describe("AirApp site engine", () => {
       );
       expect(readReleases).toHaveBeenCalledExactlyOnceWith(nodeId);
       expect(rollback).not.toHaveBeenCalled();
+    });
+
+    it.each([false, true])(
+      "keeps Free history readable and refuses rollback when remote is locked: %s",
+      async (remoteLocked) => {
+        const nodeId = await createApp();
+        const { host, readReleases, rollback, calls } = releaseHost();
+        await runWithBusabaseContext(
+          {
+            airAppSiteHost: host,
+            resolveAirAppEngineLock: async () => ({
+              lockedEngines: remoteLocked ? ["remote"] : [],
+              sitePublishingLocked: true,
+              planLabel: "Plus",
+            }),
+          },
+          async () => {
+            const history = await client.airapps.siteReleases({ nodeId });
+            expect(history).toMatchObject({
+              available: true,
+              versions: [{ version: "saved-v1", canRollback: false }],
+            });
+            expect((await client.airapps.siteState({ nodeId })).engine).toBe("available");
+            await expect(
+              client.airapps.siteRollback({ nodeId, version: "saved-v1" }),
+            ).rejects.toMatchObject({
+              code: "FORBIDDEN",
+              data: { reason: "AIRAPP_SITE_PUBLISH_PLAN_REQUIRED", planLabel: "Plus" },
+            });
+          },
+        );
+        expect(readReleases).toHaveBeenCalledExactlyOnceWith(nodeId);
+        expect(rollback).not.toHaveBeenCalled();
+        expect(calls.goLive).toHaveLength(0);
+        expect(calls.setPublic).toHaveLength(0);
+      },
+    );
+
+    it("rechecks publishing entitlement before restoring a retained release after upgrade", async () => {
+      const nodeId = await createApp();
+      const { host, rollback } = releaseHost();
+      let publishingLocked = true;
+      await runWithBusabaseContext(
+        {
+          airAppSiteHost: host,
+          resolveAirAppEngineLock: async () =>
+            publishingLocked
+              ? { lockedEngines: ["remote"], sitePublishingLocked: true, planLabel: "Plus" }
+              : null,
+        },
+        async () => {
+          expect((await client.airapps.siteReleases({ nodeId })).versions[0]?.canRollback).toBe(
+            false,
+          );
+          await expect(
+            client.airapps.siteRollback({ nodeId, version: "saved-v1" }),
+          ).rejects.toMatchObject({ data: { reason: "AIRAPP_SITE_PUBLISH_PLAN_REQUIRED" } });
+          expect(rollback).not.toHaveBeenCalled();
+          publishingLocked = false;
+          expect((await client.airapps.siteReleases({ nodeId })).versions[0]?.canRollback).toBe(
+            true,
+          );
+          expect(await client.airapps.siteRollback({ nodeId, version: "saved-v1" })).toMatchObject({
+            outcome: "ok",
+            state: {
+              engine: "available",
+              publicationLock: null,
+              liveVersion: "saved-v1",
+              isPublic: true,
+            },
+          });
+        },
+      );
+      expect(rollback).toHaveBeenCalledExactlyOnceWith(nodeId, "saved-v1", "Site app");
     });
 
     it("denies readers and cross-space release operations before the host is called", async () => {
@@ -574,6 +1198,101 @@ describe("AirApp site engine", () => {
       });
       expect(calls.deployPreview).toHaveLength(0);
       expect(calls.goLive).toHaveLength(0);
+    });
+
+    it("previews privately when only public publishing is locked", async () => {
+      const nodeId = await createApp();
+      const bindDomain = vi.fn();
+      const setPrimaryDomain = vi.fn();
+      const { host, calls } = createFakeHost({ bindDomain, setPrimaryDomain });
+      await runWithBusabaseContext(
+        {
+          airAppSiteHost: host,
+          resolveAirAppEngineLock: async () => ({
+            lockedEngines: ["remote"],
+            sitePublishingLocked: true,
+            planLabel: "Plus",
+          }),
+        },
+        async () => {
+          const preview = await client.airapps.siteDeployPreview({ nodeId });
+          expect(preview).toMatchObject({
+            outcome: "ok",
+            state: {
+              engine: "available",
+              publicationLock: { planLabel: "Plus" },
+              isPublic: false,
+              publication: "not-live",
+            },
+          });
+          expect(preview.state.previewUrl).toContain(`/api/airapp-preview/${nodeId}/`);
+          // Provider addresses and tokens remain behind the member preview registry.
+          expect(JSON.stringify(preview)).not.toContain("the-token");
+          expect(JSON.stringify(preview)).not.toContain("site-x-preview.sites.test");
+          expect(await client.airapps.siteState({ nodeId })).toMatchObject({
+            engine: "available",
+            publicationLock: { planLabel: "Plus" },
+          });
+          for (const action of [client.airapps.siteGoLive, client.airapps.siteRepublish]) {
+            await expect(action({ nodeId })).rejects.toMatchObject({
+              code: "FORBIDDEN",
+              data: { reason: "AIRAPP_SITE_PUBLISH_PLAN_REQUIRED", planLabel: "Plus" },
+            });
+          }
+          for (const action of [
+            client.airapps.siteBindDomain,
+            client.airapps.siteSetPrimaryDomain,
+          ]) {
+            await expect(action({ nodeId, hostname: "shop.company.test" })).rejects.toMatchObject({
+              code: "FORBIDDEN",
+              data: { reason: "AIRAPP_SITE_PUBLISH_PLAN_REQUIRED", planLabel: "Plus" },
+            });
+          }
+        },
+      );
+      expect(calls.deployPreview).toHaveLength(1);
+      expect(calls.goLive).toHaveLength(0);
+      expect(calls.setPublic).toHaveLength(0);
+      expect(bindDomain).not.toHaveBeenCalled();
+      expect(setPrimaryDomain).not.toHaveBeenCalled();
+    });
+
+    it("rechecks publishing after downgrade while preserving preview and takedown", async () => {
+      const nodeId = await createApp();
+      const { host, calls } = createFakeHost();
+      let publishingLocked = false;
+      await runWithBusabaseContext(
+        {
+          airAppSiteHost: host,
+          resolveAirAppEngineLock: async () => ({
+            lockedEngines: [],
+            sitePublishingLocked: publishingLocked,
+            planLabel: "Plus",
+          }),
+        },
+        async () => {
+          await client.airapps.siteDeployPreview({ nodeId });
+          expect((await client.airapps.siteGoLive({ nodeId })).state.isPublic).toBe(true);
+          publishingLocked = true;
+          expect((await client.airapps.siteDeployPreview({ nodeId })).state.engine).toBe(
+            "available",
+          );
+          await expect(client.airapps.siteGoLive({ nodeId })).rejects.toMatchObject({
+            data: { reason: "AIRAPP_SITE_PUBLISH_PLAN_REQUIRED" },
+          });
+          expect((await client.airapps.siteUnpublish({ nodeId })).state).toMatchObject({
+            isPublic: false,
+            publicationLock: { planLabel: "Plus" },
+          });
+          await expect(client.airapps.siteRepublish({ nodeId })).rejects.toMatchObject({
+            data: { reason: "AIRAPP_SITE_PUBLISH_PLAN_REQUIRED" },
+          });
+          publishingLocked = false;
+          expect((await client.airapps.siteRepublish({ nodeId })).state.isPublic).toBe(true);
+        },
+      );
+      expect(calls.goLive).toHaveLength(1);
+      expect(calls.setPublic.map(([, value]) => value)).toEqual([false, true]);
     });
 
     it("does not lock a plan that includes the engine", async () => {

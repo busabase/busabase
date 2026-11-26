@@ -1126,6 +1126,90 @@ const listCommitPayloadExpression = (options?: { keepWhiteboardPreview?: boolean
     '{}'::jsonb
   )`.as("payload");
 
+/**
+ * What a merged record_update actually changed, for the ones that landed by
+ * three-way auto-merge. That merge (`mergeRecordUpdate`) writes a NEW commit —
+ * same operationId, created after the operation's latest proposal commit —
+ * whose parent is the record as it really was just before. The operation row
+ * keeps pointing at its proposal and stale base (review state, revisions and
+ * the commit message are anchored there), so a diff read from it would show
+ * values the merge only repeated, e.g. a field an earlier change had already
+ * set. Hydration reports the landed before → after instead, keeping the
+ * operation's identity. Superseded revisions share the operationId but their
+ * parent is the operation's own previous commit, and the original proposal
+ * predates the proposal head.
+ */
+const loadLandedRecordChanges = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  operations: ReadonlyArray<OperationPO>,
+  commitsById: ReadonlyMap<string, CommitPO>,
+  payloadExpression: ReturnType<typeof listCommitPayloadExpression> | undefined,
+): Promise<Map<string, { before: Record<string, unknown>; after: Record<string, unknown> }>> => {
+  const landed = new Map<
+    string,
+    { before: Record<string, unknown>; after: Record<string, unknown> }
+  >();
+  const merged = operations.filter(
+    (item) => item.operation === "record_update" && item.status === "merged",
+  );
+  if (merged.length === 0) return landed;
+  const candidates = await db
+    .select({
+      id: busabaseCommits.id,
+      operationId: busabaseCommits.operationId,
+      parentCommitId: busabaseCommits.parentCommitId,
+      createdAt: busabaseCommits.createdAt,
+    })
+    .from(busabaseCommits)
+    .where(
+      inArray(
+        busabaseCommits.operationId,
+        merged.map((item) => item.id),
+      ),
+    );
+  const landedCommitByOperation = new Map<string, { id: string; parentCommitId: string }>();
+  for (const item of merged) {
+    const proposal = commitsById.get(item.headCommitId);
+    if (!proposal) continue;
+    const own = candidates.filter((commit) => commit.operationId === item.id);
+    const ownIds = new Set(own.map((commit) => commit.id));
+    const [merge] = own
+      .filter(
+        (commit) =>
+          commit.id !== item.headCommitId &&
+          commit.parentCommitId !== null &&
+          !ownIds.has(commit.parentCommitId) &&
+          commit.createdAt.getTime() >= proposal.createdAt.getTime(),
+      )
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+    if (merge?.parentCommitId) {
+      landedCommitByOperation.set(item.id, { id: merge.id, parentCommitId: merge.parentCommitId });
+    }
+  }
+  if (landedCommitByOperation.size === 0) return landed;
+  const payloadIds = [
+    ...new Set(
+      [...landedCommitByOperation.values()].flatMap((commit) => [commit.id, commit.parentCommitId]),
+    ),
+  ];
+  const payloadRows = await db
+    .select({
+      id: busabaseCommits.id,
+      payload: payloadExpression ?? busabaseCommits.payload,
+    })
+    .from(busabaseCommits)
+    .where(inArray(busabaseCommits.id, payloadIds));
+  const payloads = new Map(
+    payloadRows.map((row) => [row.id, row.payload as Record<string, unknown>]),
+  );
+  for (const [operationId, commit] of landedCommitByOperation) {
+    const after = payloads.get(commit.id);
+    const before = payloads.get(commit.parentCommitId);
+    if (after && before) landed.set(operationId, { before, after });
+  }
+  return landed;
+};
+
 export const hydrateChangeRequests = async (
   changeRequests: ChangeRequestPO[],
   options?: {
@@ -1263,6 +1347,12 @@ export const hydrateChangeRequests = async (
             .where(inArray(busabaseCommits.id, allCommitIds))) as CommitPO[])
       : [];
   const commitsById = new Map(commitRows.map((commit) => [commit.id, commit]));
+  const landedChanges = await loadLandedRecordChanges(
+    db,
+    hydratedItemRows,
+    commitsById,
+    maxOps === undefined ? undefined : listCommitPayloadExpression(),
+  );
 
   const viewTargetIds = [
     ...new Set(
@@ -1340,7 +1430,10 @@ export const hydrateChangeRequests = async (
         if (!commit) {
           throw new Error(`Invalid operation graph for ${item.id}`);
         }
-        return toOperationVO(item, commit, resolveBaseFields(item), users);
+        const landed = landedChanges.get(item.id);
+        return landed
+          ? toOperationVO(item, { ...commit, payload: landed.after }, landed.before, users)
+          : toOperationVO(item, commit, resolveBaseFields(item), users);
       },
     );
     const base = changeRequest.baseId ? (baseMap.get(changeRequest.baseId) ?? null) : null;
@@ -2128,13 +2221,19 @@ export const countReviewChangeRequests = async () => {
     return { review: row?.count ?? 0 };
   }
 
-  // Access in SQL; only flagged rows are resolved in JS.
-  const acl = changeRequestListAcl(db);
+  // Ids first, access in JS. The badge reads every pending row of the space
+  // and has no page to stop at, so the SQL access predicate the paged lists
+  // use (`changeRequestListAcl`) gains nothing here. That predicate nests
+  // EXISTS / NOT EXISTS over `busabase_operations`, which the planner can turn
+  // into hashing every operation of the space, and the badge was the top SQL by
+  // load in production. `filterVisibleChangeRequestRows` is the reference the
+  // SQL predicate is tested against, and it sends a few `id = any(...)`
+  // lookups per batch on indexed columns.
   const rows = await db
-    .select({ id: busabaseChangeRequests.id, needsScopeCheck: acl.needsScopeCheck })
+    .select({ id: busabaseChangeRequests.id })
     .from(busabaseChangeRequests)
-    .where(and(filters, acl.where));
-  return { review: (await keepVisibleChangeRequestCandidates(rows)).length };
+    .where(filters);
+  return { review: (await filterVisibleChangeRequestRows(rows)).length };
 };
 
 /**
@@ -2242,7 +2341,18 @@ const loadMergedChangeRequest = async (changeRequestId: string) => {
   return changeRequest ? hydrateChangeRequest(changeRequest) : null;
 };
 
-export const listRecordChangeRequests = async (recordId: string, options?: { limit?: number }) => {
+export const listRecordChangeRequests = async (
+  recordId: string,
+  options?: {
+    limit?: number;
+    /**
+     * Full history with complete (uncapped) payloads, but only this record's
+     * operations embedded — what record revert reads, without hydrating every
+     * other record of a 1,000-row bulk import that also created this one.
+     */
+    recordOperationsOnly?: boolean;
+  },
+) => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
@@ -2303,13 +2413,15 @@ export const listRecordChangeRequests = async (recordId: string, options?: { lim
     changeRequestIds
       .map((crId) => changeRequestsById.get(crId))
       .filter((changeRequest): changeRequest is ChangeRequestPO => Boolean(changeRequest)),
-    limit === undefined
-      ? undefined
-      : {
+    limit !== undefined
+      ? {
           maxOperationsPerChangeRequest: LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST,
           operationRecordId: recordId,
           includeReviews: false,
-        },
+        }
+      : options?.recordOperationsOnly
+        ? { operationRecordId: recordId, includeReviews: false }
+        : undefined,
   );
 };
 

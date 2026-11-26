@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppVO } from "busabase-contract/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Router } from "wouter";
 import { CoreI18nProvider, type CoreLocale } from "../../../i18n";
+import { SubmitPermissionProvider } from "../../dashboard/components/split-submit-button";
+import { DashboardVisitorProvider } from "../../dashboard/visitor-context";
 import { useAirAppRunnerStore } from "../store/airapp-runner-store";
 import { AirAppEngineAvailabilityProvider } from "./engine-availability-context";
 import {
@@ -120,59 +125,68 @@ describe("AirAppServiceWorkerUnsupported", () => {
 });
 
 describe("preview viewport continuity", () => {
-  it("keeps one toolbar and the iframe when switching viewports from Sites, then refreshes only the web view", () => {
-    const runner = {
-      status: "ready",
-      logLines: [],
-      previewUrl: "/api/airapp-preview/app/",
-      error: null,
-      errorCode: null,
-      engineLock: null,
-      siteBlockers: null,
-      runnerKind: "site",
-      orpc: {} as never,
-      run: vi.fn(),
-      stop: vi.fn(),
-      isBusy: false,
-      isLive: true,
-    } satisfies AirAppRunnerState;
-    render(
-      <CoreI18nProvider locale="en">
-        <AirAppRunPreview airapp={null} runner={runner} />
-      </CoreI18nProvider>,
-    );
-    const frame = screen.getByTitle("AirApp preview") as HTMLIFrameElement;
-    frame.dataset.inPageState = "unsaved input";
-    expect(document.querySelectorAll("[data-airapp-run-toolbar]")).toHaveLength(1);
-    expect(document.querySelector("[data-airapp-preview-tools]")).toBeNull();
-    const openMenu = () =>
-      fireEvent.pointerDown(screen.getByRole("button", { name: "Sites" }), {
-        button: 0,
-        ctrlKey: false,
-        pointerType: "mouse",
-      });
-    openMenu();
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Mobile" }));
-    expect(document.querySelector('[data-airapp-preview-viewport="mobile"]')).toBeTruthy();
-    expect(screen.getByTitle("AirApp preview")).toBe(frame);
-    openMenu();
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "Desktop" }));
-    expect(screen.getByTitle("AirApp preview")).toBe(frame);
-    expect(frame.dataset.inPageState).toBe("unsaved input");
-    const navigate = vi.spyOn(frame, "src", "set");
-    openMenu();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Refresh website preview" }));
-    expect(navigate).toHaveBeenCalledExactlyOnceWith(runner.previewUrl);
-    expect(runner.run).not.toHaveBeenCalled();
-    expect(runner.stop).not.toHaveBeenCalled();
-    fireEvent.load(frame);
-    openMenu();
-    expect(
-      screen
-        .getByRole("menuitem", { name: "Refresh website preview" })
-        .getAttribute("data-disabled"),
-    ).toBeNull();
-  });
+  it.each(["site", "remote"] as const)(
+    "keeps viewport state and refreshes the %s preview",
+    (kind) => {
+      const runner = {
+        status: "ready",
+        logLines: [],
+        previewUrl: "/api/airapp-preview/app/",
+        error: null,
+        errorCode: null,
+        engineLock: null,
+        siteBlockers: null,
+        runnerKind: kind,
+        orpc: {} as never,
+        run: vi.fn(),
+        stop: vi.fn(),
+        isBusy: false,
+        isLive: true,
+      } satisfies AirAppRunnerState;
+      render(
+        <CoreI18nProvider locale="en">
+          <AirAppRunPreview airapp={null} runner={runner} />
+        </CoreI18nProvider>,
+      );
+      const frame = screen.getByTitle("AirApp preview") as HTMLIFrameElement;
+      frame.dataset.inPageState = "unsaved input";
+      expect(document.querySelectorAll("[data-airapp-run-toolbar]")).toHaveLength(1);
+      expect(document.querySelector("[data-airapp-preview-tools]")).toBeNull();
+      const openMenu = () =>
+        fireEvent.pointerDown(screen.getByRole("button", { name: "Preview & publish" }), {
+          button: 0,
+          ctrlKey: false,
+          pointerType: "mouse",
+        });
+      openMenu();
+      fireEvent.click(screen.getByRole("menuitemradio", { name: "Mobile" }));
+      expect(document.querySelector('[data-airapp-preview-viewport="mobile"]')).toBeTruthy();
+      expect(screen.getByTitle("AirApp preview")).toBe(frame);
+      openMenu();
+      fireEvent.click(screen.getByRole("menuitemradio", { name: "Desktop" }));
+      expect(screen.getByTitle("AirApp preview")).toBe(frame);
+      expect(frame.dataset.inPageState).toBe("unsaved input");
+      const navigate = vi.spyOn(frame, "src", "set");
+      const refresh = screen.getByRole("button", { name: "Refresh website preview" });
+      expect(refresh.nextElementSibling).toBe(
+        screen.getByRole("button", { name: "Preview & publish" }),
+      );
+      fireEvent.click(refresh);
+      if (kind === "site") {
+        expect(runner.run).toHaveBeenCalledExactlyOnceWith({ sitePreview: true });
+        expect(navigate).not.toHaveBeenCalled();
+      } else {
+        expect(navigate).toHaveBeenCalledExactlyOnceWith(runner.previewUrl);
+        expect(runner.run).not.toHaveBeenCalled();
+        expect(refresh).toHaveProperty("disabled", true);
+      }
+      expect(runner.stop).not.toHaveBeenCalled();
+      fireEvent.load(frame);
+      expect(refresh).toHaveProperty("disabled", false);
+      openMenu();
+      expect(screen.queryByRole("menuitem", { name: "Refresh website preview" })).toBeNull();
+    },
+  );
 });
 
 /**
@@ -200,6 +214,281 @@ const notReadyRunner = (
   stop: vi.fn(),
   isBusy: status === "installing" || status === "starting",
   isLive: false,
+});
+
+const openPreviewMenu = (name: string | RegExp = /Preview & publish|More actions/) =>
+  fireEvent.pointerDown(screen.getByRole("button", { name }), {
+    button: 0,
+    ctrlKey: false,
+    pointerType: "mouse",
+  });
+
+describe("actual run engine inside the preview menu", () => {
+  const renderControls = (
+    runner: AirAppRunnerState,
+    locale: CoreLocale = "en",
+    airapp: AirAppVO | null = null,
+  ) => {
+    const view = render(
+      <CoreI18nProvider locale={locale}>
+        <AirAppRunControls
+          airapp={airapp}
+          fullscreenState={{ fullscreen: false, setFullscreen: vi.fn() }}
+          runner={runner}
+          showPinToSidePanel={false}
+          showSitePublish={false}
+        />
+      </CoreI18nProvider>,
+    );
+    expect(document.querySelector("[data-airapp-engine]")).toBeNull();
+    openPreviewMenu(
+      runner.runnerKind === "browser"
+        ? locale === "zh-CN"
+          ? "更多操作"
+          : "More actions"
+        : locale === "zh-CN"
+          ? "预览与发布"
+          : "Preview & publish",
+    );
+    return view;
+  };
+
+  it.each([
+    ["browser", "In browser"],
+    ["local", "This machine"],
+    ["remote", "Cloud sandbox"],
+    ["site", "Website"],
+  ] as const)(
+    "identifies the actual %s engine as readable information inside the menu",
+    (kind, name) => {
+      renderControls({ ...notReadyRunner("ready"), runnerKind: kind, isLive: true });
+      const indicator = screen.getByRole("status", { name: `Engine: ${name} · Running` });
+      expect(indicator.getAttribute("data-airapp-engine")).toBe(kind);
+      expect(indicator.closest('[role="menu"]')).toBe(screen.getByRole("menu"));
+      expect(indicator.textContent).toContain(name);
+      expect(
+        screen.getByRole("menu", {
+          name: kind === "browser" ? "More actions" : "Preview & publish",
+        }),
+      ).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Sites" })).toBeNull();
+    },
+  );
+
+  it("shows the actual fallback engine even when the node requests another engine", () => {
+    const airapp = {
+      node: { id: "fallback", settings: { airappEngine: "remote" } },
+      files: [],
+    } as unknown as AirAppVO;
+    renderControls(
+      { ...notReadyRunner("ready"), runnerKind: "browser", isLive: true },
+      "en",
+      airapp,
+    );
+    expect(screen.getByRole("status", { name: "Engine: In browser · Running" })).toBeTruthy();
+    expect(document.querySelector('[data-airapp-engine="remote"]')).toBeNull();
+  });
+
+  it("does not mistake an idle entry's default kind for an active browser engine", () => {
+    renderControls(notReadyRunner("idle"));
+    expect(screen.getByRole("status", { name: "Engine: Not run yet" })).toBeTruthy();
+    expect(document.querySelector('[data-airapp-engine="browser"]')).toBeNull();
+    expect(document.querySelector('[data-airapp-engine="unresolved"]')).toBeTruthy();
+  });
+
+  it("labels a failed attempt without announcing it as running", () => {
+    renderControls({ ...notReadyRunner("error"), runnerKind: "remote" });
+    expect(screen.getByRole("status", { name: "Engine: Cloud sandbox · Failed" })).toBeTruthy();
+    expect(screen.queryByRole("status", { name: /Running/ })).toBeNull();
+  });
+
+  it("identifies a locked engine without claiming the run succeeded", () => {
+    renderControls({
+      ...notReadyRunner("error"),
+      runnerKind: "remote",
+      engineLock: { engine: "remote", planLabel: "Plus" },
+    });
+    expect(
+      screen.getByRole("status", {
+        name: "Engine: Cloud sandbox · Upgrade to Plus to run this app",
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("status", { name: /Running/ })).toBeNull();
+  });
+
+  it("localizes both the engine identity and the action menu in Chinese", () => {
+    renderControls({ ...notReadyRunner("ready"), runnerKind: "remote", isLive: true }, "zh-CN");
+    expect(screen.getByRole("status", { name: "运行引擎: 云端沙箱 · 运行中" })).toBeTruthy();
+    expect(screen.getByRole("menu", { name: "预览与发布" })).toBeTruthy();
+  });
+});
+
+describe("ready-state refresh and preview actions", () => {
+  const readyRunner = (): AirAppRunnerState => ({
+    ...notReadyRunner("ready"),
+    previewUrl: "/api/airapp-preview/app/",
+    isLive: true,
+  });
+
+  it("places browser restart directly before More and keeps only stop and fullscreen in the menu", () => {
+    const runner = readyRunner();
+    const fullscreen = { fullscreen: false, setFullscreen: vi.fn() };
+    render(
+      <CoreI18nProvider locale="en">
+        <AirAppRunControls airapp={null} fullscreenState={fullscreen} runner={runner} />
+      </CoreI18nProvider>,
+    );
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+    const restart = screen.getByRole("button", { name: "Restart" });
+    expect(restart.nextElementSibling).toBe(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.queryByRole("button", { name: "Refresh website preview" })).toBeNull();
+    fireEvent.click(restart);
+    openPreviewMenu();
+    expect(screen.queryByRole("menuitem", { name: "Restart" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Refresh website preview" })).toBeNull();
+    expect(runner.run).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Enter fullscreen" }));
+    expect(fullscreen.setFullscreen).toHaveBeenCalledExactlyOnceWith(true);
+    openPreviewMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Stop" }));
+    expect(runner.stop).toHaveBeenCalledOnce();
+  });
+
+  it("retains the useful primary run or retry action while the app is not ready", () => {
+    const runner = notReadyRunner("error");
+    render(
+      <CoreI18nProvider locale="en">
+        <AirAppRunControls
+          airapp={null}
+          fullscreenState={{ fullscreen: false, setFullscreen: vi.fn() }}
+          runner={runner}
+        />
+      </CoreI18nProvider>,
+    );
+    expect(screen.queryByRole("button", { name: "Refresh website preview" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Restart" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(runner.run).toHaveBeenCalledOnce();
+  });
+
+  const app = {
+    node: { id: "release-node", name: "Customer desk", slug: "customer-desk", settings: {} },
+    files: [],
+  } as unknown as AirAppVO;
+  const renderSiteMenu = ({
+    permission = "manage",
+    anonymous = false,
+    offered = true,
+    orpc = {} as BusabaseQueryUtils,
+    client = new QueryClient(),
+    kind = "browser",
+  }: {
+    permission?: ApiKeyPermissionLevel;
+    anonymous?: boolean;
+    offered?: boolean;
+    orpc?: BusabaseQueryUtils;
+    client?: QueryClient;
+    kind?: "browser" | "site";
+  } = {}) =>
+    render(
+      <CoreI18nProvider locale="en">
+        <QueryClientProvider client={client}>
+          <Router>
+            <SubmitPermissionProvider permissionLevel={permission}>
+              <DashboardVisitorProvider visitorKind={anonymous ? "anonymous" : "member"}>
+                <AirAppEngineAvailabilityProvider
+                  engines={offered ? ["browser", "site"] : ["browser"]}
+                >
+                  <AirAppRunControls
+                    airapp={app}
+                    fullscreenState={{ fullscreen: false, setFullscreen: vi.fn() }}
+                    runner={{ ...readyRunner(), runnerKind: kind, orpc }}
+                    showPinToSidePanel={false}
+                    showSitePublish={false}
+                  />
+                </AirAppEngineAvailabilityProvider>
+              </DashboardVisitorProvider>
+            </SubmitPermissionProvider>
+          </Router>
+        </QueryClientProvider>
+      </CoreI18nProvider>,
+    );
+
+  it("opens release management in the persistent node settings dialog after the menu closes", async () => {
+    const detailOptions = vi.fn(() => ({
+      queryKey: ["node", "release-node"],
+      queryFn: () => new Promise(() => undefined),
+    }));
+    const orpc = {
+      nodes: { get: { queryOptions: detailOptions } },
+      airapps: {
+        siteDomains: {
+          queryOptions: () => ({ queryKey: ["domains", "release-node"] }),
+        },
+        siteState: {
+          queryOptions: () => ({
+            queryKey: ["site", "release-node"],
+            queryFn: async () => ({
+              engine: "available",
+              address: null,
+              blockers: [],
+              publication: "live",
+            }),
+          }),
+        },
+        siteReleases: {
+          queryOptions: () => ({
+            queryKey: ["releases", "release-node"],
+            queryFn: async () => ({ available: true, status: "idle", versions: [], history: [] }),
+          }),
+        },
+      },
+    } as unknown as BusabaseQueryUtils;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = renderSiteMenu({ orpc, client, kind: "site" });
+    expect(detailOptions).not.toHaveBeenCalled();
+    const trigger = screen.getByRole("button", { name: "Preview & publish" });
+    openPreviewMenu();
+    const releaseItem = screen.getByRole("menuitem", { name: "Deployments" });
+    releaseItem.focus();
+    expect(document.activeElement).toBe(releaseItem);
+    fireEvent.click(releaseItem);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Customer desk")).toBeTruthy();
+    expect(
+      await within(dialog).findByText("Keep the current version and up to 5 historical versions."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(detailOptions).toHaveBeenCalledWith({
+      input: { nodeId: "customer-desk", type: "airapp" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    view.unmount();
+    client.clear();
+  });
+
+  it.each([
+    ["a read-only member", "read", false, true],
+    ["an anonymous visitor", "manage", true, true],
+    ["a deployment without websites", "manage", false, false],
+  ] as const)(
+    "does not offer release management to %s",
+    (_label, permission, anonymous, offered) => {
+      const view = renderSiteMenu({
+        permission,
+        anonymous,
+        offered,
+        kind: offered ? "site" : "browser",
+      });
+      openPreviewMenu();
+      expect(screen.queryByRole("menuitem", { name: "Deployments" })).toBeNull();
+      view.unmount();
+    },
+  );
 });
 
 const translationBoundary = (element: Element) => element.closest('[translate="no"].notranslate');
@@ -240,6 +529,7 @@ describe("AirApp browser-translation boundaries", () => {
     };
     const view = render(
       <CoreI18nProvider locale="en">
+        <p>Workspace shell</p>
         <AirAppRunPreview airapp={null} runner={installing} showToolbar />
         <AirAppRunLogs runner={installing} />
       </CoreI18nProvider>,
@@ -259,6 +549,7 @@ describe("AirApp browser-translation boundaries", () => {
     expect(() =>
       view.rerender(
         <CoreI18nProvider locale="en">
+          <p>Workspace shell</p>
           <AirAppRunPreview airapp={null} runner={ready} showToolbar />
           <AirAppRunLogs runner={ready} />
         </CoreI18nProvider>,

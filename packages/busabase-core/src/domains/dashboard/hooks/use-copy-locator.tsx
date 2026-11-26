@@ -38,6 +38,8 @@ import {
 export interface AgentLocator {
   /** The target line — `renderNodeLocatorTarget` / `renderCreateTargetLine`. */
   target: string;
+  /** A concise label for the card; copying always uses the full target. */
+  displayTarget?: string;
   exampleKind: LocatorExampleKind;
 }
 

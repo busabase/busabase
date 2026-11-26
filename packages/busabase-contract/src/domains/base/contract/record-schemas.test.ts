@@ -68,6 +68,14 @@ describe("listRecordsPageInputSchema", () => {
       }).success,
     ).toBe(false);
   });
+  it("accepts a page of up to 1000 records and rejects a larger one", () => {
+    expect(listRecordsPageInputSchema.parse({ baseId: "bse_1", pageSize: 1000 }).pageSize).toBe(
+      1000,
+    );
+    expect(listRecordsPageInputSchema.safeParse({ baseId: "bse_1", pageSize: 1001 }).success).toBe(
+      false,
+    );
+  });
   it("keeps full records by default and accepts the explicit table list mode", () => {
     expect(listRecordsPageInputSchema.parse({ baseId: "bse_1" }).listMode).toBe("full");
     expect(listRecordsPageInputSchema.parse({ baseId: "bse_1", listMode: "table" }).listMode).toBe(

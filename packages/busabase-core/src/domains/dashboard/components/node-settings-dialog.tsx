@@ -14,6 +14,7 @@
 // a heavier accordion/sections settings shell, which this dialog has no use for.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
 import type { NodeIcon } from "busabase-contract/types";
@@ -21,8 +22,8 @@ import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog
 import { Input } from "kui/input";
 import { Label } from "kui/label";
 import type { LucideIcon } from "lucide-react";
-import { Info, KeyRound, Shield, SlidersHorizontal } from "lucide-react";
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { History, Info, KeyRound, LockKeyhole, Shield, SlidersHorizontal } from "lucide-react";
+import { type ComponentProps, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
@@ -32,9 +33,9 @@ import {
   AirAppEngineSetting,
   FOLLOW_APP,
   resolveAvailableAirAppRunnerKind,
-  resolveEffectiveEngineChoice,
 } from "../../airapp/components/AirAppEngineSetting";
-import { AirAppSiteSettings } from "../../airapp/components/AirAppSiteControls";
+import { AirAppSiteEnvironmentSettings } from "../../airapp/components/AirAppSiteControls";
+import { AirAppSiteReleaseSettings } from "../../airapp/components/AirAppSiteReleases";
 import {
   useAirAppEngineAvailability,
   useAirAppEnginePlanGate,
@@ -49,14 +50,21 @@ import {
 } from "../../airapp/utils/airapp-runtime-descriptor";
 import { replaceNodeRouteSlug } from "../utils/node-route";
 import { toSlugInput } from "../utils/slug-input";
+import { useIsAnonymousVisitor } from "../visitor-context";
 import { DialogContent } from "./localized-dialog-content";
 import { NodeIconPicker } from "./node-icon-picker";
 import { NodeInfoPanel } from "./node-info-panel";
 import { NodeSettingsAppSignInSlotContext } from "./node-settings-app-sign-in-slot";
 import { NodeSettingsPermissionsSlotContext } from "./node-settings-permissions-slot";
-import { SplitSubmitButton } from "./split-submit-button";
+import { SplitSubmitButton, useWorkspacePermissionLevel } from "./split-submit-button";
 
-export type NodeSettingsTab = "general" | "info" | "permissions" | "signIn";
+export type NodeSettingsTab =
+  | "general"
+  | "info"
+  | "permissions"
+  | "signIn"
+  | "releases"
+  | "environment";
 
 export interface NodeSettingsDialogProps {
   orpc: BusabaseQueryUtils;
@@ -66,8 +74,12 @@ export interface NodeSettingsDialogProps {
   nodeSlug?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Restore focus when opened from a transient menu rather than a DialogTrigger. */
+  onCloseAutoFocus?: ComponentProps<typeof DialogContent>["onCloseAutoFocus"];
   /** Jump straight to a specific tab when the dialog (re-)opens. */
   initialTab?: NodeSettingsTab;
+  /** A Vault dependency link opens the Site environment section directly. */
+  initialSiteEnvironment?: boolean;
   /** Auto-focus + select the name field on open — used by the "Rename" entry points. */
   focusField?: "name";
   /** Fired after a successful immediate rename (not a submitted-for-review request). */
@@ -82,7 +94,9 @@ export function NodeSettingsDialog({
   nodeSlug,
   open,
   onOpenChange,
+  onCloseAutoFocus,
   initialTab,
+  initialSiteEnvironment = false,
   focusField,
   onRenamed,
 }: NodeSettingsDialogProps) {
@@ -93,11 +107,31 @@ export function NodeSettingsDialog({
   // AirApps only, and only when the host has app users at all — see
   // `node-settings-app-sign-in-slot.tsx`.
   const appSignInPanel = nodeType === "airapp" ? renderAppSignInPanel : null;
+  const availableEngines = useAirAppEngineAvailability();
+  const planGate = useAirAppEnginePlanGate();
+  const notConfiguredEngines = useAirAppEnginesNotConfigured();
+  const permission = useWorkspacePermissionLevel();
+  const isAnonymous = useIsAnonymousVisitor();
+  // Publishing is independent of the working preview's engine: a browser app
+  // can have a published website too. Match the publication entry's access gate.
+  const canManageSite =
+    nodeType === "airapp" &&
+    !isAnonymous &&
+    hasApiKeyLevel(permission, "write") &&
+    (availableEngines.includes("site") ||
+      planGate?.lockedEngines.includes("site") ||
+      notConfiguredEngines.includes("site"));
 
   const [activeTab, setActiveTab] = useState<NodeSettingsTab>(initialTab ?? "general");
+  const [environmentVisited, setEnvironmentVisited] = useState(false);
   useEffect(() => {
-    if (open && initialTab) setActiveTab(initialTab);
-  }, [open, initialTab]);
+    if (open && initialSiteEnvironment) setActiveTab("environment");
+    else if (open && initialTab) setActiveTab(initialTab);
+    if (!open) setEnvironmentVisited(false);
+  }, [open, initialTab, initialSiteEnvironment]);
+  useEffect(() => {
+    if (open && activeTab === "environment") setEnvironmentVisited(true);
+  }, [open, activeTab]);
 
   // One shared fetch for both General (initial description/icon) and Info
   // (the full property list) — `nodes.get` is the same query every detail
@@ -115,6 +149,18 @@ export function NodeSettingsDialog({
   const tabs: { id: NodeSettingsTab; icon: LucideIcon; label: string }[] = [
     { id: "general", icon: SlidersHorizontal, label: t.tabGeneral },
     { id: "info", icon: Info, label: t.tabInfo },
+    ...(canManageSite
+      ? [{ id: "releases" as const, icon: History, label: messages.airapp.site.releases.manage }]
+      : []),
+    ...(canManageSite
+      ? [
+          {
+            id: "environment" as const,
+            icon: LockKeyhole,
+            label: messages.airapp.site.environment.title,
+          },
+        ]
+      : []),
     // Absent entirely (not disabled) when no host injected a panel — see
     // `node-settings-permissions-slot.tsx`.
     ...(renderPermissionsPanel
@@ -127,6 +173,7 @@ export function NodeSettingsDialog({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
         className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+        onCloseAutoFocus={onCloseAutoFocus}
         // Radix's own open-auto-focus grabs the FIRST focusable descendant —
         // here that's the "General" tab button, rendered before the Name
         // field in DOM order — which silently wins over the name input's own
@@ -189,6 +236,25 @@ export function NodeSettingsDialog({
                 nodeType={nodeType}
                 orpc={orpc}
               />
+            ) : null}
+            {activeTab === "releases" && canManageSite ? (
+              <AirAppSiteReleaseSettings
+                active={open}
+                key={nodeId}
+                nodeId={nodeId}
+                nodeName={nodeName}
+                orpc={orpc}
+              />
+            ) : null}
+            {canManageSite && (environmentVisited || activeTab === "environment") ? (
+              <div hidden={activeTab !== "environment"}>
+                <AirAppSiteEnvironmentSettings
+                  enabled={open && activeTab === "environment"}
+                  key={nodeId}
+                  nodeId={nodeId}
+                  orpc={orpc}
+                />
+              </div>
             ) : null}
             {activeTab === "permissions" && renderPermissionsPanel
               ? renderPermissionsPanel(nodeId, nodeName)
@@ -527,12 +593,6 @@ function GeneralTabContent({
           planGate={airAppEnginePlanGate}
           value={runnerKind}
         />
-      ) : null}
-      {nodeType === "airapp" &&
-      resolveEffectiveEngineChoice(runnerKind, appPreferred, appRequired) === "site" &&
-      (availableAirAppEngines.includes("site") ||
-        airAppEnginePlanGate?.lockedEngines.includes("site")) ? (
-        <AirAppSiteSettings nodeId={nodeId} orpc={orpc} />
       ) : null}
 
       <div className="flex justify-end border-border/50 border-t pt-4">

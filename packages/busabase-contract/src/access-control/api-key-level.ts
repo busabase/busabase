@@ -346,8 +346,14 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "fileTrees.preparePreview": node("read"),
   "airapps.runLocal": node("write"),
   "airapps.stopLocal": node("write"),
+  "airapps.previewStart": node("write"),
+  "airapps.previewState": node("read"),
+  "airapps.previewStop": node("write"),
   "airapps.siteState": node("write"),
+  "airapps.siteEnvironment": node("write"),
+  "airapps.siteSaveEnvironment": node("write"),
   "airapps.siteReleases": node("write"),
+  "airapps.siteLogs": node("write"),
   "airapps.siteRollback": node("write"),
   "airapps.siteDomains": node("write"),
   "airapps.siteBindDomain": node("write"),
@@ -490,6 +496,9 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "records.getMany": node("read"),
   "records.search": node("read"),
   "records.listChangeRequests": node("read"),
+  // Read-only dry run of `records.changeRequest` `operation: "revert"`; the
+  // write itself stays `node("changeRequest")` like every record edit.
+  "records.revertPreview": node("read"),
   "records.listLinks": node("read"),
 };
 

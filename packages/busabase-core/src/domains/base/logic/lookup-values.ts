@@ -17,9 +17,9 @@ import { buildBaseVisibilityExists, buildNodeVisibilityExists } from "../../../l
 import { toBaseVO } from "../../../logic/vo";
 import { applyRollup, isRollupCompatible, LOOKUP_ROLLUPS } from "../lookup/rollup";
 import { commitPayloadWithFields } from "./commit-payload-projection";
-
+import { legacyRelationLinks } from "./legacy-relation-links";
 import { lookupDependentFieldSlugs } from "./lookup-formulas";
-import { resolveReverseRelationValues } from "./reverse-relations";
+import { resolveReverseRelationValues, reverseOfFieldIdOf } from "./reverse-relations";
 
 type Db = Awaited<ReturnType<typeof getDb>>;
 type RecordLike = { id: string; baseId: string };
@@ -120,6 +120,43 @@ export const resolveLookupValues = async (
     const key = `${link.sourceRecordId}|${link.fieldSlug}`;
     targetsByLink.set(key, [...(targetsByLink.get(key) ?? []), link.targetRecordId]);
   }
+  const lookupRecordIds = lookupRecords.map((record) => record.id);
+  const reverseForwardFieldIds = new Set(
+    lookupRecords.flatMap((record) =>
+      (basesById.get(record.baseId)?.fields ?? []).flatMap((field) => {
+        const id = reverseOfFieldIdOf(field);
+        return id ? [id] : [];
+      }),
+    ),
+  );
+  const legacyLinks = await legacyRelationLinks(
+    db,
+    [
+      ...new Map(
+        [
+          ...[...basesById.values()].flatMap((base) => base.fields),
+          ...targetFields.filter((field) => reverseForwardFieldIds.has(field.id)),
+        ]
+          .filter((field) => field.type === "relation")
+          .map((field) => [field.id, field]),
+      ).values(),
+    ],
+    lookupRecordIds,
+    reverseForwardFieldIds.size ? lookupRecordIds : undefined,
+  );
+  const sourceIds = new Set(lookupRecordIds);
+  const legacyTargets = new Map<string, string[]>();
+  for (const link of legacyLinks) {
+    if (!sourceIds.has(link.sourceRecordId)) continue;
+    const key = `${link.sourceRecordId}|${link.fieldSlug}`;
+    const ids = legacyTargets.get(key) ?? [];
+    if (!ids.includes(link.targetRecordId)) legacyTargets.set(key, [...ids, link.targetRecordId]);
+  }
+  // A mixed legacy value may already have indexed plain IDs. The current
+  // projection supplies the complete order, including the decoded IDs.
+  for (const [key, ids] of legacyTargets) {
+    targetsByLink.set(key, [...new Set([...ids, ...(targetsByLink.get(key) ?? [])])]);
+  }
   // A lookup over a reverse relation column walks the link table backwards:
   // its "targets" are the records whose forward field links to this one.
   const reverseValues = await resolveReverseRelationValues(
@@ -131,6 +168,7 @@ export const resolveLookupValues = async (
         return fields ? [[record.baseId, fields] as const] : [];
       }),
     ),
+    legacyLinks,
   );
   for (const [recordId, values] of reverseValues) {
     for (const [slug, ids] of Object.entries(values)) {

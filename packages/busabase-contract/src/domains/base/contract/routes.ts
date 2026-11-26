@@ -33,6 +33,8 @@ import {
   recordGetManyInputSchema,
   recordGetManyResponseSchema,
   recordLinkSchema,
+  recordRevertPreviewInputSchema,
+  recordRevertPreviewSchema,
   recordSchema,
 } from "./record-schemas";
 import { viewChangeRequestInputSchema, viewSchema } from "./view-schemas";
@@ -242,6 +244,7 @@ export const recordContract = {
         "One SQL GROUP BY returning every bucket's exact count — the split a board column header or a summary tile needs, without reading the records themselves. " +
         "`fieldSlug` must name a `select` or `checkbox` field: their stored value IS the grouping key, so the buckets are exactly the ones a client would build. Grouping by a text, number or date field is rejected rather than approximated (text keys are truncated at the projection limit; date keys would bucket by the server's timezone, not the viewer's). " +
         "`viewId` and `filters` narrow the set first, with the same exactness rules as `records.count`: provably-exact conditions stay a cheap SQL aggregate, anything else falls back to evaluating every matching row server-side — exact, but not free on a large Base. " +
+        "A `find` (the grid's record search), a `filled` aggregate (records the `not_empty` filter would keep, any field type) or a `checked` aggregate (records the `is_true` filter would keep, checkbox fields only) always takes that evaluating path. " +
         'Groups come back keyed by raw choice id (or `"true"`/`"false"`), with `null` for records that have no value; labels are the client\'s to render.',
       successDescription:
         "Every group's exact count, plus the total across all groups. Groups with zero records are omitted — a Base's full choice list lives in its field definition, so the client already knows which buckets to render empty.",
@@ -289,10 +292,22 @@ export const recordContract = {
       tags: ["Records", "Change Requests"],
       summary: "Create record change request",
       successDescription:
-        "Creates a record change request selected by `operation`. All three operations are permission-aware: they merge immediately when the actor has write access on the Base's node, and land as a pending Change Request otherwise or when `autoMerge: false` is passed.",
+        "Creates a record change request selected by `operation`. Every operation is permission-aware: it merges immediately when the actor has write access on the Base's node, and lands as a pending Change Request otherwise or when `autoMerge: false` is passed. `revert` returns the record to its state just before a change request from its history by undoing that change request and every later one — preview it first with `records.revertPreview`.",
     })
     .input(recordChangeRequestInputSchema)
     .output(z.union([materializedRecordSchema, pendingChangeRequestSchema])),
+  revertPreview: oc
+    .route({
+      method: "GET",
+      path: "/records/{recordId}/revert-preview",
+      tags: ["Records", "Change Requests"],
+      summary: "Preview record revert",
+      description:
+        'Read-only. Shows what `records.changeRequest` with `operation: "revert"` would do: the change requests it undoes, each field it sets back, and pending change requests it leaves alone. A field deleted or converted to another type since then makes the revert impossible; that is a 409 naming the field. Pass the returned `planFingerprint` as `expectedPlanFingerprint` when submitting so the revert lands exactly as previewed.',
+      successDescription: "What rolling the record back to before the change request would do.",
+    })
+    .input(recordRevertPreviewInputSchema)
+    .output(recordRevertPreviewSchema),
   listChangeRequests: oc
     .route({
       method: "GET",

@@ -1,4 +1,5 @@
 import type { CoreI18nMessages } from "./messages";
+import { siteEnvironmentMessages } from "./site-environment";
 
 export const dashboardPt: CoreI18nMessages = {
   lookup: lookupPt,
@@ -500,10 +501,17 @@ export const dashboardPt: CoreI18nMessages = {
     requireSignInHint:
       "Qualquer pessoa com o link ainda pode abrir o formulário; somente visitantes conectados podem enviá-lo.",
     passwordLabel: "Senha",
-    passwordHint: "Deixe em branco para não usar senha",
-    passwordPlaceholder: "Defina uma senha",
-    passwordSet: "Há uma senha definida — digite uma nova para alterá-la ou remova-a",
-    passwordClear: "Remover senha",
+    passwordProtectionLabel: "Proteção por senha",
+    passwordProtectionHint: "Os visitantes precisam digitar a senha para abrir este link.",
+    passwordChange: "Alterar",
+    passwordSave: "Salvar",
+    passwordCancel: "Cancelar",
+    passwordLengthHint: "Use de 4 a 64 caracteres.",
+    passwordLegacy:
+      "Há uma senha definida, mas ela não pode ser exibida aqui. Troque-a por uma nova para vê-la e copiá-la.",
+    copyLinkAndPassword: "Copiar link e senha",
+    linkAndPasswordCopied: "Link e senha copiados",
+    linkAndPasswordClipboard: "Link: {url}\nSenha: {password}",
     expiryLabel: "Expira",
     expiryHint: "O link deixa de funcionar automaticamente no horário selecionado.",
     expiryNever: "Nunca",
@@ -782,6 +790,8 @@ export const dashboardPt: CoreI18nMessages = {
       phone: "Prévia no celular",
       signIn:
         "Leia o código para abrir esta prévia privada. Entre com a mesma conta no celular. Não é o Site publicado.",
+      sharedLink:
+        "Qualquer pessoa com este link pode visualizar esta versão por até 24 horas. Mantenha o link privado. Esta é uma prévia, não o Site publicado.",
       browserOnly:
         "Esta prévia é executada neste navegador. Prepare uma prévia de Site em «Publicar Site» para abrir no celular.",
       loopback:
@@ -792,7 +802,38 @@ export const dashboardPt: CoreI18nMessages = {
       openLink: "Abrir prévia",
     },
     site: {
+      environment: siteEnvironmentMessages.pt,
       publishUpdate: "Publicar atualização",
+      logs: {
+        contentHiddenTitle: "Conteúdo dos registos oculto",
+        contentHiddenDescription:
+          "Não é possível confirmar a configuração de segredos usada em alguns registos. As mensagens e os caminhos afetados são ocultados para proteger os dados sensíveis. As horas, métodos e códigos de estado continuam visíveis.",
+
+        button: "Registos",
+        versionButton: "Ver registos de {version}",
+        title: "Registos · {version}",
+        description:
+          "Registos de produção dos períodos de implementação desta versão nas últimas 24 horas. Os pedidos durante uma mudança de versão podem sobrepor-se.",
+        collectionHint:
+          "As novas implementações recolhem registos. As versões anteriores podem não ter registos; publique uma atualização e aguarde até que apareçam.",
+        loading: "A carregar registos de produção…",
+        loadFailed: "Não foi possível carregar os registos. Tente novamente.",
+        unavailable: "Os registos de produção não estão disponíveis nesta implementação.",
+        empty:
+          "Não foram encontrados registos para os períodos de implementação desta versão nas últimas 24 horas.",
+        refresh: "Atualizar registos",
+        close: "Fechar registos",
+        checkedAt: "Consultado às {time}",
+        truncated:
+          "A mostrar os últimos registos disponíveis. Outros eventos ou períodos de implementação podem ser omitidos.",
+        levels: {
+          debug: "Depuração",
+          info: "Informação",
+          log: "Registo",
+          warn: "Aviso",
+          error: "Erro",
+        },
+      },
       releases: {
         busy: "Uma publicação está sendo aplicada. A lista será atualizada automaticamente.",
         manage: "Gerenciar publicações",
@@ -824,6 +865,9 @@ export const dashboardPt: CoreI18nMessages = {
           "Escaneie para abrir o Site publicado. Alterações não publicadas do rascunho não estão incluídas.",
       },
       publish: {
+        alreadyLive:
+          "Esta versão já está publicada. Altere o aplicativo e prepare uma nova prévia para publicar uma atualização.",
+        readyToPublish: "Prévia verificada. Esta versão está pronta para publicar.",
         previewStale:
           "Os arquivos mudaram após esta prévia. Crie ou atualize a prévia do site antes de publicar.",
         noPreview: "Crie uma prévia do site antes de publicar.",
@@ -834,10 +878,10 @@ export const dashboardPt: CoreI18nMessages = {
         preserveBrowser: "A prévia no navegador continua funcionando enquanto você prepara o site.",
         checking: "Verificando se o site está pronto…",
         checkFailed: "Não foi possível verificar o site. Tente novamente.",
-        planRequired: "A hospedagem de sites está incluída a partir do plano {plan}.",
-        paidPlanRequired: "Este espaço precisa de um plano pago para hospedar um site.",
+        planRequired: "A publicação de sites está incluída a partir do plano {plan}.",
+        paidPlanRequired: "Este espaço precisa de um plano pago para publicar um site.",
         upgradeHint:
-          "Prepare o app e depois faça o upgrade do espaço para visualizar e publicar. Um link de prévia no navegador não é um site sempre disponível.",
+          "Você já pode visualizar uma prévia privada. Faça o upgrade deste espaço quando quiser publicar um site sempre disponível.",
         prepareTitle: "Preparar a versão web",
         prepareHint:
           "Peça ao agente para preparar uma versão web. Pode ser necessário alterar o código antes de publicar.",
@@ -851,7 +895,7 @@ export const dashboardPt: CoreI18nMessages = {
         refreshPreview: "Atualizar prévia do site",
         previewTitle: "Prévia privada do site",
         publishConsent:
-          "A versão revisada será publicada. Qualquer pessoa com o endereço poderá usar o site, incluindo os dados e as ações expostos pelo código.",
+          "Qualquer pessoa com o endereço do Site pode acessar esta versão e os dados e ações que ela oferece.",
       },
       statusNotLive: "Não publicado",
       statusLive: "Publicado",
@@ -887,7 +931,7 @@ export const dashboardPt: CoreI18nMessages = {
         guideNameHint:
           "Use a parte antes do seu domínio raiz, por exemplo shop para shop.company.com. Alguns provedores pedem o nome completo.",
         guideStepCheck:
-          "Volte aqui e clique em “{check}”. A propagação do DNS pode levar de alguns minutos a algumas horas; depois disso, o HTTPS é configurado automaticamente. Se também for necessário um registro TXT de verificação, ele aparecerá aqui depois que você adicionar o domínio.",
+          "Quando o CNAME de roteamento é resolvido, a Cloudflare verifica o hostname automaticamente e prepara HTTPS. Clique em “{check}” para ver o status; alterações de DNS podem demorar.",
         guideRootDomain:
           "Quer usar um domínio raiz como company.com? Isso só funciona se o seu provedor de DNS aceitar CNAME na raiz (CNAME flattening, ALIAS ou ANAME; a Cloudflare aceita). Caso contrário, use um subdomínio como www ou shop.",
         guideLink: "Ver o guia de configuração",
@@ -904,7 +948,7 @@ export const dashboardPt: CoreI18nMessages = {
         adding: "Adicionando…",
         pending: "Configuração pendente",
         pendingDnsHint:
-          "Adicione os registros abaixo no seu provedor de DNS e verifique novamente. As alterações de DNS podem levar tempo para aparecer.",
+          "Adicione o CNAME de roteamento no seu provedor de DNS e verifique novamente. Alterações de DNS podem demorar a aparecer.",
         pendingHttpsHint:
           "A propriedade do domínio foi verificada. O HTTPS está sendo preparado; verifique novamente em breve.",
         active: "Conectado",
@@ -921,8 +965,11 @@ export const dashboardPt: CoreI18nMessages = {
         },
         offlineHint:
           "O site está fora do ar. Todos os endereços do site mostram uma página não encontrada.",
+        advancedVerification: "Verificação avançada",
+        advancedHint:
+          "Use estas verificações opcionais de propriedade e certificado para migração ou antes de redirecionar o tráfego. A configuração normal de um subdomínio começa pelo CNAME de roteamento acima.",
         dnsInstructions:
-          "Adicione estes registros no seu provedor de DNS. Mantenha os outros registros necessários ao domínio. O proxy da Cloudflare é compatível após a verificação de que o domínio chega ao site.",
+          "Adicione este CNAME no seu provedor de DNS e verifique novamente. O proxy da Cloudflare é compatível após a verificação da rota do site.",
         dnsName: "Nome",
         dnsValue: "Valor / destino",
         httpInstructions:
@@ -1724,6 +1771,7 @@ export const dashboardPt: CoreI18nMessages = {
       "Digite alguns caracteres para buscar no conteúdo de registros e arquivos nesta aba.",
   },
   trash: {
+    deletedAt: "Excluído",
     title: "Lixeira",
     body: "Os itens arquivados ficam ocultos na barra lateral. Restaure para torná-los ativos novamente.",
     bases: "Bases",
@@ -1731,7 +1779,7 @@ export const dashboardPt: CoreI18nMessages = {
     noArchivedBasesBody: "As Bases que você arquivar aparecerão aqui.",
     foldersDocsSkills: "Pastas, documentos e skills",
     noArchivedItemsTitle: "Nenhum item arquivado",
-    noArchivedItemsBody: "As pastas, documentos e skills que você excluir aparecerão aqui.",
+    noArchivedItemsBody: "Os itens excluídos aparecerão aqui.",
     deleteForever: "Excluir para sempre",
     deletePermanentlyTitle: "Excluir permanentemente?",
     deletePermanentlyBody: 'Excluir permanentemente "{name}"? Esta ação não pode ser desfeita.',
@@ -1774,6 +1822,8 @@ export const dashboardPt: CoreI18nMessages = {
     changeIcon: "Alterar ícone",
     iconUploadLabel: "Enviar imagem",
     iconUploadFormatHint: "PNG, JPG, GIF ou WebP, até 2 MB",
+    restoreDefaultIcon: "Restaurar ícone padrão",
+    restoreDefaultIconHint: "Remove a imagem ou o emoji personalizado",
     cropDialogTitle: "Editar ícone",
     confirmCrop: "Aplicar",
     iconFileMustBeImage: "Selecione um arquivo de imagem",
@@ -2416,6 +2466,8 @@ export const dashboardPt: CoreI18nMessages = {
       'Isto abre um Change Request de exclusão para "{title}". O registro canônico continua visível até que a solicitação seja revisada e mesclada.',
     editRecord: "Editar registro",
     newRecordTitle: "Novo registro em {base}",
+    newRecordHelp:
+      "Precisa de um exemplo? Abra Prompts do agente → Criar um registro de prática. Confira o exemplo identificado como fictício antes de salvar. Para registros reais, forneça seus próprios dados e arquivos.",
     failedSaveChangeRequest: "Falha ao salvar o Change Request",
     invalidFields: "Verifique os seguintes campos: {fields}.",
     submitRequest: "Enviar solicitação",
@@ -2852,6 +2904,8 @@ export const dashboardPt: CoreI18nMessages = {
     untitledStep: "Etapa sem título",
     completed: "Concluído",
     previewFrame: "Pré-visualização de {name}",
+    htmlSourcePlainText:
+      "O código-fonte extenso é exibido como texto simples para manter a pré-visualização fluida. O conteúdo está completo.",
     save: "Salvar",
     saved: "Salvo",
     unsaved: "Alterações não salvas",

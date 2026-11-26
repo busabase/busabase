@@ -4,9 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { type ReactNode, useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 import { coreMessagesByLocale } from "../../../i18n/catalog";
+import { AssetContentUrlProvider } from "../../assets/hooks/asset-content-url-context";
 import { FilePreviewSurface } from "./file-preview-surface";
 import { FileViewerSlotProvider, type HostFileViewer } from "./file-viewer-slot";
 import {
@@ -60,6 +61,70 @@ afterEach(() => {
 });
 
 describe("FilePreviewSurface", () => {
+  it.each([false, true])(
+    "passes the %s Embed asset address through the actual host viewer slot",
+    (embedded) => {
+      const state: PreviewFullscreenState = { fullscreen: false, setFullscreen: () => undefined };
+      const expected = embedded
+        ? "/embed/emb_example/assets/ast_report/raw?token=link-secret"
+        : "/api/dev/attachment/original/report.pptx";
+      const file = (
+        <FilePreviewSurface
+          assetId="ast_report"
+          fullscreenState={state}
+          mimeType="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+          name="report.pptx"
+          url="/api/dev/attachment/original/report.pptx"
+        />
+      );
+      const hostViewer: HostFileViewer = {
+        canRender: (file) => file.name === "report.pptx",
+        render: (file) => (
+          <div data-testid="office-viewer" data-url={file.url}>
+            Report preview
+          </div>
+        ),
+      };
+      render(
+        <Providers>
+          <FileViewerSlotProvider value={hostViewer}>
+            {embedded ? (
+              <AssetContentUrlProvider
+                value={(id) => `/embed/emb_example/assets/${id}/raw?token=link-secret`}
+              >
+                {file}
+              </AssetContentUrlProvider>
+            ) : (
+              file
+            )}
+          </FileViewerSlotProvider>
+        </Providers>,
+      );
+      expect(screen.getByTestId("office-viewer").getAttribute("data-url")).toBe(expected);
+    },
+  );
+
+  it("uses the same Embed asset address for native image previews", () => {
+    const state: PreviewFullscreenState = { fullscreen: false, setFullscreen: () => undefined };
+    render(
+      <Providers>
+        <AssetContentUrlProvider
+          value={(id) => `/embed/emb_example/assets/${id}/raw?token=link-secret`}
+        >
+          <FilePreviewSurface
+            assetId="ast_image"
+            fullscreenState={state}
+            mimeType="image/png"
+            name="diagram.png"
+            url="/api/dev/attachment/original/diagram.png"
+          />
+        </AssetContentUrlProvider>
+      </Providers>,
+    );
+    expect(screen.getByRole("img").getAttribute("src")).toBe(
+      "/embed/emb_example/assets/ast_image/raw?token=link-secret",
+    );
+  });
   it.each([
     ["image/svg+xml", "img"],
     ["video/mp4", "video"],
@@ -216,6 +281,57 @@ describe("FilePreviewSurface with a host file viewer", () => {
     canRender: (file) => file.name.endsWith(".xlsx") || file.name.endsWith(".pdf"),
     render: (file) => <div data-testid="host-viewer">{`${file.name}|${file.url}`}</div>,
   };
+
+  it.each([
+    { mimeType: "application/pdf", syncWithUrl: false },
+    { mimeType: "application/pdf", syncWithUrl: true },
+    { mimeType: XLSX_MIME, syncWithUrl: false },
+    { mimeType: XLSX_MIME, syncWithUrl: true },
+  ])(
+    "preserves the $mimeType viewer and its options through fullscreen (URL sync: $syncWithUrl)",
+    async ({ mimeType, syncWithUrl }) => {
+      const renderViewer = vi.fn<HostFileViewer["render"]>(() => (
+        <input aria-label="Reading page" defaultValue="7" />
+      ));
+      const viewer: HostFileViewer = { canRender: () => true, render: renderViewer };
+      const { container } = render(
+        <FileViewerSlotProvider value={viewer}>
+          {syncWithUrl ? (
+            <UrlFullscreenHarness mimeType={mimeType} />
+          ) : (
+            <LocalFullscreenHarness mimeType={mimeType} />
+          )}
+        </FileViewerSlotProvider>,
+      );
+      const options =
+        mimeType === "application/pdf"
+          ? { fitToContainer: true, pdfScrollMode: "continuous" }
+          : undefined;
+      const page = screen.getByRole("textbox", { name: "Reading page" });
+      expect(renderViewer).toHaveBeenLastCalledWith(expect.anything(), options);
+      fireEvent.change(page, { target: { value: "24" } });
+
+      fireEvent.click(
+        screen.getByRole("button", { name: coreMessagesByLocale.en.airapp.enterFullscreen }),
+      );
+      await waitFor(() =>
+        expect(container.querySelector('[data-file-fullscreen="true"]')).not.toBeNull(),
+      );
+      expect(screen.getByRole("textbox", { name: "Reading page" })).toBe(page);
+      expect((page as HTMLInputElement).value).toBe("24");
+      expect(renderViewer).toHaveBeenLastCalledWith(expect.anything(), options);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: coreMessagesByLocale.en.airapp.exitFullscreen }),
+      );
+      await waitFor(() =>
+        expect(container.querySelector('[data-file-fullscreen="true"]')).toBeNull(),
+      );
+      expect(screen.getByRole("textbox", { name: "Reading page" })).toBe(page);
+      expect((page as HTMLInputElement).value).toBe("24");
+      expect(renderViewer).toHaveBeenLastCalledWith(expect.anything(), options);
+    },
+  );
 
   function renderSurface(
     file: { mimeType: string; name: string },

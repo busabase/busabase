@@ -73,17 +73,20 @@ export function PreviewFullscreenButton({
   label,
   available = true,
   onEnter,
+  className,
 }: {
   fullscreenState: PreviewFullscreenState;
   label: string;
   available?: boolean;
   /** Optional view-selection handoff before the preview surface grows. */
   onEnter?: () => void;
+  className?: string;
 }) {
   if (!available || fullscreenState.fullscreen) return null;
   return (
     <Button
       aria-label={label}
+      className={className}
       onClick={() => {
         onEnter?.();
         fullscreenState.setFullscreen(true);

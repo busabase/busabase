@@ -1,6 +1,6 @@
 import { GrepSourceSchema } from "busabase-contract/contract/grep-schemas";
 import { describe, expect, it } from "vitest";
-import { buildSkillMarkdown } from "../src/skill-doc";
+import { buildSkillMarkdown, renderOnboardingNextSteps } from "../src/skill-doc";
 
 /**
  * The skill doc is the agent-facing contract for the HTTP API. It previously told
@@ -42,7 +42,7 @@ const cloudWithoutPreselectedSpace = () =>
   });
 
 const setupDescription =
-  "Guide users through choosing and connecting to Busabase, authorizing Busabase Cloud when needed, and installing the Busabase Agent Skills for ongoing use.";
+  "Connect or install Busabase, including 帮我连接 Busabase / 安装 Busabase, with recommended choices, sign-in links, and ongoing agent skills.";
 
 function canonicalUrl(doc: string, label: "Cloud" | "Personal Desktop"): URL {
   const prefix = label === "Cloud" ? "- **A / Cloud:** " : "- **B / Personal Desktop:** ";
@@ -123,13 +123,50 @@ describe("buildSkillMarkdown advertises the batch/bulk/temp-ref/assets surface",
 });
 
 describe("generated Cloud onboarding", () => {
+  it("routes missing credentials through setup on the same host and preserves the target Space", () => {
+    const doc = buildSkillMarkdown("https://preview.busabase.test", {
+      mode: "cloud",
+      spaceId: "space_123",
+    });
+    const href = doc.match(/\[the official setup guide\]\(([^)]+)\)/)?.[1];
+    expect(href).toBeDefined();
+    if (!href) throw new Error("Missing official setup link");
+    const setupUrl = new URL(href);
+    expect(setupUrl.origin).toBe("https://preview.busabase.test");
+    expect(setupUrl.pathname).toBe("/SETUP_SKILL.md");
+    expect(setupUrl.searchParams.get("space")).toBe("space_123");
+    expect(setupUrl.searchParams.has("editionConfirmed")).toBe(false);
+    expect(doc).not.toContain("Settings → API Keys");
+    expect(local).not.toContain("**Setup required**");
+    expect(
+      buildSkillMarkdown("https://preview.busabase.test", {
+        mode: "cloud",
+        apiKey: "bso_test",
+        spaceId: "space_123",
+      }),
+    ).not.toContain("**Setup required**");
+  });
+
   it("installs both permanent Busabase skills explicitly", () => {
     for (const doc of [cloudBootstrap, localBootstrap]) {
       expect(doc).toMatch(
-        /^npx skills add busabase\/skills --skill busabase busabase-app-creator$/m,
+        /^npx skills add busabase\/skills --skill busabase busabase-app-creator --global --agent <current-agent> --yes$/m,
       );
       expect(doc).toContain("`busabase` and `busabase-app-creator` are permanent");
     }
+  });
+
+  it("tries a saved account only on its own host, so its key never reaches another deployment", () => {
+    const doc = buildSkillMarkdown("https://preview.busabase.test", {
+      mode: "cloud",
+      stage: "bootstrap",
+      editionConfirmed: true,
+    });
+    expect(doc).toContain("npx --yes busabase-cli@latest auth status --output json");
+    expect(doc).toContain("whose `baseUrl` is exactly `https://preview.busabase.test`");
+    expect(doc).toContain("npx --yes busabase-cli@latest whoami --output json --profile <profile>");
+    // `--base-url` swaps the host but not the saved key — never combine it with `whoami`.
+    expect(doc).not.toMatch(/whoami[^`\n]*--base-url/);
   });
 
   it("uses device authorization without exposing or requesting secrets", () => {
@@ -195,9 +232,7 @@ describe("generated Cloud onboarding", () => {
     });
 
     expect(cloudWithoutPreselectedSpace).toContain("availableSpaces");
-    expect(cloudWithoutPreselectedSpace).toContain(
-      "Always tell the user which Space was selected (name + id)",
-    );
+    expect(cloudWithoutPreselectedSpace).toContain("Show its name, keep ids in tool calls");
     expect(cloudWithoutPreselectedSpace).toContain("busabase-cli@latest space use <id>");
     expect(cloudWithoutPreselectedSpace).not.toContain(
       "if the selected Space is not the\none intended, switch with",
@@ -309,9 +344,13 @@ describe("bootstrap edition confirmation", () => {
   it("keeps an unconfirmed preference command-free and asks one A/B edition question", () => {
     for (const doc of [cloudDispatcher, desktopDispatcher]) {
       expect(doc).toContain("## Step 0 — Welcome and confirm the edition");
-      expect(doc).toContain("Your first reply must follow the model below");
+      expect(doc).toContain("your first reply must follow the model");
+      expect(doc).toContain("an already configured connection may be verified read-only");
       expect(doc).toContain("👋 Welcome! This is **Busabase** (https://busabase.com)");
-      expect(doc).toContain("every change I make goes in as a **ChangeRequest**, so you can");
+      expect(doc).toContain("You can see what I changed and undo it later.");
+      expect(doc).toContain("**A. Busabase Cloud** (recommended if you're unsure)");
+      expect(doc).toContain('"按推荐来" accepts the option');
+      expect(doc).toContain("an unanswered question is not a choice");
       expect(doc).toContain("Before I connect, which edition would you like to use?");
       expect(doc).toContain("**A. Busabase Cloud**");
       expect(doc).toContain("**B. Busabase Personal Desktop**");
@@ -409,9 +448,7 @@ describe("bootstrap edition confirmation", () => {
 
 describe("Cloud setup prefers a connected Busabase MCP integration over CLI login", () => {
   it("keeps the MCP-aware additions within the setup context budget", () => {
-    // +1,000 for the optional 3d invite-teammates step (agent-member-invitations), then +300:
-    // a fresh agent dry-running 3d guessed a missing address from a colleague's domain and could
-    // not tell how to send an admin invite, so the step now says both outright.
+    // Keep the full setup, including optional post-success choices, within the context budget.
     expect(Buffer.byteLength(cloudBootstrap, "utf8")).toBeLessThan(20_800);
     expect(Buffer.byteLength(cloudWithoutPreselectedSpace(), "utf8")).toBeLessThan(21_300);
   });
@@ -464,8 +501,10 @@ describe("Cloud setup prefers a connected Busabase MCP integration over CLI logi
 
   it("treats bootstrapRequired on a fresh identity as expected, not a probe failure", () => {
     const doc = cloudWithoutPreselectedSpace();
-    expect(doc).toContain("With no preselected Space, use the only result");
-    expect(doc).toContain("accept a new\npersonal Space when the identity has no memberships");
+    expect(doc).toContain(
+      "With no preselected Space, honor a user-named or verified configured target",
+    );
+    expect(doc).toContain("Accept a new\npersonal Space when the identity has no memberships");
   });
 
   it("falls back to CLI sign-in only when no MCP integration is available or it fails", () => {
@@ -545,12 +584,12 @@ describe("Cloud setup's final handoff installs skills without changing transport
       "Have the Harness install both skills into its persistent skill store",
     );
     expect(cloudBootstrap).toMatch(
-      /^npx skills add busabase\/skills --skill busabase busabase-app-creator$/m,
+      /^npx skills add busabase\/skills --skill busabase busabase-app-creator --global --agent <current-agent> --yes$/m,
     );
     expect(cloudBootstrap).toContain("MCP remains the transport when it connected successfully");
     expect(cloudBootstrap).toContain("installing skills does not require CLI\ncredentials");
     expect(cloudBootstrap).toContain(
-      "Finish only after both skills are available in future sessions",
+      "With a persistent store, finish only after both skills are available in future sessions",
     );
   });
 
@@ -576,7 +615,7 @@ describe("Cloud setup's final handoff installs skills without changing transport
     expect(localBootstrap).not.toContain("MCP");
     expect(localBootstrap).not.toContain("CLI path");
     expect(localBootstrap).toMatch(
-      /^npx skills add busabase\/skills --skill busabase busabase-app-creator$/m,
+      /^npx skills add busabase\/skills --skill busabase busabase-app-creator --global --agent <current-agent> --yes$/m,
     );
     expect(localBootstrap).toContain(
       "One step left before everyday use. Install both permanent skills",
@@ -584,45 +623,58 @@ describe("Cloud setup's final handoff installs skills without changing transport
   });
 });
 
-describe("Cloud setup offers to invite teammates once, after initialization", () => {
-  const step = (doc: string) => doc.slice(doc.indexOf("**3d. Offer to invite teammates"));
-
-  it("asks only after bootstrap completion is marked and verified, and never blocks it", () => {
+describe("post-setup choices", () => {
+  it("offers invitations after setup success for new and existing spaces", () => {
     for (const doc of [cloudBootstrap, cloudWithoutPreselectedSpace()]) {
-      const offer = doc.indexOf("**3d. Offer to invite teammates — optional, ask once**");
-      expect(offer).toBeGreaterThan(doc.indexOf("/api/v1/onboarding/bootstrap-complete"));
-      expect(offer).toBeGreaterThan(doc.indexOf("no follow-up `whoami` is needed"));
-      expect(offer).toBeLessThan(doc.indexOf("## Step 3 — The last setup step"));
-      expect(step(doc)).toContain("only after completion returned version 1");
-      expect(step(doc)).toContain("Either way, continue to Step 3.");
-      expect(step(doc)).toContain("**C** → skip; never ask again.");
-      expect(step(doc)).toContain("ask for any missing address (never guess one)");
-      expect(step(doc)).toContain("`--role admin` needs a `manage` key");
+      const menu = doc.indexOf("## What would you like to do next?");
+      expect(menu).toBeGreaterThan(doc.indexOf("## 🎉 You're set up"));
+      expect(menu).toBeGreaterThan(doc.indexOf("## Step 3 — The last setup step"));
+      expect(doc.indexOf("members create-invite-link")).toBeGreaterThan(menu);
+      expect(doc).not.toContain("**3d. Offer to invite teammates");
+      expect(doc).not.toContain("| 👥 **Invite teammates**");
+      expect(doc).toContain("new or existing space");
     }
   });
 
-  it("confirms the exact recipients before any email, and defaults to a link", () => {
-    const offer = step(cloudBootstrap);
-    expect(offer).toContain("repeat the exact addresses and role");
-    expect(offer).toContain("get a yes");
-    expect(offer).toContain("members invite --email <address>");
-    expect(offer).toContain("members create-invite-link`; give them its `url`");
-    expect(offer).toContain(
-      "https://busabase.com/dashboard?settings=space&tab=people (Members settings)",
+  it("keeps optional invitations separate from connecting another assistant", () => {
+    // The role check sits above the menu so a member never sees "Bring a friend".
+    const roleCheck =
+      "List C only if `npx --yes busabase-cli@latest whoami --output json` shows `member.role` owner/admin; else omit it.";
+    expect(cloudBootstrap).toContain(roleCheck);
+    expect(cloudBootstrap.indexOf(roleCheck)).toBeLessThan(
+      cloudBootstrap.indexOf("> **C. Bring a friend**"),
     );
+    expect(renderOnboardingNextSteps({ mode: "cloud", transport: "mcp" })).toContain(
+      "List C only if `auth_verify` shows `member.role` owner/admin; else omit it.",
+    );
+    expect(localBootstrap).not.toContain("List C only if");
+    expect(cloudBootstrap).toContain("Each assistant");
+    expect(cloudBootstrap).toContain("members create-invite-link");
+    expect(cloudBootstrap).toContain("SETUP_SKILL.md?invite=…");
+    expect(cloudBootstrap).toContain("Inviting people differs from connecting your own assistant");
   });
 
-  it("lists the optional step in the journey table without renumbering the setup steps", () => {
+  it("invites by email after confirming addresses, and explains 403 and 404 apart", () => {
     expect(cloudBootstrap).toContain(
-      "| 4 | 👥 **Invite teammates** (optional) | Step 2 (3d) | offered once after a new Space is verified |",
+      "confirm each address and role (member unless asked), then run `npx --yes busabase-cli@latest members invite --email <address>` once per address",
     );
-    expect(cloudBootstrap).toContain("| 5 | 🎓 **Skills installed** | Step 3 |");
+    expect(cloudBootstrap).toContain("403: not owner/admin, or admin needs a manage key");
+    expect(cloudBootstrap).toContain(
+      "404: this server cannot\ninvite by API — point to https://busabase.com/dashboard?settings=space&tab=people",
+    );
+    // Desktop has no members API: no invitation menu entry and no invitation commands.
+    expect(localBootstrap).not.toContain("members invite");
+    expect(localBootstrap).not.toContain("members create-invite-link");
+    expect(cloudBootstrap).toContain("| 4 | 🎓 **Skills installed** | Step 3 |");
     expect(localBootstrap).toContain("| 4 | 🎓 **Skills installed** | Step 4 |");
   });
 
-  it("never offers invitations on Personal Desktop, which has no members", () => {
-    expect(localBootstrap).not.toContain("invite teammates");
+  it("offers local collaboration without Cloud invitation APIs on Desktop", () => {
+    expect(localBootstrap).toContain("Both assistants must run on this actual computer");
+    expect(localBootstrap).not.toContain("members create-invite-link");
     expect(localBootstrap).not.toContain("members invite");
+    expect(localBootstrap).not.toContain("**C. Bring a friend**");
+    expect(localBootstrap).not.toContain("**D. Join a space");
   });
 });
 

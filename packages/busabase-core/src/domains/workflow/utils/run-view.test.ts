@@ -132,6 +132,17 @@ describe("workflowRunStepStates", () => {
     expect(Object.fromEntries(states)).toEqual({ trigger: "done", hook: "failed" });
   });
 
+  it("marks an approval step as waiting for approval", () => {
+    const states = workflowRunStepStates(
+      run({
+        status: "waiting_approval",
+        cursorNodeId: "review",
+        pause: { kind: "approval", nodeId: "review", resumeAt: null },
+      }),
+    );
+    expect(states.get("review")).toBe("waiting_approval");
+  });
+
   it("is empty without a run", () => {
     expect(workflowRunStepStates(null).size).toBe(0);
   });

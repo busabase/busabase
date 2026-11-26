@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/client";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppSiteActionVO } from "busabase-contract/domains/airapp/contract";
 import { describe, expect, it, vi } from "vitest";
@@ -29,11 +30,14 @@ const deployed = (
 
 const createRunner = () => {
   const call = vi.fn<() => Promise<AirAppSiteActionVO>>();
-  const orpc = { airapps: { siteDeployPreview: { call } } } as unknown as BusabaseQueryUtils;
+  const readState = vi.fn(async () => deployed("current").state);
+  const orpc = {
+    airapps: { siteDeployPreview: { call }, siteState: { call: readState } },
+  } as unknown as BusabaseQueryUtils;
   const runner = new SiteRunner({ orpc, nodeId: "node-1" });
   const onReady = vi.fn<(path: string) => void>();
   runner.onReady(onReady);
-  return { call, runner, onReady };
+  return { call, runner, onReady, readState };
 };
 
 describe("SiteRunner", () => {
@@ -93,6 +97,45 @@ describe("SiteRunner", () => {
     complete(deployed("version-1"));
     await started;
 
+    expect(onReady).not.toHaveBeenCalled();
+  });
+  it.each([
+    { previewVersion: null, previewUrl: null },
+    { previewStale: true },
+    { previewEnvironmentStale: true },
+  ])("does not upload a Vault preview that needs preparation: %j", async (changes) => {
+    const { call, runner, onReady, readState } = createRunner();
+    readState.mockResolvedValue({
+      ...deployed("current").state,
+      ...changes,
+      environmentDeploymentLock: { reason: "SPACE_VAULT_MANAGE_REQUIRED" },
+    });
+    await expect(runner.start()).rejects.toMatchObject({ denial: "space-vault-manage" });
+    expect(call).not.toHaveBeenCalled();
+    expect(onReady).not.toHaveBeenCalled();
+  });
+  it("reuses a prepared Vault preview despite the deployment lock", async () => {
+    const { call, runner, onReady, readState } = createRunner();
+    readState.mockResolvedValue({
+      ...deployed("current").state,
+      environmentDeploymentLock: { reason: "SPACE_VAULT_MANAGE_REQUIRED" },
+    });
+    call.mockResolvedValue(deployed("current"));
+
+    await runner.start();
+
+    expect(call).toHaveBeenCalledExactlyOnceWith({ nodeId: "node-1" });
+    expect(onReady).toHaveBeenCalledExactlyOnceWith(
+      "/api/airapp-preview/node-1/?__busabase_site_version=current",
+    );
+  });
+  it("classifies a permission change after a successful preflight without retrying", async () => {
+    const { call, runner, onReady } = createRunner();
+    call.mockRejectedValue(
+      new ORPCError("FORBIDDEN", { data: { reason: "SPACE_VAULT_MANAGE_REQUIRED" } }),
+    );
+    await expect(runner.start()).rejects.toMatchObject({ denial: "space-vault-manage" });
+    expect(call).toHaveBeenCalledTimes(1);
     expect(onReady).not.toHaveBeenCalled();
   });
 });

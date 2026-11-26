@@ -8,6 +8,7 @@ import { type ComponentProps, type ReactNode, useState } from "react";
 import { Streamdown, type Components as StreamdownComponents } from "streamdown";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
+import { useResolvedAssetBody } from "../../assets/hooks/asset-content-url-context";
 import { fieldDisplayKind, fieldLinkPrefix, isFileFieldType } from "../../base/field-types";
 import { getDateFieldOptions, parseDateFieldValue } from "../../base/utils/date-value";
 import { embedAspectRatio, embedHeight, resolveEmbedPreview } from "../../base/utils/embed";
@@ -63,13 +64,20 @@ export const shouldCollapsePreview = (field: BaseFieldVO | undefined, value: unk
   return text.length > lengthThreshold || text.split(/\r?\n/).length > lineThreshold;
 };
 
-export function FieldBadge({ chip }: { chip: FieldChip }) {
+/** `highlight` marks a record find's query in the label (see `useRecordFindHighlighter`). */
+export function FieldBadge({
+  chip,
+  highlight,
+}: {
+  chip: FieldChip;
+  highlight?: (text: string) => ReactNode;
+}) {
   return (
     <span
       className={`inline-flex max-w-full items-center truncate rounded-md border px-2 py-0.5 font-medium text-xs ${getChoiceBadgeClass(chip.color)}`}
       title={chip.label}
     >
-      {chip.label}
+      {highlight ? highlight(chip.label) : chip.label}
     </span>
   );
 }
@@ -77,14 +85,20 @@ export function FieldBadge({ chip }: { chip: FieldChip }) {
 export function FieldBadgeList({
   chips,
   className = "",
+  highlight,
 }: {
   chips: FieldChip[];
   className?: string;
+  highlight?: (text: string) => ReactNode;
 }) {
   return (
     <div className={`flex min-w-0 flex-wrap items-center gap-1.5 ${className}`}>
       {chips.map((chip, index) => (
-        <FieldBadge chip={chip} key={`${chip.label}:${chip.color ?? ""}:${index}`} />
+        <FieldBadge
+          chip={chip}
+          highlight={highlight}
+          key={`${chip.label}:${chip.color ?? ""}:${index}`}
+        />
       ))}
     </div>
   );
@@ -172,9 +186,11 @@ export const mdComponents: StreamdownComponents = {
   ),
   thead: ({ children }) => <thead className="bg-muted/50">{children as ReactNode}</thead>,
   th: ({ children }) => (
-    <th className="border-b px-3 py-1.5 text-left font-semibold">{children as ReactNode}</th>
+    <th className="min-w-20 border-b px-3 py-1.5 text-left font-semibold">
+      {children as ReactNode}
+    </th>
   ),
-  td: ({ children }) => <td className="border-b px-3 py-1.5">{children as ReactNode}</td>,
+  td: ({ children }) => <td className="min-w-20 border-b px-3 py-1.5">{children as ReactNode}</td>,
 };
 
 /**
@@ -238,12 +254,13 @@ export function MarkdownFieldPreview({
   className?: string;
   value: string;
 }) {
+  const previewValue = useResolvedAssetBody(value);
   return (
     <SourceTogglePreview
       className={className}
       preview={
         <div className="min-w-0 break-words text-sm leading-7 [word-break:break-word] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-          <Streamdown components={mdComponents}>{markdownPreviewSource(value)}</Streamdown>
+          <Streamdown components={mdComponents}>{markdownPreviewSource(previewValue)}</Streamdown>
         </div>
       }
       source={value}
@@ -460,6 +477,9 @@ export function FieldValuePreview({
   records = [],
   record,
   value,
+  showAllLookupValues = false,
+  showLookupSources = true,
+  collectionTrailing,
 }: {
   className?: string;
   field?: BaseFieldVO;
@@ -473,6 +493,10 @@ export function FieldValuePreview({
   records?: RecordVO[];
   record?: RecordVO;
   value: unknown;
+  /** Detail views render full lookup values and wrap relation labels. */
+  showAllLookupValues?: boolean;
+  showLookupSources?: boolean;
+  collectionTrailing?: ReactNode;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -484,6 +508,9 @@ export function FieldValuePreview({
   if (field?.type === "lookup") {
     return (
       <LookupFieldValue
+        showAllValues={showAllLookupValues}
+        showSourcesButton={showLookupSources}
+        trailing={collectionTrailing}
         computed={computed}
         field={field}
         fieldUsers={fieldUsers}
@@ -536,7 +563,9 @@ export function FieldValuePreview({
           const label = linkedRecord
             ? getRecordTitle(linkedRecord, messages)
             : shortIdentifier(recordId);
-          const chipClassName = "max-w-64 truncate rounded-md border bg-card px-2 py-0.5 text-xs";
+          const chipClassName = showAllLookupValues
+            ? "max-w-full whitespace-normal break-words rounded-md border bg-card px-2 py-0.5 text-xs"
+            : "max-w-64 truncate rounded-md border bg-card px-2 py-0.5 text-xs";
           // A relation whose target has been archived used to render exactly
           // like a live one — same border, same colour, same link — so a row
           // could point at something sitting in the trash with nothing on
@@ -573,6 +602,7 @@ export function FieldValuePreview({
             </span>
           );
         })}
+        {collectionTrailing}
       </div>
     );
   }
@@ -590,7 +620,7 @@ export function FieldValuePreview({
     return <span className="text-muted-foreground">-</span>;
   }
 
-  const shouldCollapse = shouldCollapsePreview(field, value);
+  const shouldCollapse = !showAllLookupValues && shouldCollapsePreview(field, value);
 
   if (kind === "markdown") {
     const md = fieldValueToString(value);
@@ -649,11 +679,18 @@ export function FieldValuePreview({
     );
   }
 
-  const rendered = (
-    <div className={`min-w-0 whitespace-pre-wrap break-words leading-6 ${className}`}>{text}</div>
-  );
   // Multi-line text (longtext / ai_summary) gets the same collapse + fullscreen chrome.
   const isMultiline = Boolean(field && ["longtext", "ai_summary"].includes(field.type));
+  // Plain text starts at the very top, right under the fullscreen button that
+  // `MultilineFieldPreview` pins to its corner — keep the text clear of it.
+  // (Markdown and HTML open on their Preview/Source row, which has the room.)
+  const rendered = (
+    <div
+      className={`min-w-0 whitespace-pre-wrap break-words leading-6 ${isMultiline ? "pr-8" : ""} ${className}`}
+    >
+      {text}
+    </div>
+  );
   return isMultiline ? (
     <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
       {rendered}
@@ -672,6 +709,9 @@ export function LookupFieldValue({
   draft = false,
   presentation = "flow",
   rowHeight = 48,
+  showAllValues = false,
+  showSourcesButton = true,
+  trailing,
 }: {
   field: BaseFieldVO;
   computed?: LookupComputedVO;
@@ -681,6 +721,9 @@ export function LookupFieldValue({
   draft?: boolean;
   presentation?: "flow" | "grid";
   rowHeight?: number;
+  showAllValues?: boolean;
+  showSourcesButton?: boolean;
+  trailing?: ReactNode;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -702,6 +745,7 @@ export function LookupFieldValue({
   const renderValue = (item: unknown, index: number) =>
     displayField ? (
       <FieldValuePreview
+        showAllLookupValues={showAllValues}
         field={displayField}
         fieldUsers={fieldUsers}
         key={index}
@@ -709,7 +753,12 @@ export function LookupFieldValue({
         value={rollup === "values" ? lookupItemValue(displayField, item) : item}
       />
     ) : (
-      <span className="max-w-full truncate" key={index}>
+      <span
+        className={
+          showAllValues ? "max-w-full whitespace-pre-wrap break-words" : "max-w-full truncate"
+        }
+        key={index}
+      >
         {getFieldPreviewText(field, item, messages, locale) || "-"}
       </span>
     );
@@ -872,7 +921,7 @@ export function LookupFieldValue({
       ) : attachmentValues ? (
         <AttachmentValuePreview
           className={gridAttachments ? "flex-1" : undefined}
-          compact
+          compact={!showAllValues}
           presentation={presentation}
           rowHeight={rowHeight}
           value={values}
@@ -880,9 +929,9 @@ export function LookupFieldValue({
       ) : grid ? (
         <div className="min-w-0 flex-1">{renderGridValue()}</div>
       ) : (
-        values.slice(0, 3).map(renderValue)
+        (showAllValues ? values : values.slice(0, 3)).map(renderValue)
       )}
-      {canExpand ? (
+      {canExpand && showSourcesButton ? (
         <button
           aria-label={messages.lookup.details}
           className="inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
@@ -894,13 +943,14 @@ export function LookupFieldValue({
           title={messages.lookup.details}
           type="button"
         >
-          {!grid && !attachmentValues && values.length > 3 ? (
+          {!showAllValues && !grid && !attachmentValues && values.length > 3 ? (
             `+${values.length - 3}`
           ) : (
             <List size={13} />
           )}
         </button>
       ) : null}
+      {trailing}
       <Dialog onOpenChange={setOpen} open={open}>
         <DialogContent
           className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg overflow-y-auto"

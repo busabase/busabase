@@ -3,108 +3,49 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { Button } from "kui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
-import { Check, Copy, History, Loader2, RotateCcw } from "lucide-react";
+import { Check, Copy, History, Loader2, Logs, RotateCcw } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { ShareLinkActions } from "../../dashboard/components/share-link-actions";
-import type { SidePanelTabProps } from "../../dashboard/side-panel-registry";
-import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
 import {
-  AIRAPP_SITE_RELEASES_TAB_TYPE,
-  AirAppSiteReleasesPayloadSchema,
-  airAppSiteReleasesTabId,
-} from "../utils/site-release-panel";
+  readSiteAccessDenial,
+  type SiteAccessDenial,
+  siteAccessMessage,
+  siteDeploymentDenial,
+} from "../utils/site-access";
+import { AirAppPublishToSite } from "./AirAppPublishToSite";
 import { AirAppSiteSettings } from "./AirAppSiteControls";
+import { AirAppSiteLogs } from "./AirAppSiteLogs";
 
 interface AirAppSiteReleasesProps {
   orpc: BusabaseQueryUtils;
   nodeId: string;
   nodeName: string;
-  compact?: boolean;
 }
 
-/** Production recovery stays beside publication, separate from the working preview. */
-export function AirAppSiteReleases(props: AirAppSiteReleasesProps) {
-  const messages = useCoreI18n();
-  const client = useQueryClient();
-  const tabId = airAppSiteReleasesTabId(props.nodeId);
-  const active = useSidePanelStore((state) => state.isOpen && state.activeTabId === tabId);
-  return (
-    <TooltipProvider delayDuration={350}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            aria-label={messages.airapp.site.releases.manage}
-            aria-pressed={active}
-            data-airapp-release-management=""
-            className={
-              props.compact
-                ? "h-8 w-8 gap-1.5 px-0 @min-[900px]/airapp-toolbar:w-auto @min-[900px]/airapp-toolbar:px-2.5"
-                : undefined
-            }
-            onClick={() => {
-              const input = { nodeId: props.nodeId };
-              void Promise.all([
-                client.invalidateQueries({
-                  queryKey: props.orpc.airapps.siteState.queryOptions({ input }).queryKey,
-                }),
-                client.invalidateQueries({
-                  queryKey: props.orpc.airapps.siteReleases.queryOptions({ input }).queryKey,
-                }),
-              ]);
-              const payload = { nodeId: props.nodeId, nodeName: props.nodeName };
-              const panel = useSidePanelStore.getState();
-              panel.updateTabPayload(tabId, payload);
-              panel.openTab({
-                id: tabId,
-                type: AIRAPP_SITE_RELEASES_TAB_TYPE,
-                title: `${props.nodeName} · ${messages.airapp.site.releases.manage}`,
-                payload,
-              });
-            }}
-            size="sm"
-            title={props.compact ? undefined : messages.airapp.site.releases.manage}
-            type="button"
-            variant="outline"
-          >
-            <History aria-hidden="true" className="size-3.5" />
-            <span
-              className={
-                props.compact ? "hidden @min-[900px]/airapp-toolbar:inline" : "hidden sm:inline"
-              }
-            >
-              {messages.airapp.site.releases.manage}
-            </span>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent className="text-xs">{messages.airapp.site.releases.manage}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
-/** Shares the workspace panel's tab, resize, maximize and mobile controls. */
-export function AirAppSiteReleasesPanel({ orpc, payload }: SidePanelTabProps) {
-  const parsed = AirAppSiteReleasesPayloadSchema.safeParse(payload);
-  return parsed.success ? <ReleaseContents orpc={orpc} {...parsed.data} /> : null;
-}
-
-function ReleaseContents({ orpc, nodeId, nodeName }: AirAppSiteReleasesProps) {
+/** Website configuration and release history inside the AirApp's node settings. */
+export function AirAppSiteReleaseSettings({
+  orpc,
+  nodeId,
+  nodeName,
+  active,
+  initialSettingsOpen = false,
+}: AirAppSiteReleasesProps & { active: boolean; initialSettingsOpen?: boolean }) {
   const messages = useCoreI18n();
   const copy = messages.airapp.site.releases;
   const locale = useCoreLocale();
   const client = useQueryClient();
   const id = useId();
   const confirmationRef = useRef<HTMLDivElement>(null);
+  const logsTriggerRef = useRef<HTMLButtonElement>(null);
   const [target, setTarget] = useState<string | null>(null);
+  const [logsVersion, setLogsVersion] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const active = useSidePanelStore(
-    (state) => state.isOpen && state.activeTabId === airAppSiteReleasesTabId(nodeId),
-  );
+  const [accessDenied, setAccessDenied] = useState<SiteAccessDenial | null>(null);
+  const settingsRef = useRef<HTMLDetailsElement>(null);
   const siteOptions = orpc.airapps.siteState.queryOptions({ input: { nodeId } });
   const releaseOptions = orpc.airapps.siteReleases.queryOptions({ input: { nodeId } });
   const site = useQuery({
@@ -123,6 +64,18 @@ function ReleaseContents({ orpc, nodeId, nodeName }: AirAppSiteReleasesProps) {
     refetchInterval: (query) =>
       active && query.state.data?.status === "deploying" ? 2_000 : false,
   });
+  useEffect(() => {
+    if (
+      !active ||
+      !initialSettingsOpen ||
+      site.isPending ||
+      releases.isPending ||
+      !settingsRef.current
+    )
+      return;
+    settingsRef.current.open = true;
+    settingsRef.current.scrollIntoView?.({ block: "nearest" });
+  }, [active, initialSettingsOpen, site.isPending, releases.isPending]);
   const data = releases.data;
   const versions = [...(data?.versions ?? [])].sort(
     (a, b) => Number(b.isCurrent) - Number(a.isCurrent) || b.releaseNumber - a.releaseNumber,
@@ -138,12 +91,26 @@ function ReleaseContents({ orpc, nodeId, nodeName }: AirAppSiteReleasesProps) {
       toast.success(copy.rollbackDone);
     },
     onError: (cause) => {
-      setError(cause instanceof Error ? cause.message : String(cause));
-      void Promise.all([site.refetch(), releases.refetch()]);
+      const denial = readSiteAccessDenial(cause);
+      setAccessDenied(denial);
+      setError(denial ? null : cause instanceof Error ? cause.message : String(cause));
+      if (!denial) void Promise.all([site.refetch(), releases.refetch()]);
     },
   });
+  const denial =
+    accessDenied ??
+    readSiteAccessDenial(site.error) ??
+    readSiteAccessDenial(releases.error) ??
+    siteDeploymentDenial(site.data);
+  const permissionMessage = denial
+    ? siteAccessMessage(messages.airapp.site.environment, denial)
+    : null;
   const busy = rollback.isPending || data?.status === "deploying";
-  const canRollback = site.data?.engine === "available" && Boolean(data?.available);
+  const canRollback =
+    site.data?.engine === "available" &&
+    !site.data.publicationLock &&
+    !denial &&
+    Boolean(data?.available);
   const checking = site.isFetching || releases.isFetching || !active;
   const stamp = (value: string) =>
     new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(
@@ -151,6 +118,7 @@ function ReleaseContents({ orpc, nodeId, nodeName }: AirAppSiteReleasesProps) {
     );
   const name = (version: string, releaseNumber?: number) =>
     releaseNumber ? `v${releaseNumber}` : version.slice(0, 10);
+  const logsId = (version: string) => `${id}-logs-${encodeURIComponent(version)}`;
   const selected = data?.versions.find(
     (version) => version.version === target && version.canRollback,
   );
@@ -172,28 +140,62 @@ function ReleaseContents({ orpc, nodeId, nodeName }: AirAppSiteReleasesProps) {
   if (site.isError || releases.isError) {
     return (
       <div className="space-y-3 p-6" role="alert">
-        <p className="text-destructive text-sm">{copy.loadFailed}</p>
-        <Button
-          onClick={() => void Promise.all([site.refetch(), releases.refetch()])}
-          size="sm"
-          variant="outline"
-        >
-          {messages.common.retry}
-        </Button>
+        <p className="text-destructive text-sm">{permissionMessage ?? copy.loadFailed}</p>
+        {!denial ? (
+          <Button
+            onClick={() => void Promise.all([site.refetch(), releases.refetch()])}
+            size="sm"
+            variant="outline"
+          >
+            {messages.common.retry}
+          </Button>
+        ) : null}
       </div>
     );
   }
 
   return (
-    <div
-      className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5"
-      data-airapp-release-panel=""
-    >
-      <section aria-label={messages.airapp.site.addressLabel} className="space-y-3">
-        <AirAppSiteSettings enabled={active} nodeId={nodeId} orpc={orpc} />
+    <div className="space-y-6" data-airapp-release-panel="">
+      <section
+        aria-label={messages.airapp.site.addressLabel}
+        className="space-y-3 border-border border-b bg-background py-2"
+        data-airapp-release-summary=""
+      >
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <p className="font-medium text-sm">
+              {site.data?.publication === "live"
+                ? messages.airapp.site.statusLive
+                : site.data?.publication === "live-with-changes"
+                  ? messages.airapp.site.statusLiveWithChanges
+                  : messages.airapp.site.statusNotLive}
+            </p>
+            {address ? (
+              <a
+                aria-label={address}
+                className="block truncate text-muted-foreground text-sm underline-offset-2 hover:text-foreground hover:underline"
+                href={address}
+                rel="noreferrer"
+                target="_blank"
+                title={address}
+              >
+                {address}
+              </a>
+            ) : null}
+          </div>
+          <AirAppPublishToSite
+            compact
+            nodeId={nodeId}
+            nodeName={nodeName}
+            orpc={orpc}
+            showButton={active}
+          />
+        </div>
         {address ? (
-          <div className="space-y-2">
+          <div className="flex items-center gap-1">
             <Button
+              aria-label={copied ? copy.copied : copy.copyAddress}
+              title={copied ? copy.copied : copy.copyAddress}
               onClick={async () => {
                 try {
                   await navigator.clipboard.writeText(address);
@@ -203,27 +205,37 @@ function ReleaseContents({ orpc, nodeId, nodeName }: AirAppSiteReleasesProps) {
                   setCopyFailed(true);
                 }
               }}
-              size="sm"
-              variant="outline"
+              size="icon-sm"
+              variant="ghost"
             >
               {copied ? (
-                <Check aria-hidden="true" className="size-3.5" />
+                <Check aria-hidden="true" className="size-4" />
               ) : (
-                <Copy aria-hidden="true" className="size-3.5" />
+                <Copy aria-hidden="true" className="size-4" />
               )}
-              {copied ? copy.copied : copy.copyAddress}
             </Button>
-            {copyFailed ? (
-              <p className="text-destructive text-xs" role="alert">
-                {copy.copyFailed}
-              </p>
-            ) : null}
             {site.data?.isPublic ? (
-              <>
-                <p className="text-muted-foreground text-xs">{copy.publicQrHint}</p>
-                <ShareLinkActions title={nodeName} url={address} />
-              </>
+              <ShareLinkActions
+                compact
+                description={copy.publicQrHint}
+                title={nodeName}
+                url={address}
+              />
             ) : null}
+          </div>
+        ) : null}
+        {copyFailed && address ? (
+          <div className="space-y-1">
+            <p className="text-destructive text-xs" role="alert">
+              {copy.copyFailed}
+            </p>
+            <input
+              aria-label={copy.copyAddress}
+              className="h-8 w-full rounded-sm border border-input bg-background px-2 text-xs"
+              onFocus={(event) => event.currentTarget.select()}
+              readOnly
+              value={address}
+            />
           </div>
         ) : null}
       </section>
@@ -242,48 +254,85 @@ function ReleaseContents({ orpc, nodeId, nodeName }: AirAppSiteReleasesProps) {
           <ul className="divide-y divide-border border-border border-y">
             {versions.map((version) => (
               <li
-                className="flex items-center justify-between gap-3 py-3"
+                className="min-w-0 space-y-3 py-2"
                 data-airapp-release-version={version.version}
                 key={version.version}
               >
-                <div className="min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-sm">
-                      {name(version.version, version.releaseNumber)}
-                    </span>
-                    {version.isCurrent ? (
-                      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary text-xs">
-                        {copy.current}
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium text-sm">
+                        {name(version.version, version.releaseNumber)}
                       </span>
+                      {version.isCurrent ? (
+                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary text-xs">
+                          {copy.current}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p
+                      className="truncate text-muted-foreground text-xs"
+                      title={`${stamp(version.createdAt)} · ${version.version}`}
+                    >
+                      <time dateTime={version.createdAt}>{stamp(version.createdAt)}</time>
+                    </p>
+                    {version.releaseNumber === 0 ? (
+                      <p className="text-muted-foreground text-xs">{copy.legacy}</p>
                     ) : null}
                   </div>
-                  <p className="text-muted-foreground text-xs">
-                    <time dateTime={version.createdAt}>{stamp(version.createdAt)}</time>
-                  </p>
-                  {version.releaseNumber === 0 ? (
-                    <p className="text-muted-foreground text-xs">{copy.legacy}</p>
-                  ) : (
-                    <p className="font-mono text-muted-foreground text-xs" title={version.version}>
-                      {version.version.slice(0, 10)}
-                    </p>
-                  )}
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                    <Button
+                      aria-controls={
+                        logsVersion === version.version && active
+                          ? logsId(version.version)
+                          : undefined
+                      }
+                      aria-expanded={logsVersion === version.version && active}
+                      aria-label={fmt(messages.airapp.site.logs.versionButton, {
+                        version: name(version.version, version.releaseNumber),
+                      })}
+                      onClick={(event) => {
+                        logsTriggerRef.current = event.currentTarget;
+                        setLogsVersion(version.version);
+                      }}
+                      size="sm"
+                      variant="ghost"
+                    >
+                      <Logs aria-hidden="true" className="size-3.5" />
+                      {messages.airapp.site.logs.button}
+                    </Button>
+                    {version.canRollback || (Boolean(denial) && !version.isCurrent) ? (
+                      <Button
+                        aria-label={fmt(copy.rollbackVersion, {
+                          version: name(version.version, version.releaseNumber),
+                        })}
+                        disabled={busy || !canRollback || checking}
+                        onClick={() => {
+                          setTarget(version.version);
+                          setError(null);
+                        }}
+                        size="sm"
+                        variant="outline"
+                      >
+                        <RotateCcw aria-hidden="true" className="size-3.5" />
+                        {copy.rollback}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
-                {version.canRollback ? (
-                  <Button
-                    aria-label={fmt(copy.rollbackVersion, {
-                      version: name(version.version, version.releaseNumber),
-                    })}
-                    disabled={busy || !canRollback || checking}
-                    onClick={() => {
-                      setTarget(version.version);
-                      setError(null);
+                {active && logsVersion === version.version ? (
+                  <AirAppSiteLogs
+                    id={logsId(version.version)}
+                    key={`${nodeId}:${version.version}`}
+                    nodeId={nodeId}
+                    onClose={() => {
+                      setLogsVersion(null);
+                      logsTriggerRef.current?.focus();
                     }}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <RotateCcw aria-hidden="true" className="size-3.5" />
-                    {copy.rollback}
-                  </Button>
+                    orpc={orpc}
+                    version={version.version}
+                    versionLabel={name(version.version, version.releaseNumber)}
+                  />
                 ) : null}
               </li>
             ))}
@@ -291,7 +340,16 @@ function ReleaseContents({ orpc, nodeId, nodeName }: AirAppSiteReleasesProps) {
         ) : (
           <p className="text-muted-foreground text-sm">{copy.empty}</p>
         )}
-        {site.data?.engine === "locked" ? (
+        {permissionMessage ? (
+          <p
+            className="text-muted-foreground text-sm"
+            data-airapp-site-access-denied=""
+            role="alert"
+          >
+            {permissionMessage}
+          </p>
+        ) : null}
+        {site.data?.engine === "locked" || site.data?.publicationLock ? (
           <p className="text-muted-foreground text-xs">{copy.planLocked}</p>
         ) : null}
         {data?.status === "deploying" ? (
@@ -344,12 +402,19 @@ function ReleaseContents({ orpc, nodeId, nodeName }: AirAppSiteReleasesProps) {
         ) : null}
       </section>
 
-      <section aria-labelledby={`${id}-history`} className="space-y-3">
-        <h3 className="font-medium text-sm" id={`${id}-history`}>
-          {copy.history}
-        </h3>
+      <details className="border-border border-t pt-4" data-airapp-release-history="">
+        <summary className="cursor-pointer text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <h3 className="inline font-medium" id={`${id}-history`}>
+            {copy.history}
+          </h3>
+          {data?.history.length ? (
+            <span className="ml-2 text-muted-foreground text-xs tabular-nums">
+              {data.history.length}
+            </span>
+          ) : null}
+        </summary>
         {data?.history.length ? (
-          <ol className="space-y-3">
+          <ol className="mt-4 space-y-3">
             {data.history.map((entry) => (
               <li className="flex items-start gap-2 text-sm" key={entry.id}>
                 <History
@@ -373,7 +438,19 @@ function ReleaseContents({ orpc, nodeId, nodeName }: AirAppSiteReleasesProps) {
         ) : (
           <p className="text-muted-foreground text-sm">{copy.historyEmpty}</p>
         )}
-      </section>
+      </details>
+      <details
+        className="border-border border-t pt-4"
+        data-airapp-release-settings=""
+        ref={settingsRef}
+      >
+        <summary className="cursor-pointer font-medium text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          {messages.nodeSettings.dialogTitle}
+        </summary>
+        <div className="mt-3">
+          <AirAppSiteSettings enabled={active} nodeId={nodeId} orpc={orpc} />
+        </div>
+      </details>
     </div>
   );
 }

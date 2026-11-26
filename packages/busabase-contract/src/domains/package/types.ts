@@ -22,11 +22,17 @@ import {
 } from "../base/contract/base-schemas";
 import {
   gridRowHeightSchema,
+  viewFieldSummariesSchema,
   viewFilterConjunctionSchema,
   viewFilterOperatorSchema,
   viewFiltersSchema,
 } from "../base/contract/view-schemas";
-import { mapViewFilters, VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "../base/types";
+import {
+  mapViewFilters,
+  VIEW_FIELD_MAX_WIDTH,
+  VIEW_FIELD_MIN_WIDTH,
+  VIEW_GROUP_MAX_LEVELS,
+} from "../base/types";
 import { TemplateManifestSchema } from "./template";
 
 export const PACKAGE_FORMAT = "busabase-package@1";
@@ -445,6 +451,12 @@ export const PackageViewSortSchema = z.object({
   fieldSlug: z.string().min(1),
 });
 
+/** View grouping level minus the optional, server-populated `fieldId`. */
+export const PackageViewGroupBySchema = z.object({
+  fieldSlug: z.string().min(1),
+  direction: z.enum(["asc", "desc"]).default("asc"),
+});
+
 export const PackageViewConfigSchema = z.object({
   filters: viewFiltersSchema
     .transform((conditions) =>
@@ -465,6 +477,9 @@ export const PackageViewConfigSchema = z.object({
     .record(z.string().min(1), z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH))
     .optional(),
   rowHeight: gridRowHeightSchema.optional(),
+  /** Grouping minus the optional, server-populated `fieldId` (slugs survive a re-id'ing install). */
+  groupBy: z.array(PackageViewGroupBySchema).max(VIEW_GROUP_MAX_LEVELS).optional(),
+  fieldSummaries: viewFieldSummariesSchema.optional(),
 });
 export type PackageViewConfig = z.infer<typeof PackageViewConfigSchema>;
 

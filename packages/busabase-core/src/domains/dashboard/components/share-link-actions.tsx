@@ -1,49 +1,34 @@
 "use client";
 
 import { Button } from "kui/button";
-import { Download, QrCode, Share2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Popover, PopoverTrigger } from "kui/popover";
+import { QrCode, Share2, X } from "lucide-react";
+import { useEffect, useId, useState } from "react";
 import { toast } from "sonner";
 import { useCoreI18n } from "../../../i18n";
+import { ShareQrCode, ShareQrPopoverContent } from "./share-qr-code";
 
-export function ShareLinkActions({ url, title }: { url: string; title: string }) {
-  const t = useCoreI18n().share;
-  const [qrPreview, setQrPreview] = useState<{ url: string; dataUrl: string } | null>(null);
+export function ShareLinkActions({
+  url,
+  title,
+  compact = false,
+  description,
+}: {
+  url: string;
+  title: string;
+  compact?: boolean;
+  description?: string;
+}) {
+  const messages = useCoreI18n();
+  const t = messages.share;
   const [qrOpen, setQrOpen] = useState(false);
   const [canNativeShare, setCanNativeShare] = useState(false);
-  const visiblePreview = qrOpen && qrPreview?.url === url ? qrPreview : null;
+  const titleId = useId();
+  const descriptionId = useId();
 
   useEffect(() => {
     setCanNativeShare(typeof navigator.share === "function");
   }, []);
-
-  const showQr = async () => {
-    if (visiblePreview) {
-      setQrOpen(false);
-      return;
-    }
-    try {
-      const { default: QRCode } = await import("qrcode");
-      const dataUrl = await QRCode.toDataURL(url, {
-        errorCorrectionLevel: "M",
-        margin: 4,
-        width: 512,
-        color: { dark: "#000000", light: "#ffffff" },
-      });
-      setQrPreview({ url, dataUrl });
-      setQrOpen(true);
-    } catch {
-      toast.error(t.qrFailed);
-    }
-  };
-
-  const downloadQr = () => {
-    if (!visiblePreview) return;
-    const link = document.createElement("a");
-    link.href = visiblePreview.dataUrl;
-    link.download = "busabase-qr.png";
-    link.click();
-  };
 
   const share = async () => {
     try {
@@ -55,40 +40,66 @@ export function ShareLinkActions({ url, title }: { url: string; title: string })
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
-        <Button
-          aria-expanded={Boolean(visiblePreview)}
-          onClick={() => void showQr()}
-          size="sm"
-          type="button"
-          variant="outline"
+    <div className="flex flex-wrap items-center gap-1" data-share-link-actions="">
+      <Popover onOpenChange={setQrOpen} open={qrOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            aria-label={t.qrCode}
+            className={
+              compact ? "size-8 shrink-0 text-muted-foreground hover:text-foreground" : undefined
+            }
+            size={compact ? "icon-sm" : "sm"}
+            title={compact ? t.qrCode : undefined}
+            type="button"
+            variant={compact ? "ghost" : "outline"}
+          >
+            <QrCode aria-hidden="true" className="size-3.5" />
+            {!compact ? t.qrCode : null}
+          </Button>
+        </PopoverTrigger>
+        <ShareQrPopoverContent
+          aria-describedby={description ? descriptionId : undefined}
+          aria-labelledby={titleId}
         >
-          <QrCode aria-hidden="true" className="size-4" />
-          {t.qrCode}
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="font-medium text-sm" id={titleId}>
+              {t.qrCode}
+            </h3>
+            <Button
+              aria-label={messages.common.close}
+              className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={() => setQrOpen(false)}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              <X aria-hidden="true" className="size-3.5" />
+            </Button>
+          </div>
+          {qrOpen ? <ShareQrCode url={url} /> : null}
+          {description ? (
+            <p className="mt-3 text-muted-foreground text-xs leading-relaxed" id={descriptionId}>
+              {description}
+            </p>
+          ) : null}
+        </ShareQrPopoverContent>
+      </Popover>
+      {canNativeShare ? (
+        <Button
+          aria-label={t.shareViaDevice}
+          className={
+            compact ? "size-8 shrink-0 text-muted-foreground hover:text-foreground" : undefined
+          }
+          onClick={() => void share()}
+          size={compact ? "icon-sm" : "sm"}
+          title={compact ? t.shareViaDevice : undefined}
+          type="button"
+          variant={compact ? "ghost" : "outline"}
+        >
+          <Share2 aria-hidden="true" className="size-3.5" />
+          {!compact ? t.shareViaDevice : null}
         </Button>
-        {canNativeShare && (
-          <Button onClick={() => void share()} size="sm" type="button" variant="outline">
-            <Share2 aria-hidden="true" className="size-4" />
-            {t.shareViaDevice}
-          </Button>
-        )}
-      </div>
-      {visiblePreview && (
-        <div className="flex flex-col items-start gap-3 rounded-md border border-border/70 p-3">
-          <img
-            alt={t.qrAlt}
-            className="aspect-square w-48 max-w-full bg-white p-2"
-            height={192}
-            src={visiblePreview.dataUrl}
-            width={192}
-          />
-          <Button onClick={downloadQr} size="sm" type="button" variant="outline">
-            <Download aria-hidden="true" className="size-4" />
-            {t.downloadQr}
-          </Button>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }

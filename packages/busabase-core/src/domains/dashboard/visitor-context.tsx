@@ -21,8 +21,16 @@ import { createContext, type ReactNode, useContext } from "react";
  * shared node instead. Threaded as a prop/context from the server rather than
  * inferred client-side, so an anonymous render can never transiently fire the
  * member queries while a session check resolves.
+ *
+ * `"embed"` is the holder of an Embed Link. It is session-less in exactly the
+ * same way — every space-wide query stays off and member affordances stay
+ * hidden — but its authority is the link (served under `visitorKind: "embed"`
+ * and `EMBED_READ_ALLOWLIST`), not a public share. The one place the two differ
+ * on the client is what that authority covers: an embed may ask for a Drive
+ * file's remote preview (`fileTrees.previewConfig` / `preparePreview`), a guest
+ * may not.
  */
-export type DashboardVisitorKind = "member" | "anonymous";
+export type DashboardVisitorKind = "member" | "anonymous" | "embed";
 
 const DashboardVisitorContext = createContext<DashboardVisitorKind>("member");
 
@@ -43,9 +51,13 @@ export const useDashboardVisitorKind = (): DashboardVisitorKind =>
   useContext(DashboardVisitorContext);
 
 /**
- * True when the current render is a public, session-less one.
+ * True when the current render is a public, session-less one — a public-share
+ * guest or an Embed Link holder.
  *
  * Defaults to false, so every existing host (open source, cloud member,
  * mobile WebView embed) is unaffected unless it opts in explicitly.
  */
-export const useIsAnonymousVisitor = (): boolean => useDashboardVisitorKind() === "anonymous";
+export const useIsAnonymousVisitor = (): boolean => useDashboardVisitorKind() !== "member";
+
+/** True only for a public-share guest — narrower than `useIsAnonymousVisitor`. */
+export const useIsPublicShareVisitor = (): boolean => useDashboardVisitorKind() === "anonymous";

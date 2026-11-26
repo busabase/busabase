@@ -13,11 +13,19 @@ import { DropdownMenuItem } from "kui/dropdown-menu";
 import { Label } from "kui/label";
 import { Switch } from "kui/switch";
 import { ExternalLink, Globe, Loader2, TriangleAlert } from "lucide-react";
-import { type ReactNode, useEffect, useId } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n } from "../../../i18n";
 import type { AirAppRunStatus } from "../store/airapp-runner-store";
+import {
+  readSiteAccessDenial,
+  type SiteAccessDenial,
+  siteAccessMessage,
+  siteDeploymentDenial,
+} from "../utils/site-access";
 import { AirAppSiteDomains } from "./AirAppSiteDomains";
+import { AirAppSiteEnvironment } from "./AirAppSiteEnvironment";
+import { useAirAppEnginePlanGate } from "./engine-availability-context";
 
 type CoreMessages = ReturnType<typeof useCoreI18n>;
 
@@ -97,15 +105,26 @@ const publicationLabel = (messages: CoreMessages, publication: AirAppSitePublica
 /** Whether Go live has something to do right now. */
 export const canGoLive = (state: AirAppSiteStateVO): boolean =>
   state.engine === "available" &&
+  !state.publicationLock &&
+  !state.environmentDeploymentLock &&
   state.previewVersion !== null &&
   !state.previewStale &&
-  (state.previewVersion !== state.liveVersion || !state.isPublic);
+  (state.previewVersion !== state.liveVersion ||
+    !state.isPublic ||
+    Boolean(state.liveEnvironmentStale));
 
 /** The reason Go live is unavailable, when the person has something to do about it. */
 export const goLiveNote = (messages: CoreMessages, state: AirAppSiteStateVO): string | null => {
   if (state.engine !== "available" || state.blockers.length > 0) return null;
+  if (state.publicationLock) {
+    return fmt(messages.airapp.site.publish.planRequired, {
+      plan: state.publicationLock.planLabel,
+    });
+  }
+  if (siteDeploymentDenial(state)) return messages.airapp.site.environment.manageRequired;
   if (state.previewVersion === null) return messages.airapp.site.noPreview;
-  return state.previewStale ? messages.airapp.site.previewStale : null;
+  if (state.previewStale) return messages.airapp.site.previewStale;
+  return state.liveEnvironmentStale ? messages.airapp.site.environment.latestOnPublish : null;
 };
 
 const siteErrorMessage = (error: unknown): string =>
@@ -124,20 +143,32 @@ export function AirAppSiteGoLive({
   runStatus: AirAppRunStatus;
   /** Changes when the app's files do, which is what makes a preview stale. */
   filesRevision: string;
-  renderMenuAction?: (action: ReactNode) => ReactNode;
+  renderMenuAction?: (action: ReactNode, state?: AirAppSiteStateVO) => ReactNode;
 }) {
   const messages = useCoreI18n();
+  const planGate = useAirAppEnginePlanGate();
   const client = useQueryClient();
-  const { data: state, refetch } = useSiteState(orpc, nodeId);
+  const [accessDenied, setAccessDenied] = useState<SiteAccessDenial | null>(null);
+  const { data: state, refetch } = useQuery({
+    ...orpc.airapps.siteState.queryOptions({ input: { nodeId } }),
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+  const lastChecked = useRef({ filesRevision, runStatus });
   const domains = useQuery({
     ...orpc.airapps.siteDomains.queryOptions({ input: { nodeId } }),
-    enabled: Boolean(state?.address && state.engine !== "not-offered"),
+    enabled: !renderMenuAction && Boolean(state?.address && state.engine !== "not-offered"),
   });
 
   // A finished deploy or an edited file changes the answer; the query cannot see either.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: filesRevision is the trigger
   useEffect(() => {
-    if (runStatus === "ready" || runStatus === "error") void refetch();
+    const previous = lastChecked.current;
+    lastChecked.current = { filesRevision, runStatus };
+    if (
+      previous.filesRevision !== filesRevision ||
+      (previous.runStatus !== runStatus && (runStatus === "ready" || runStatus === "error"))
+    )
+      void refetch();
   }, [runStatus, filesRevision, refetch]);
 
   const goLive = useMutation({
@@ -157,7 +188,15 @@ export function AirAppSiteGoLive({
         toast.error(first ? airAppSiteBlockerMessage(messages, first) : messages.airapp.runFailed);
       }
     },
-    onError: (error) => toast.error(siteErrorMessage(error)),
+    onError: (error) => {
+      const denial = readSiteAccessDenial(error);
+      setAccessDenied(denial);
+      toast.error(
+        denial
+          ? siteAccessMessage(messages.airapp.site.environment, denial)
+          : siteErrorMessage(error),
+      );
+    },
   });
 
   if (!state || state.engine === "not-offered") return renderMenuAction?.(null) ?? null;
@@ -165,14 +204,19 @@ export function AirAppSiteGoLive({
     return renderMenuAction(
       <DropdownMenuItem
         data-airapp-site-go-live=""
-        disabled={!canGoLive(state) || goLive.isPending || runStatus === "starting"}
+        disabled={
+          Boolean(accessDenied) || !canGoLive(state) || goLive.isPending || runStatus === "starting"
+        }
         onSelect={() => goLive.mutate()}
       >
         {goLive.isPending ? <Loader2 className="animate-spin" /> : <Globe />}
         {state.liveVersion ? messages.airapp.site.publishUpdate : messages.airapp.site.goLive}
       </DropdownMenuItem>,
+      state,
     );
-  const note = goLiveNote(messages, state);
+  const note = accessDenied
+    ? siteAccessMessage(messages.airapp.site.environment, accessDenied)
+    : goLiveNote(messages, state);
   const address =
     (!domains.isError &&
       domains.data?.bindings.find((binding) => binding.status === "active")?.url) ||
@@ -204,8 +248,13 @@ export function AirAppSiteGoLive({
       ) : null}
       <Button
         data-airapp-site-go-live=""
-        disabled={!canGoLive(state) || goLive.isPending || runStatus === "starting"}
-        onClick={() => goLive.mutate()}
+        disabled={
+          Boolean(accessDenied) ||
+          (state.publicationLock ? !planGate?.onUpgrade : !canGoLive(state)) ||
+          goLive.isPending ||
+          runStatus === "starting"
+        }
+        onClick={() => (state.publicationLock ? planGate?.onUpgrade?.() : goLive.mutate())}
         size="sm"
         type="button"
       >
@@ -214,7 +263,13 @@ export function AirAppSiteGoLive({
         ) : (
           <Globe className="size-3.5" />
         )}
-        {state.liveVersion ? messages.airapp.site.publishUpdate : messages.airapp.site.goLive}
+        {state.publicationLock
+          ? fmt(messages.airapp.enginePlan.upgrade, {
+              plan: planGate?.planLabel ?? state.publicationLock.planLabel,
+            })
+          : state.liveVersion
+            ? messages.airapp.site.publishUpdate
+            : messages.airapp.site.goLive}
       </Button>
     </div>
   );
@@ -230,7 +285,46 @@ export function AirAppSiteGoLive({
  * switch that takes its site down.
  */
 export const showsAirAppSiteSettings = (state: AirAppSiteStateVO): boolean =>
-  Boolean(state.address) && !(state.engine === "locked" && state.liveVersion === null);
+  Boolean(state.address) &&
+  !((state.engine === "locked" || state.publicationLock) && state.liveVersion === null);
+
+/** Environment bindings share the site's state, independently of release settings. */
+export function AirAppSiteEnvironmentSettings({
+  orpc,
+  nodeId,
+  enabled = true,
+}: {
+  orpc: BusabaseQueryUtils;
+  nodeId: string;
+  enabled?: boolean;
+}) {
+  const messages = useCoreI18n();
+  const copy = messages.airapp.site.environment;
+  const site = useSiteState(orpc, nodeId, enabled);
+  if (site.isError && !site.data) {
+    const denial = readSiteAccessDenial(site.error);
+    return (
+      <div className="space-y-3" role="alert">
+        <p className="text-destructive text-sm">
+          {denial ? siteAccessMessage(copy, denial) : copy.loadFailed}
+        </p>
+        {!denial ? (
+          <Button onClick={() => void site.refetch()} size="sm" type="button" variant="outline">
+            {copy.retry}
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+  if (!site.data) return <p role="status">{copy.loading}</p>;
+  if (!site.data.address)
+    return (
+      <p className="text-muted-foreground text-sm" role="status">
+        {messages.airapp.requiredEngineUnavailable.site}
+      </p>
+    );
+  return <AirAppSiteEnvironment enabled={enabled} nodeId={nodeId} orpc={orpc} state={site.data} />;
+}
 
 /** The site's address and public switch, in the AirApp's settings. */
 export function AirAppSiteSettings({
@@ -245,6 +339,7 @@ export function AirAppSiteSettings({
   const messages = useCoreI18n();
   const copy = messages.airapp.site;
   const publicSwitchId = useId();
+  const [accessDenied, setAccessDenied] = useState<SiteAccessDenial | null>(null);
   const { data: state, refetch } = useSiteState(orpc, nodeId, enabled);
 
   const setPublic = useMutation({
@@ -253,14 +348,22 @@ export function AirAppSiteSettings({
         ? orpc.airapps.siteRepublish.call({ nodeId })
         : orpc.airapps.siteUnpublish.call({ nodeId }),
     onSuccess: () => refetch(),
-    onError: (error) => toast.error(siteErrorMessage(error)),
+    onError: (error) => {
+      const denial = readSiteAccessDenial(error);
+      setAccessDenied(denial);
+      toast.error(denial ? siteAccessMessage(copy.environment, denial) : siteErrorMessage(error));
+    },
   });
 
-  if (!state?.address || !showsAirAppSiteSettings(state)) return null;
+  if (!state?.address) return null;
+  if (!showsAirAppSiteSettings(state)) return null;
   const hasLiveVersion = state.liveVersion !== null;
   // A locked plan may take a site down but not put one back up.
   const switchDisabled =
-    !hasLiveVersion || setPublic.isPending || (state.engine !== "available" && !state.isPublic);
+    !hasLiveVersion ||
+    setPublic.isPending ||
+    (!state.isPublic && (Boolean(accessDenied) || Boolean(state.environmentDeploymentLock))) ||
+    ((state.engine !== "available" || Boolean(state.publicationLock)) && !state.isPublic);
 
   return (
     <div
@@ -285,6 +388,11 @@ export function AirAppSiteSettings({
           </a>
         )}
       </div>
+      {accessDenied || state.environmentDeploymentLock ? (
+        <p className="text-muted-foreground text-xs" data-airapp-site-access-denied="" role="alert">
+          {siteAccessMessage(copy.environment, accessDenied ?? "space-vault-manage")}
+        </p>
+      ) : null}
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-0.5">
           <Label htmlFor={publicSwitchId}>{copy.publicLabel}</Label>

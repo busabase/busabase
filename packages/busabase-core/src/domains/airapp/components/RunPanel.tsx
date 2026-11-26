@@ -1,26 +1,37 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type { AirAppSiteStateVO } from "busabase-contract/domains/airapp/contract";
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import { DropdownMenuItem } from "kui/dropdown-menu";
+import { TabsContent } from "kui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
 import {
   ArrowUpCircle,
   Check,
   CircleStop,
+  Cloud,
   Copy,
+  Globe,
+  History,
+  Laptop,
   Loader2,
   Lock,
   Maximize,
+  Monitor,
   Pin,
   Play,
   RotateCcw,
+  RotateCw,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { fmt, useCoreI18n } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { airAppToolbarMessages } from "../../../i18n/airapp-toolbar";
+import { NodeSettingsDialog } from "../../dashboard/components/node-settings-dialog";
 import {
   FullscreenPreviewSurface,
   type PreviewFullscreenState,
@@ -28,10 +39,14 @@ import {
 } from "../../dashboard/components/preview-fullscreen";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { useWorkspacePermissionLevel } from "../../dashboard/components/split-submit-button";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import type { SidePanelTabProps } from "../../dashboard/side-panel-registry";
 import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
+import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
+import { useAirAppBrowserLogs } from "../hooks/use-airapp-browser-logs";
 import { type AirAppPreviewState, useAirAppPreviewState } from "../hooks/use-airapp-preview-state";
+import { type AirAppSiteViewsState, useAirAppSiteViews } from "../hooks/use-airapp-site-views";
 import { airAppSidePanelTabId } from "../store/airapp-keepalive-store";
 import {
   type AirAppRunEntry,
@@ -53,14 +68,24 @@ import {
   resolvePreferredEngineFallback,
 } from "../utils/engine-plan-gate";
 import { NodepodServiceWorkerError } from "../utils/nodepod-service-worker";
-import { AIRAPP_PREVIEW_IFRAME_SANDBOX } from "../utils/preview-sandbox";
+import { readSiteAccessDenial, siteAccessMessage } from "../utils/site-access";
 import { renderTerminalOutput } from "../utils/terminal-output";
-import { AirAppPreviewExternalButton, AirAppPreviewMenu } from "./AirAppPreviewMenu";
-import { AirAppPreviewFrame } from "./AirAppPreviewTools";
+import { AirAppFilesPanel } from "./AirAppFilesPanel";
+import { AirAppPreviewMenu } from "./AirAppPreviewMenu";
+import { AirAppPreviewFrame, absolutePreviewUrl } from "./AirAppPreviewTools";
+import { AirAppPreviewViewport } from "./AirAppPreviewViewport";
+import { AirAppPublishToSite } from "./AirAppPublishToSite";
 import { AirAppSiteBlockers, AirAppSiteGoLive } from "./AirAppSiteControls";
+import { AirAppSiteLogs } from "./AirAppSiteLogs";
+import {
+  AirAppSiteContextActions,
+  AirAppSiteModeSwitch,
+  AirAppSiteToolbarActions,
+} from "./AirAppSiteViews";
 import {
   useAirAppEngineAvailability,
   useAirAppEnginePlanGate,
+  useAirAppEnginesNotConfigured,
 } from "./engine-availability-context";
 import { createAirAppRunner } from "./runners/runner-factory";
 import { AirAppSiteBlockedError } from "./runners/site-runner";
@@ -220,6 +245,10 @@ const airAppFilesRevision = (files: AirAppVO["files"]): string =>
       .sort(([a], [b]) => a.localeCompare(b)),
   );
 
+interface AirAppRunOptions {
+  sitePreview?: boolean;
+}
+
 /**
  * Owns the AirApp runner lifecycle (mount/install/start, log streaming,
  * preview URL) independent of which tab is currently visible. Called once at
@@ -251,7 +280,16 @@ export function useAirAppRunner({
     [nodeId],
   );
   const entry = useAirAppRunnerStore(selectEntry);
-  const { status, logLines, previewUrl, errorCode, engineLock, siteBlockers, runnerKind } = entry;
+  const {
+    status,
+    logLines,
+    previewUrl,
+    errorCode,
+    engineLock,
+    siteBlockers,
+    siteAccessDenied,
+    runnerKind,
+  } = entry;
   const error = airAppRunErrorText(messages, entry);
   const selectionsHydrated = useAirAppRunnerStore((state) => state.selectionsHydrated);
   const availableEngines = useAirAppEngineAvailability();
@@ -263,250 +301,282 @@ export function useAirAppRunner({
     }
   }, []);
 
-  const run = useCallback(async () => {
-    if (!airapp) {
-      return;
-    }
-    const currentNodeId = airapp.node.id;
-    const store = useAirAppRunnerStore.getState();
-    // The override lives on the NODE now, not in this browser. `undefined` means
-    // nobody has overridden it, which is what lets `airapp.json` decide — the
-    // distinction the old `localStorage` map could only express by absence, and
-    // the reason absence must stay meaningful.
-    const savedEngine = airapp.node.settings?.airappEngine ?? null;
-    const userChose = savedEngine !== null;
-    const wantedKind = savedEngine ?? DEFAULT_RUNNER_KIND;
-
-    // Which engine can actually run this app has to be settled BEFORE the
-    // runner is constructed — and the answer lives in the app's own files. The
-    // alternative (construct the stored default, then discover the mismatch
-    // during install) is what would make opening a Python AirApp auto-start it
-    // in the browser, a JavaScript-only runtime, and fail every single time.
-    //
-    // Only the manifest needs to be fetched: runtime inference keys off which
-    // marker files exist, which the listing already tells us.
-    let engineNote: string | null = null;
-    let plan: ReturnType<typeof resolveRunPlan>;
-    try {
-      const probeFiles: Record<string, string> = {};
-      for (const file of airapp.files) probeFiles[file.path] = "";
-      if (airapp.files.some((file) => file.path === AIRAPP_MANIFEST_PATH)) {
-        const manifest = await orpc.fileTrees.readFile.call({
-          nodeId: currentNodeId,
-          filePath: AIRAPP_MANIFEST_PATH,
-          type: "airapp",
-        });
-        if (manifest.encoding === "utf8") probeFiles[AIRAPP_MANIFEST_PATH] = manifest.content;
+  const run = useCallback(
+    async (options?: AirAppRunOptions) => {
+      if (!airapp) {
+        return;
       }
-      plan = resolveRunPlan(probeFiles);
-    } catch (caught) {
-      // A malformed `airapp.json` is named here rather than swallowed: falling
-      // back to defaults would run something the author did not ask for.
-      useAirAppRunnerStore
-        .getState()
-        .failBeforeRun(
-          currentNodeId,
-          wantedKind,
-          caught instanceof Error ? caught.message : messages.airapp.runFailed,
-        );
-      return;
-    }
+      const currentNodeId = airapp.node.id;
+      const store = useAirAppRunnerStore.getState();
+      // The override lives on the NODE now, not in this browser. `undefined` means
+      // nobody has overridden it, which is what lets `airapp.json` decide — the
+      // distinction the old `localStorage` map could only express by absence, and
+      // the reason absence must stay meaningful.
+      const savedEngine = airapp.node.settings?.airappEngine ?? null;
+      const userChose = savedEngine !== null;
+      const wantedKind = savedEngine ?? DEFAULT_RUNNER_KIND;
 
-    // A preference the host cannot satisfy falls back to an eligible engine.
-    // A hard requirement, or a Python app on a browser-only deployment, stops
-    // here without ever constructing an incompatible runner.
-    const resolved = createEligibleAirAppRunner({
-      runtime: plan.runtime,
-      preferredEngine: plan.preferredEngine,
-      requiredEngine: plan.requiredEngine,
-      userChose,
-      wantedKind,
-      availableEngines,
-      lockedEngines: planGate?.lockedEngines,
-      createRunner: (kind) => createAirAppRunner(kind, { orpc, nodeId: currentNodeId }),
-    });
-    if (!resolved.runnerKind && resolved.lockedEngine && planGate) {
-      // Not "this deployment can't run this app": it can, the moment the
-      // space upgrades. Say that, and offer the way there.
-      store.failBeforeRun(
-        currentNodeId,
-        resolved.lockedEngine,
-        fmt(messages.airapp.enginePlan.lockedTitle, { plan: planGate.planLabel }),
-        { engine: resolved.lockedEngine, planLabel: planGate.planLabel },
-      );
-      return;
-    }
-    if (!resolved.runnerKind) {
-      store.failBeforeRun(
-        currentNodeId,
-        plan.requiredEngine ?? wantedKind,
-        noEligibleAirAppEngineMessage(messages, plan.runtime, plan.requiredEngine),
-        undefined,
-        { runtime: plan.runtime, requiredEngine: plan.requiredEngine },
-      );
-      return;
-    }
-    const { runnerKind, runner } = resolved;
-    // Record what actually ran, so the auto-run debounce below knows whether
-    // opening this node provisions something. This used to be written into the
-    // user's saved *selection* — the only slot available — which is how a
-    // fallback came to silently rewrite a setting the user had chosen. It is a
-    // separate concern now: `node.settings.airappEngine` is what was asked for
-    // (and only a person writes it), `lastEffectiveKinds` is what happened.
-    store.recordEffectiveRunnerKind(currentNodeId, runnerKind);
-    // The log is the honest place to report a fallback.
-    engineNote = airAppEngineNote({
-      runtime: plan.runtime,
-      preferredEngine: plan.preferredEngine,
-      userChose,
-      wantedKind,
-      runnerKind,
-      availableEngines,
-      lockedEngines: planGate?.lockedEngines,
-    });
-    store.beginRun(currentNodeId, runner, runnerKind, airAppFilesRevision(airapp.files));
-    if (engineNote) {
-      useAirAppRunnerStore.getState().appendLog(currentNodeId, runner, engineNote);
-    }
-    runner.onLog((chunk) =>
-      useAirAppRunnerStore.getState().appendLog(currentNodeId, runner, chunk),
-    );
-    runner.onReady((url) =>
-      useAirAppRunnerStore.getState().setPreviewUrl(currentNodeId, runner, url),
-    );
-    // An app that dies after it started is the case the panel used to miss
-    // entirely: one log line, status frozen on "ready", and a preview that had
-    // stopped answering. Surface it as the failure it is.
-    runner.onExit((code) =>
-      useAirAppRunnerStore
-        .getState()
-        .setError(
-          currentNodeId,
-          runner,
-          code === null || code === 0
-            ? messages.airapp.appStopped
-            : fmt(messages.airapp.appExited, { code: String(code) }),
-        ),
-    );
-
-    try {
-      // Mount every file into the runner's virtual filesystem — text (utf8)
-      // inline, and asset-backed binary (`encoding: "url"`, e.g. images, fonts,
-      // sample data) by fetching its bytes from the asset URL the read returns.
+      // Which engine can actually run this app has to be settled BEFORE the
+      // runner is constructed — and the answer lives in the app's own files. The
+      // alternative (construct the stored default, then discover the mismatch
+      // during install) is what would make opening a Python AirApp auto-start it
+      // in the browser, a JavaScript-only runtime, and fail every single time.
       //
-      // Binary used to be dropped here, which failed in the worst possible way:
-      // the file stored fine and the pod booted fine, so an AirApp shipping its
-      // own images just rendered broken `<img>`s with nothing logged anywhere.
-      // A file that cannot be mounted must now say so (below) rather than
-      // vanish.
-      //
-      // A website reads nothing here: the server reads the node's own files, because
-      // what gets published must never be what a browser said it was.
-      const filesToMount = resolved.runnerKind === "site" ? [] : airapp.files;
-      const entries = await Promise.all(
-        filesToMount.map(async (file) => {
-          // Runner boot is an imperative lifecycle that can outlive this view.
-          // A React Query observer for the Files tab may use the same readFile
-          // key and cancel it during Strict Mode's mount cleanup, so do not join
-          // that observer-owned query here.
-          const detail = await orpc.fileTrees.readFile.call({
+      // Only the manifest needs to be fetched: runtime inference keys off which
+      // marker files exist, which the listing already tells us.
+      let engineNote: string | null = null;
+      let plan: ReturnType<typeof resolveRunPlan>;
+      try {
+        const probeFiles: Record<string, string> = {};
+        for (const file of airapp.files) probeFiles[file.path] = "";
+        if (airapp.files.some((file) => file.path === AIRAPP_MANIFEST_PATH)) {
+          const manifest = await orpc.fileTrees.readFile.call({
             nodeId: currentNodeId,
-            filePath: file.path,
+            filePath: AIRAPP_MANIFEST_PATH,
             type: "airapp",
           });
-          if (detail.encoding === "utf8") {
-            return [file.path, detail.content] as const;
-          }
-          if (!detail.assetUrl) return null;
-          // Same-origin in every hosted row, so no credentials/CORS dance —
-          // this is the storage URL busabase itself just handed back.
-          const response = await fetch(detail.assetUrl);
-          if (!response.ok) {
-            throw new Error(
-              `Failed to load "${file.path}" (HTTP ${response.status}) — the AirApp cannot start without it.`,
-            );
-          }
-          return [file.path, new Uint8Array(await response.arrayBuffer())] as const;
-        }),
-      );
-      const files: Record<string, AirAppMountedFile> = {};
-      for (const fileEntry of entries) {
-        if (fileEntry) {
-          files[fileEntry[0]] = fileEntry[1];
+          if (manifest.encoding === "utf8") probeFiles[AIRAPP_MANIFEST_PATH] = manifest.content;
         }
-      }
-      if (resolved.runnerKind !== "site" && Object.keys(files).length === 0) {
-        throw new Error(messages.airapp.noRunnableFiles);
+        plan = resolveRunPlan(probeFiles);
+        if (options?.sitePreview) {
+          // Refreshing a website must stay on its deployment path, even if an
+          // edit now requests another engine. The server returns bundle blockers
+          // instead of letting this action provision a different runtime.
+          plan = { ...plan, requiredEngine: "site" };
+          const active = useAirAppRunnerStore.getState().entries[currentNodeId];
+          if (
+            active &&
+            (active.status === "loading-files" ||
+              active.status === "installing" ||
+              active.status === "starting")
+          )
+            return;
+        }
+      } catch (caught) {
+        // A malformed `airapp.json` is named here rather than swallowed: falling
+        // back to defaults would run something the author did not ask for.
+        useAirAppRunnerStore
+          .getState()
+          .failBeforeRun(
+            currentNodeId,
+            wantedKind,
+            caught instanceof Error ? caught.message : messages.airapp.runFailed,
+          );
+        return;
       }
 
-      await runner.mount(files);
-      useAirAppRunnerStore.getState().setStatus(currentNodeId, runner, "installing");
-      await runner.install();
-      useAirAppRunnerStore.getState().setStatus(currentNodeId, runner, "starting");
-      await runner.start();
-      // status flips to "ready" from the onReady callback once the dev server
-      // actually reports listening — starting a process isn't the same as it
-      // being reachable yet.
-    } catch (caught) {
-      if (caught instanceof AirAppSiteBlockedError) {
-        useAirAppRunnerStore
-          .getState()
-          .setError(
-            currentNodeId,
-            runner,
-            messages.airapp.site.blockedTitle,
-            undefined,
-            undefined,
-            caught.blockers,
-          );
-        return;
-      }
-      // The server re-checks the plan on every run, so a stale page (a plan that
-      // lapsed after it loaded) lands here rather than on the lock above. It is
-      // the same situation and gets the same state, not a line of server text.
-      const refusal = readAirAppEnginePlanRefusal(caught);
-      if (refusal) {
-        const lock: AirAppEngineLockState = {
-          engine: refusal.engine,
-          // The host's localized plan name when the dashboard has one.
-          planLabel: planGate?.planLabel ?? refusal.planLabel,
-        };
-        useAirAppRunnerStore
-          .getState()
-          .setError(
-            currentNodeId,
-            runner,
-            fmt(messages.airapp.enginePlan.lockedTitle, { plan: lock.planLabel }),
-            undefined,
-            lock,
-          );
-        return;
-      }
-      // A Service Worker failure is the one runtime error with a code: log the
-      // code plus the underlying browser error for support, and show the
-      // localized, phase-specific copy rather than `caught.message` (which is
-      // the English log identifier).
-      const swError = caught instanceof NodepodServiceWorkerError ? caught : null;
-      if (swError) {
-        const cause = swError.cause instanceof Error ? `: ${swError.cause.message}` : "";
-        useAirAppRunnerStore
-          .getState()
-          .appendLog(currentNodeId, runner, `[busabase] ${swError.code}${cause}\n`);
-      }
-      useAirAppRunnerStore
-        .getState()
-        .setError(
+      // A preference the host cannot satisfy falls back to an eligible engine.
+      // A hard requirement, or a Python app on a browser-only deployment, stops
+      // here without ever constructing an incompatible runner.
+      const resolved = createEligibleAirAppRunner({
+        runtime: plan.runtime,
+        preferredEngine: plan.preferredEngine,
+        requiredEngine: plan.requiredEngine,
+        userChose,
+        wantedKind,
+        availableEngines,
+        lockedEngines: planGate?.lockedEngines,
+        createRunner: (kind) => createAirAppRunner(kind, { orpc, nodeId: currentNodeId }),
+      });
+      if (!resolved.runnerKind && resolved.lockedEngine && planGate) {
+        // Not "this deployment can't run this app": it can, the moment the
+        // space upgrades. Say that, and offer the way there.
+        store.failBeforeRun(
           currentNodeId,
-          runner,
-          swError
-            ? messages.airapp.swError[swError.code]
-            : caught instanceof Error
-              ? caught.message
-              : messages.airapp.runFailed,
-          swError?.code,
+          resolved.lockedEngine,
+          fmt(messages.airapp.enginePlan.lockedTitle, { plan: planGate.planLabel }),
+          { engine: resolved.lockedEngine, planLabel: planGate.planLabel },
         );
-    }
-  }, [messages, airapp, orpc, availableEngines, planGate]);
+        return;
+      }
+      if (!resolved.runnerKind) {
+        store.failBeforeRun(
+          currentNodeId,
+          plan.requiredEngine ?? wantedKind,
+          noEligibleAirAppEngineMessage(messages, plan.runtime, plan.requiredEngine),
+          undefined,
+          { runtime: plan.runtime, requiredEngine: plan.requiredEngine },
+        );
+        return;
+      }
+      const { runnerKind, runner } = resolved;
+      // Record what actually ran, so the auto-run debounce below knows whether
+      // opening this node provisions something. This used to be written into the
+      // user's saved *selection* — the only slot available — which is how a
+      // fallback came to silently rewrite a setting the user had chosen. It is a
+      // separate concern now: `node.settings.airappEngine` is what was asked for
+      // (and only a person writes it), `lastEffectiveKinds` is what happened.
+      store.recordEffectiveRunnerKind(currentNodeId, runnerKind);
+      // The log is the honest place to report a fallback.
+      engineNote = airAppEngineNote({
+        runtime: plan.runtime,
+        preferredEngine: plan.preferredEngine,
+        userChose,
+        wantedKind,
+        runnerKind,
+        availableEngines,
+        lockedEngines: planGate?.lockedEngines,
+      });
+      store.beginRun(currentNodeId, runner, runnerKind, airAppFilesRevision(airapp.files));
+      if (engineNote) {
+        useAirAppRunnerStore.getState().appendLog(currentNodeId, runner, engineNote);
+      }
+      runner.onLog((chunk) =>
+        useAirAppRunnerStore.getState().appendLog(currentNodeId, runner, chunk),
+      );
+      runner.onReady((url) =>
+        useAirAppRunnerStore.getState().setPreviewUrl(currentNodeId, runner, url),
+      );
+      // An app that dies after it started is the case the panel used to miss
+      // entirely: one log line, status frozen on "ready", and a preview that had
+      // stopped answering. Surface it as the failure it is.
+      runner.onExit((code) =>
+        useAirAppRunnerStore
+          .getState()
+          .setError(
+            currentNodeId,
+            runner,
+            code === null || code === 0
+              ? messages.airapp.appStopped
+              : fmt(messages.airapp.appExited, { code: String(code) }),
+          ),
+      );
+
+      try {
+        // Mount every file into the runner's virtual filesystem — text (utf8)
+        // inline, and asset-backed binary (`encoding: "url"`, e.g. images, fonts,
+        // sample data) by fetching its bytes from the asset URL the read returns.
+        //
+        // Binary used to be dropped here, which failed in the worst possible way:
+        // the file stored fine and the pod booted fine, so an AirApp shipping its
+        // own images just rendered broken `<img>`s with nothing logged anywhere.
+        // A file that cannot be mounted must now say so (below) rather than
+        // vanish.
+        //
+        // A website reads nothing here: the server reads the node's own files, because
+        // what gets published must never be what a browser said it was.
+        const filesToMount = resolved.runnerKind === "site" ? [] : airapp.files;
+        const entries = await Promise.all(
+          filesToMount.map(async (file) => {
+            // Runner boot is an imperative lifecycle that can outlive this view.
+            // A React Query observer for the Files tab may use the same readFile
+            // key and cancel it during Strict Mode's mount cleanup, so do not join
+            // that observer-owned query here.
+            const detail = await orpc.fileTrees.readFile.call({
+              nodeId: currentNodeId,
+              filePath: file.path,
+              type: "airapp",
+            });
+            if (detail.encoding === "utf8") {
+              return [file.path, detail.content] as const;
+            }
+            if (!detail.assetUrl) return null;
+            // Same-origin in every hosted row, so no credentials/CORS dance —
+            // this is the storage URL busabase itself just handed back.
+            const response = await fetch(detail.assetUrl);
+            if (!response.ok) {
+              throw new Error(
+                `Failed to load "${file.path}" (HTTP ${response.status}) — the AirApp cannot start without it.`,
+              );
+            }
+            return [file.path, new Uint8Array(await response.arrayBuffer())] as const;
+          }),
+        );
+        const files: Record<string, AirAppMountedFile> = {};
+        for (const fileEntry of entries) {
+          if (fileEntry) {
+            files[fileEntry[0]] = fileEntry[1];
+          }
+        }
+        if (resolved.runnerKind !== "site" && Object.keys(files).length === 0) {
+          throw new Error(messages.airapp.noRunnableFiles);
+        }
+
+        await runner.mount(files);
+        useAirAppRunnerStore.getState().setStatus(currentNodeId, runner, "installing");
+        await runner.install();
+        useAirAppRunnerStore.getState().setStatus(currentNodeId, runner, "starting");
+        await runner.start();
+        // status flips to "ready" from the onReady callback once the dev server
+        // actually reports listening — starting a process isn't the same as it
+        // being reachable yet.
+      } catch (caught) {
+        if (caught instanceof AirAppSiteBlockedError) {
+          useAirAppRunnerStore
+            .getState()
+            .setError(
+              currentNodeId,
+              runner,
+              messages.airapp.site.blockedTitle,
+              undefined,
+              undefined,
+              caught.blockers,
+            );
+          return;
+        }
+        // The server re-checks the plan on every run, so a stale page (a plan that
+        // lapsed after it loaded) lands here rather than on the lock above. It is
+        // the same situation and gets the same state, not a line of server text.
+        const refusal = readAirAppEnginePlanRefusal(caught);
+        if (refusal) {
+          const lock: AirAppEngineLockState = {
+            engine: refusal.engine,
+            // The host's localized plan name when the dashboard has one.
+            planLabel: planGate?.planLabel ?? refusal.planLabel,
+          };
+          useAirAppRunnerStore
+            .getState()
+            .setError(
+              currentNodeId,
+              runner,
+              fmt(messages.airapp.enginePlan.lockedTitle, { plan: lock.planLabel }),
+              undefined,
+              lock,
+            );
+          return;
+        }
+        const accessDenied = readSiteAccessDenial(caught);
+        if (accessDenied) {
+          useAirAppRunnerStore
+            .getState()
+            .setError(
+              currentNodeId,
+              runner,
+              siteAccessMessage(messages.airapp.site.environment, accessDenied),
+              undefined,
+              undefined,
+              undefined,
+              accessDenied,
+            );
+          return;
+        }
+        // A Service Worker failure is the one runtime error with a code: log the
+        // code plus the underlying browser error for support, and show the
+        // localized, phase-specific copy rather than `caught.message` (which is
+        // the English log identifier).
+        const swError = caught instanceof NodepodServiceWorkerError ? caught : null;
+        if (swError) {
+          const cause = swError.cause instanceof Error ? `: ${swError.cause.message}` : "";
+          useAirAppRunnerStore
+            .getState()
+            .appendLog(currentNodeId, runner, `[busabase] ${swError.code}${cause}\n`);
+        }
+        useAirAppRunnerStore
+          .getState()
+          .setError(
+            currentNodeId,
+            runner,
+            swError
+              ? messages.airapp.swError[swError.code]
+              : caught instanceof Error
+                ? caught.message
+                : messages.airapp.runFailed,
+            swError?.code,
+          );
+      }
+    },
+    [messages, airapp, orpc, availableEngines, planGate],
+  );
 
   useEffect(() => {
     if (!nodeId) return;
@@ -543,6 +613,7 @@ export function useAirAppRunner({
     void runner.start().catch((caught: unknown) => {
       const blockers = caught instanceof AirAppSiteBlockedError ? caught.blockers : undefined;
       const refusal = readAirAppEnginePlanRefusal(caught);
+      const accessDenied = readSiteAccessDenial(caught);
       const lock = refusal
         ? {
             engine: refusal.engine,
@@ -564,6 +635,7 @@ export function useAirAppRunner({
           undefined,
           lock,
           blockers,
+          accessDenied ?? undefined,
         );
     });
   }, [nodeId, filesRevision, entry, orpc, availableEngines, planGate, messages]);
@@ -642,6 +714,7 @@ export function useAirAppRunner({
     errorCode,
     engineLock,
     siteBlockers,
+    ...(siteAccessDenied ? { siteAccessDenied } : {}),
     run,
     stop,
     isBusy,
@@ -679,8 +752,10 @@ interface AirAppRunControlsProps {
   showSitePublish?: boolean;
   fullscreenState: AirAppFullscreenState;
   previewState?: AirAppPreviewState;
-  releasesAction?: ReactNode;
   siteActionItems?: ReactNode;
+  publishAction?: ReactNode;
+  publishButton?: ReactNode;
+  siteViews?: AirAppSiteViewsState;
 }
 
 /** The topbar owns Pin; both preview surfaces keep the same tab identity. */
@@ -720,7 +795,65 @@ function AirAppControlHint({ label, children }: { label: string; children: React
   );
 }
 
-/** A compact action cluster with a dedicated Sites menu for publication and preview tools. */
+/** Shows the engine used by this run, independently of publication actions or saved preferences. */
+function AirAppRunEngine({ runner }: { runner: AirAppRunnerState }) {
+  const { airapp: messages } = useCoreI18n();
+  const { runnerKind, status, engineLock } = runner;
+  const names = {
+    browser: messages.engineBrowser,
+    local: messages.engineLocal,
+    remote: messages.engineRemote,
+    site: messages.engineSite,
+  };
+  const hints = {
+    browser: messages.engineBrowserHint,
+    local: messages.engineLocalHint,
+    remote: messages.engineRemoteHint,
+    site: messages.engineSiteHint,
+  };
+  const statuses: Record<AirAppRunStatus, string> = {
+    idle: messages.statusIdle,
+    "loading-files": messages.statusLoadingFiles,
+    installing: messages.statusInstalling,
+    starting: messages.statusStarting,
+    ready: messages.statusReady,
+    error: messages.statusError,
+  };
+  // Idle entries use the store's default kind, even after a different engine
+  // was stopped. It is not evidence that a browser engine is running.
+  const unresolved = status === "idle";
+  const name = unresolved ? messages.statusIdle : names[runnerKind];
+  const state = engineLock
+    ? fmt(messages.enginePlan.lockedTitle, { plan: engineLock.planLabel })
+    : statuses[status];
+  const label = `${messages.engineLabel}: ${name}${unresolved ? "" : ` · ${state}`}`;
+  const Icon = unresolved
+    ? CircleStop
+    : engineLock
+      ? Lock
+      : { browser: Monitor, local: Laptop, remote: Cloud, site: Globe }[runnerKind];
+  return (
+    <div
+      aria-label={label}
+      className="space-y-1 px-2 py-2 text-xs"
+      data-airapp-engine={unresolved ? "unresolved" : runnerKind}
+      role="status"
+    >
+      <p className="flex items-center gap-1.5 font-medium text-foreground">
+        <Icon aria-hidden="true" className="size-3.5 shrink-0" />
+        {messages.engineLabel}: {name}
+      </p>
+      {unresolved ? null : (
+        <>
+          <p className="text-muted-foreground">{state}</p>
+          <p className="text-muted-foreground">{hints[runnerKind]}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** A compact action cluster with a separate menu for publication and preview tools. */
 export function AirAppRunControls({
   runner,
   airapp,
@@ -728,15 +861,52 @@ export function AirAppRunControls({
   showSitePublish = true,
   fullscreenState,
   previewState,
-  releasesAction,
   siteActionItems,
+  publishAction,
+  publishButton,
+  siteViews,
 }: AirAppRunControlsProps) {
   const messages = useCoreI18n();
-  const { status, previewUrl, errorCode, engineLock, run, stop, isBusy, isLive, runnerKind } =
-    runner;
+  const toolbarCopy = airAppToolbarMessages[useCoreLocale()];
+  const availableEngines = useAirAppEngineAvailability();
+  const planGate = useAirAppEnginePlanGate();
+  const notConfiguredEngines = useAirAppEnginesNotConfigured();
+  const permission = useWorkspacePermissionLevel();
+  const isAnonymous = useIsAnonymousVisitor();
+  const [releaseSettingsOpen, setReleaseSettingsOpen] = useState(false);
+  const [releaseSettingsMounted, setReleaseSettingsMounted] = useState(false);
+  const menuTrigger = useRef<HTMLButtonElement>(null);
+  const canPublishSite =
+    airapp &&
+    !isAnonymous &&
+    hasApiKeyLevel(permission, "write") &&
+    (availableEngines.includes("site") ||
+      planGate?.lockedEngines.includes("site") ||
+      notConfiguredEngines.includes("site"));
+  const {
+    status,
+    previewUrl,
+    errorCode,
+    engineLock,
+    siteAccessDenied,
+    run,
+    stop,
+    isBusy,
+    isLive,
+    runnerKind,
+  } = runner;
+  const canManageSite = canPublishSite && runnerKind === "site";
   const ownPreview = useAirAppPreviewState(previewUrl);
-  const preview = previewState ?? ownPreview;
+  const preview = siteViews?.isSite ? siteViews.activePreview : (previewState ?? ownPreview);
+  const activeFrameUrl = siteViews?.isSite ? siteViews.activeFrameUrl : previewUrl;
   const isUnsupportedBrowser = errorCode === "SERVICE_WORKER_UNAVAILABLE";
+  const canShareSite = Boolean(
+    airapp &&
+      !isAnonymous &&
+      hasApiKeyLevel(permission, "write") &&
+      runnerKind === "site" &&
+      !engineLock,
+  );
   const runLabel =
     status === "ready" || status === "error" ? messages.airapp.runAgain : messages.airapp.run;
   const stopAction =
@@ -746,78 +916,225 @@ export function AirAppRunControls({
         {messages.airapp.stop}
       </DropdownMenuItem>
     ) : null;
-  const controls = (sitePublishItem: ReactNode = null) => (
-    <TooltipProvider delayDuration={350}>
-      <div
-        className="notranslate flex min-w-0 shrink-0 items-center gap-1"
-        data-airapp-node-id={airapp?.node.id}
-        data-airapp-run-status={status}
-        data-airapp-preview-controls=""
-        translate="no"
-      >
-        {isUnsupportedBrowser || engineLock ? null : (
-          <AirAppControlHint label={runLabel}>
-            <Button
-              aria-label={runLabel}
-              className="h-8 w-8 gap-1.5 px-0 @min-[900px]/airapp-toolbar:w-auto @min-[900px]/airapp-toolbar:px-2.5"
-              disabled={isBusy}
-              onClick={() => void run()}
-              size="sm"
-              type="button"
-              variant={status === "ready" ? "outline" : "default"}
+  const controls = (
+    siteState?: AirAppSiteStateVO,
+    menuPublish: ReactNode = publishAction,
+    primaryPublish: ReactNode = publishButton,
+  ) => {
+    const ownerUrl = absolutePreviewUrl(previewUrl, "https://preview.invalid");
+    const ownerVersion = ownerUrl
+      ? new URL(ownerUrl).searchParams.get("__busabase_site_version")
+      : null;
+    const sharedUrl =
+      canShareSite && previewUrl && ownerVersion && siteState?.previewVersion === ownerVersion
+        ? siteState.previewShareUrl
+        : null;
+    const sharingPending =
+      canShareSite &&
+      (status !== "ready" ||
+        !siteState ||
+        siteState.previewShareUrl === null ||
+        (ownerVersion && siteState.previewVersion !== ownerVersion));
+    const previewLink = sharingPending ? null : (sharedUrl ?? previewUrl);
+    // Another actor can prepare the preview while this tab's state is stale.
+    // Allow a manual recheck; preflight and the server still guard Vault uploads.
+    const sitePermissionBlocked =
+      Boolean(siteAccessDenied) && siteAccessDenied !== "space-vault-manage";
+    return (
+      <TooltipProvider delayDuration={350}>
+        <div
+          className="notranslate flex min-w-0 shrink-0 items-center gap-1"
+          data-airapp-node-id={airapp?.node.id}
+          data-airapp-run-status={status}
+          data-airapp-preview-controls=""
+          translate="no"
+        >
+          {primaryPublish}
+          {status === "ready" ||
+          isUnsupportedBrowser ||
+          engineLock ||
+          sitePermissionBlocked ? null : (
+            <AirAppControlHint label={runLabel}>
+              <Button
+                aria-label={runLabel}
+                className="h-8 w-8 gap-1.5 px-0 @min-[900px]/airapp-toolbar:w-auto @min-[900px]/airapp-toolbar:px-2.5"
+                disabled={isBusy}
+                onClick={() => void run(runnerKind === "site" ? { sitePreview: true } : undefined)}
+                size="sm"
+                type="button"
+                variant="default"
+              >
+                {isBusy ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : status === "error" ? (
+                  <RotateCcw className="size-3.5" />
+                ) : (
+                  <Play className="size-3.5" />
+                )}
+                <span className="hidden @min-[900px]/airapp-toolbar:inline">{runLabel}</span>
+              </Button>
+            </AirAppControlHint>
+          )}
+          {runnerKind === "browser" ? (
+            status === "ready" && !isUnsupportedBrowser && !engineLock ? (
+              <AirAppControlHint label={messages.airapp.runAgain}>
+                <Button
+                  aria-label={messages.airapp.runAgain}
+                  className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
+                  disabled={isBusy}
+                  onClick={() => void run()}
+                  size="icon-sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <RotateCcw aria-hidden="true" className="size-3.5" />
+                </Button>
+              </AirAppControlHint>
+            ) : null
+          ) : (
+            <AirAppControlHint
+              label={
+                siteViews?.isSite
+                  ? toolbarCopy.refreshPage
+                  : messages.airapp.site.publish.refreshPreview
+              }
             >
-              {isBusy ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : status === "ready" || status === "error" ? (
-                <RotateCcw className="size-3.5" />
-              ) : (
-                <Play className="size-3.5" />
-              )}
-              <span className="hidden @min-[900px]/airapp-toolbar:inline">{runLabel}</span>
-            </Button>
-          </AirAppControlHint>
-        )}
-        {releasesAction}
-        <AirAppPreviewExternalButton url={previewUrl} />
-        {previewUrl && !fullscreenState.fullscreen ? (
-          <AirAppControlHint label={messages.airapp.enterFullscreen}>
-            <Button
-              aria-label={messages.airapp.enterFullscreen}
-              onClick={() => fullscreenState.setFullscreen(true)}
-              size="icon-sm"
-              type="button"
-              variant="ghost"
-            >
-              <Maximize className="size-3.5" />
-            </Button>
-          </AirAppControlHint>
-        ) : null}
-        <AirAppPreviewMenu
-          topItems={
-            <>
-              {siteActionItems}
-              {sitePublishItem}
-            </>
-          }
-          extraItems={stopAction}
-          kind={runnerKind}
-          previewState={preview}
-          url={previewUrl}
+              <Button
+                aria-label={
+                  siteViews?.isSite
+                    ? toolbarCopy.refreshPage
+                    : messages.airapp.site.publish.refreshPreview
+                }
+                className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
+                disabled={!activeFrameUrl || preview.refreshing || isBusy}
+                onClick={() => {
+                  // Reconcile the version and this member's proxy registration
+                  // before navigating a private Site preview. Reloading its old
+                  // version URL can otherwise stay on the proxy's 503 forever.
+                  if (runnerKind === "site" && siteViews?.view !== "deployed")
+                    void run({ sitePreview: true });
+                  else preview.refresh();
+                }}
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+              >
+                {preview.refreshing ? (
+                  <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+                ) : (
+                  <RotateCw aria-hidden="true" className="size-3.5" />
+                )}
+              </Button>
+            </AirAppControlHint>
+          )}
+          <AirAppPreviewMenu
+            compact={runnerKind === "browser" || siteViews?.isSite}
+            triggerRef={menuTrigger}
+            primaryAction={menuPublish}
+            header={<AirAppRunEngine runner={runner} />}
+            topItems={
+              <>
+                {runnerKind !== "browser" &&
+                runnerKind !== "site" &&
+                !isUnsupportedBrowser &&
+                !engineLock ? (
+                  <DropdownMenuItem disabled={isBusy} onSelect={() => void run()}>
+                    {isBusy ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+                    {runLabel}
+                  </DropdownMenuItem>
+                ) : null}
+                {activeFrameUrl && !fullscreenState.fullscreen ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      if (siteViews?.isSite) siteViews.selectView(siteViews.view);
+                      fullscreenState.setFullscreen(true);
+                    }}
+                  >
+                    <Maximize />
+                    {messages.airapp.enterFullscreen}
+                  </DropdownMenuItem>
+                ) : null}
+                {siteActionItems}
+                {canManageSite ? (
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setReleaseSettingsMounted(true);
+                      setReleaseSettingsOpen(true);
+                    }}
+                  >
+                    <History />
+                    {messages.airapp.site.releases.manage}
+                  </DropdownMenuItem>
+                ) : null}
+              </>
+            }
+            extraItems={stopAction}
+            kind={runnerKind}
+            previewAvailable={Boolean(activeFrameUrl)}
+            previewState={preview}
+            showLink={!siteViews?.isSite}
+            shareable={Boolean(sharedUrl)}
+            url={previewLink}
+          />
+          {airapp && showPinToSidePanel ? <AirAppPinButton airapp={airapp} /> : null}
+        </div>
+      </TooltipProvider>
+    );
+  };
+  const preparedControls = (
+    menuPublish: ReactNode = publishAction,
+    primaryPublish: ReactNode = publishButton,
+  ) =>
+    airapp && canPublishSite ? (
+      <AirAppSiteGoLive
+        filesRevision={airapp.files.map((file) => `${file.path}:${file.updatedAt}`).join("|")}
+        nodeId={airapp.node.id}
+        orpc={runner.orpc}
+        renderMenuAction={(_action, state) => controls(state, menuPublish, primaryPublish)}
+        runStatus={status}
+      />
+    ) : (
+      controls(undefined, menuPublish, primaryPublish)
+    );
+  return (
+    <>
+      {airapp && showSitePublish && canPublishSite ? (
+        <AirAppPublishToSite
+          buttonWhenNeeded
+          compact
+          filesRevision={airapp.files.map((file) => `${file.path}:${file.updatedAt}`).join("|")}
+          nodeId={airapp.node.id}
+          nodeName={airapp.node.name}
+          orpc={runner.orpc}
+          placement="menu"
+          publicationBusy={runner.runnerKind === "site" && runner.isBusy}
+          renderButtons={(button, _releases, menuItem) => preparedControls(menuItem, button)}
+          showButton
         />
-        {airapp && showPinToSidePanel ? <AirAppPinButton airapp={airapp} /> : null}
-      </div>
-    </TooltipProvider>
-  );
-  return airapp && showSitePublish && runnerKind === "site" && !engineLock ? (
-    <AirAppSiteGoLive
-      filesRevision={airapp.files.map((file) => `${file.path}:${file.updatedAt}`).join("|")}
-      nodeId={airapp.node.id}
-      orpc={runner.orpc}
-      renderMenuAction={controls}
-      runStatus={status}
-    />
-  ) : (
-    controls()
+      ) : (
+        preparedControls()
+      )}
+      {airapp && canManageSite && releaseSettingsMounted ? (
+        <NodeSettingsDialog
+          initialTab="releases"
+          nodeId={airapp.node.id}
+          nodeName={airapp.node.name}
+          nodeSlug={airapp.node.slug}
+          nodeType="airapp"
+          onCloseAutoFocus={(event) => {
+            // The menuitem that opened this dialog has already unmounted.
+            // Return to its durable entry point after the dialog releases focus.
+            if (menuTrigger.current?.isConnected) {
+              event.preventDefault();
+              menuTrigger.current.focus();
+            }
+          }}
+          onOpenChange={setReleaseSettingsOpen}
+          open={releaseSettingsOpen}
+          orpc={runner.orpc}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -836,6 +1153,9 @@ interface AirAppRunPreviewProps {
    *  owns the state for its own toolbar. */
   fullscreenState?: AirAppFullscreenState;
   previewState?: AirAppPreviewState;
+  siteViews?: AirAppSiteViewsState;
+  /** Non-Site detail views own the legacy Tabs root; Sites use labeled regions. */
+  tabbed?: boolean;
 }
 
 /** The preview has no reliable shape until an AirApp boots, so use an honest
@@ -1017,36 +1337,103 @@ export function AirAppEnginePlanLocked({ lock }: { lock: AirAppEngineLockState }
   );
 }
 
-/** "App" tab content: the live preview iframe, optionally topped by a local
- *  run toolbar (see `showToolbar`).
+/** Running application content, optionally topped by a local toolbar.
+ *  Sites keep private/public modes in persistent, labeled regions.
  *
  *  Going fullscreen only swaps this container's classes — the iframe element
  *  underneath is never re-created or re-parented, so the running app keeps its
  *  DOM, JS memory and already-fetched data instead of booting again. */
-export function AirAppRunPreview({
+export function AirAppRunPreview(props: AirAppRunPreviewProps) {
+  if (props.airapp && props.runner.runnerKind === "site" && !props.siteViews) {
+    return <AirAppSiteRunPreview {...props} />;
+  }
+  return <AirAppRunPreviewSurface {...props} />;
+}
+
+function AirAppSiteRunPreview(props: AirAppRunPreviewProps) {
+  const siteViews = useAirAppSiteViews({
+    orpc: props.runner.orpc,
+    airapp: props.airapp,
+    kind: props.runner.runnerKind,
+    previewUrl: props.runner.previewUrl,
+    status: props.runner.status,
+  });
+  return <AirAppRunPreviewSurface {...props} siteViews={siteViews} />;
+}
+
+function AirAppRunPreviewSurface({
   runner,
   airapp,
   showToolbar = true,
   fullscreenState,
   previewState,
+  siteViews,
+  tabbed = false,
 }: AirAppRunPreviewProps) {
   const messages = useCoreI18n();
-  const { status, previewUrl, error, errorCode, engineLock, siteBlockers } = runner;
+  const toolbarCopy = airAppToolbarMessages[useCoreLocale()];
+  const { status, previewUrl, error, errorCode, engineLock, siteBlockers, siteAccessDenied } =
+    runner;
   const ownFullscreen = useAirAppFullscreen();
   const activeFullscreen = fullscreenState ?? ownFullscreen;
   const ownPreview = useAirAppPreviewState(previewUrl);
-  const preview = previewState ?? ownPreview;
-  // `SERVICE_WORKER_UNAVAILABLE` gets its own full recovery state below
-  // instead of the generic top banner + dead-end "previewFailed" text: unlike
-  // every other run failure, there is no retry that can fix it in-app.
+  const isSite = Boolean(siteViews?.isSite);
+  const preview = isSite && siteViews ? siteViews.preview : (previewState ?? ownPreview);
+  const activePreview = isSite && siteViews ? siteViews.activePreview : preview;
+  const logsPanelId = useId();
+  const browserLogs = useAirAppBrowserLogs({
+    frameRef: preview.frameRef,
+    url: isSite ? previewUrl : null,
+  });
   const isUnsupportedBrowser = errorCode === "SERVICE_WORKER_UNAVAILABLE";
-
-  return (
+  const draft = (
+    <AirAppPreviewViewport
+      fallback={
+        isUnsupportedBrowser ? (
+          <AirAppServiceWorkerUnsupported />
+        ) : engineLock ? (
+          <AirAppEnginePlanLocked lock={engineLock} />
+        ) : siteAccessDenied ? (
+          <div
+            className="grid h-full min-h-[160px] place-items-center p-6 text-center text-muted-foreground text-sm"
+            data-airapp-site-access-denied=""
+            role="alert"
+          >
+            {siteAccessMessage(messages.airapp.site.environment, siteAccessDenied)}
+          </div>
+        ) : siteBlockers ? (
+          <AirAppSiteBlockers blockers={siteBlockers} />
+        ) : status === "idle" || status === "error" ? (
+          <div
+            className="notranslate grid h-full min-h-[160px] place-items-center p-6 text-center text-muted-foreground text-sm"
+            translate="no"
+          >
+            {status === "idle" ? messages.airapp.previewEmpty : messages.airapp.previewFailed}
+          </div>
+        ) : (
+          <AirAppPreviewPending status={status} />
+        )
+      }
+      onError={preview.loaded}
+      onLoad={preview.loaded}
+      ref={preview.frameRef}
+      src={
+        isUnsupportedBrowser || engineLock || siteBlockers || siteAccessDenied ? null : previewUrl
+      }
+      title={messages.airapp.previewTitle}
+      wrapFrame={(frame) => (
+        <AirAppPreviewFrame viewport={preview.viewport}>{frame}</AirAppPreviewFrame>
+      )}
+    />
+  );
+  const panelClass =
+    "mt-0 flex min-h-0 min-w-0 flex-1 flex-col data-[state=inactive]:hidden data-[state=inactive]:pointer-events-none";
+  const surface = (
     <FullscreenPreviewSurface
       aria-label={airapp?.node.name ?? messages.airapp.previewTitle}
       bodyClassName="flex flex-col"
       banner={
-        error && !isUnsupportedBrowser && !engineLock && !siteBlockers ? (
+        error && !isUnsupportedBrowser && !engineLock && !siteBlockers && !siteAccessDenied ? (
           <AirAppRunError error={error} />
         ) : null
       }
@@ -1057,52 +1444,129 @@ export function AirAppRunPreview({
       toolbar={
         showToolbar ? (
           <div
-            className="@container/airapp-toolbar flex min-h-11 items-center justify-between gap-2 border-border/60 border-b px-3 py-2"
+            className={`@container/airapp-toolbar flex min-h-11 min-w-0 items-center justify-end gap-1 border-border/60 border-b px-3 py-2 ${isSite ? "flex-nowrap" : "flex-wrap"}`}
             data-airapp-run-toolbar=""
           >
-            <span className="font-medium text-muted-foreground text-xs uppercase">
-              {messages.airapp.runPanelTitle}
-            </span>
-            <AirAppRunControls
-              airapp={airapp}
-              fullscreenState={activeFullscreen}
-              runner={runner}
-              showPinToSidePanel={false}
-              previewState={preview}
-            />
+            {isSite && siteViews ? (
+              <div className="flex shrink-0 items-center gap-1" data-airapp-view-switcher="">
+                <AirAppSiteModeSwitch views={siteViews} />
+                <AirAppSiteContextActions views={siteViews} />
+              </div>
+            ) : null}
+            {isSite && siteViews ? (
+              <AirAppSiteToolbarActions
+                views={siteViews}
+                controls={
+                  <AirAppRunControls
+                    airapp={airapp}
+                    fullscreenState={activeFullscreen}
+                    runner={runner}
+                    showPinToSidePanel={false}
+                    previewState={activePreview}
+                    siteViews={siteViews}
+                  />
+                }
+              />
+            ) : (
+              <AirAppRunControls
+                airapp={airapp}
+                fullscreenState={activeFullscreen}
+                runner={runner}
+                showPinToSidePanel={false}
+                previewState={activePreview}
+              />
+            )}
           </div>
         ) : null
       }
     >
-      {isUnsupportedBrowser ? (
-        <AirAppServiceWorkerUnsupported />
-      ) : engineLock ? (
-        <AirAppEnginePlanLocked lock={engineLock} />
-      ) : siteBlockers ? (
-        <AirAppSiteBlockers blockers={siteBlockers} />
-      ) : previewUrl ? (
-        <AirAppPreviewFrame viewport={preview.viewport}>
-          <iframe
-            className="h-full w-full border-0 bg-background"
-            onError={preview.loaded}
-            onLoad={preview.loaded}
-            ref={preview.frameRef}
-            sandbox={AIRAPP_PREVIEW_IFRAME_SANDBOX}
-            src={previewUrl}
-            title={messages.airapp.previewTitle}
-          />
-        </AirAppPreviewFrame>
-      ) : status === "idle" || status === "error" ? (
-        <div
-          className="notranslate grid h-full min-h-[160px] place-items-center p-6 text-center text-muted-foreground text-sm"
-          translate="no"
-        >
-          {status === "idle" ? messages.airapp.previewEmpty : messages.airapp.previewFailed}
-        </div>
+      {isSite && siteViews ? (
+        <>
+          <section
+            aria-label={toolbarCopy.menuShort}
+            className={
+              siteViews.view === "preview" ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"
+            }
+            data-airapp-site-view="preview"
+            hidden={siteViews.view !== "preview"}
+          >
+            {isSite && siteViews ? (
+              <>
+                <div
+                  className={
+                    siteViews.panel === "content" ? "flex min-h-0 flex-1 flex-col" : "hidden"
+                  }
+                >
+                  {draft}
+                </div>
+                {siteViews.panel === "files" && airapp ? (
+                  <AirAppFilesPanel airapp={airapp} orpc={runner.orpc} />
+                ) : null}
+                {siteViews.panel === "logs" ? (
+                  <AirAppRunLogs runner={{ ...runner, logLines: browserLogs.lines }} />
+                ) : null}
+              </>
+            ) : (
+              draft
+            )}
+          </section>
+          <section
+            aria-label={toolbarCopy.deployedSite}
+            className={
+              siteViews.view === "deployed" ? "flex min-h-0 min-w-0 flex-1 flex-col" : "hidden"
+            }
+            data-airapp-site-view="deployed"
+            hidden={siteViews.view !== "deployed"}
+          >
+            <div
+              className={siteViews.panel === "content" ? "flex min-h-0 flex-1 flex-col" : "hidden"}
+            >
+              <AirAppPreviewViewport
+                credentialless
+                data-airapp-deployed-frame=""
+                frameKey={siteViews.deployedVersion ?? undefined}
+                onError={siteViews.deployed.loaded}
+                onLoad={siteViews.deployed.loaded}
+                ref={siteViews.deployed.frameRef}
+                src={siteViews.deployedVisited ? siteViews.deployedUrl : null}
+                title={toolbarCopy.deployedSite}
+                wrapFrame={(frame) => (
+                  <AirAppPreviewFrame viewport={siteViews.deployed.viewport}>
+                    {frame}
+                  </AirAppPreviewFrame>
+                )}
+              />
+            </div>
+            {siteViews.view === "deployed" &&
+            siteViews.panel === "logs" &&
+            siteViews.deployedVersion &&
+            airapp ? (
+              <div className="min-h-0 min-w-0 flex-1 overflow-auto p-3">
+                <AirAppSiteLogs
+                  nodeId={airapp.node.id}
+                  orpc={runner.orpc}
+                  version={siteViews.deployedVersion}
+                  versionLabel={siteViews.deployedVersion.slice(0, 8)}
+                  id={logsPanelId}
+                  onClose={() => siteViews.togglePanel("logs")}
+                />
+              </div>
+            ) : null}
+          </section>
+        </>
+      ) : tabbed ? (
+        <TabsContent className={panelClass} forceMount value="app">
+          {draft}
+        </TabsContent>
       ) : (
-        <AirAppPreviewPending status={status} />
+        draft
       )}
     </FullscreenPreviewSurface>
+  );
+  return isSite && showToolbar ? (
+    <div className="@container/airapp-toolbar flex min-h-0 min-w-0 flex-1 flex-col">{surface}</div>
+  ) : (
+    surface
   );
 }
 

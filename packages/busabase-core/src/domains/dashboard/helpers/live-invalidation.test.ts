@@ -67,6 +67,7 @@ describe("live invalidation classification", () => {
       "nodeRouteState",
       "nodes",
       "recordDetail",
+      "recordHistory",
       "records",
       "recordsCount",
       "recordsPage",
@@ -124,6 +125,7 @@ describe("live invalidation batching", () => {
       "changeRequests",
       "changeRequestsPaged",
       "inboxSnapshot",
+      "recordHistory",
     ]);
   });
 
@@ -147,6 +149,7 @@ describe("live invalidation batching", () => {
       "changeRequests",
       "changeRequestsPaged",
       "inboxSnapshot",
+      "recordHistory",
     ]);
   });
 
@@ -180,5 +183,23 @@ describe("live invalidation batching", () => {
     // The superseded timer must not flush the same batch a second time.
     vi.advanceTimersByTime(50);
     expect(flush).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("record history live scopes", () => {
+  it("batches identified records once and widens when a pending event lost its persisted pair", () => {
+    vi.useFakeTimers();
+    const flush = vi.fn();
+    const batcher = createLiveInvalidationBatcher(flush, 50);
+    for (let i = 0; i < 100; i++)
+      batcher.push(event("change_request.merged", { recordIds: ["r1"] }));
+    vi.advanceTimersByTime(50);
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect([...flush.mock.calls[0][0].historyRecordIds]).toEqual(["r1"]);
+    batcher.push(event("change_request.created", { changeRequestId: "one", recordIds: ["r1"] }));
+    batcher.push(event("change_request.pending_review", { changeRequestId: "missed" }));
+    vi.advanceTimersByTime(50);
+    expect(flush.mock.calls[1][0].targets).toContain("recordHistory");
+    expect(flush.mock.calls[1][0].historyRecordIds).toBeUndefined();
   });
 });

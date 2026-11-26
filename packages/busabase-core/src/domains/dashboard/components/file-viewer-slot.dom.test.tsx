@@ -40,6 +40,12 @@ describe("file viewer scopes", () => {
       expect(screen.getByTestId("embedded-file-preview").getAttribute("data-url")).toBe(
         "/original",
       );
+      expect(
+        screen.getByTestId("embedded-file-preview").getAttribute("data-fit-to-container"),
+      ).toBe("true");
+      expect(screen.getByTestId("embedded-file-preview").getAttribute("data-pdf-scroll-mode")).toBe(
+        "continuous",
+      );
       result.rerender(
         <CoreI18nProvider>
           <FileViewerSlotProvider
@@ -50,6 +56,9 @@ describe("file viewer scopes", () => {
         </CoreI18nProvider>,
       );
       expect(screen.getByTestId("embedded-file-preview").getAttribute("data-file-name")).toBe(name);
+      expect(
+        screen.getByTestId("embedded-file-preview").getAttribute("data-fit-to-container"),
+      ).toBe("true");
     },
   );
 
@@ -82,5 +91,11 @@ describe("file viewer scopes", () => {
       </CoreI18nProvider>,
     );
     expect(screen.getByTestId("embedded-file-preview").getAttribute("data-url")).toBe("/table");
+    expect(screen.getByTestId("embedded-file-preview").getAttribute("data-fit-to-container")).toBe(
+      "undefined",
+    );
+    expect(screen.getByTestId("embedded-file-preview").getAttribute("data-pdf-scroll-mode")).toBe(
+      "undefined",
+    );
   });
 });

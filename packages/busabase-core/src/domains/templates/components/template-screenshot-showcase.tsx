@@ -29,6 +29,8 @@ export interface TemplateScreenshot {
 
 interface TemplateScreenshotShowcaseProps {
   screenshots: TemplateScreenshot[];
+  /** Optional shelf thumbnails. Preview, navigation and download always use `screenshots`. */
+  thumbnailImages?: ReactNode[];
   /**
    * The demo clips' tiles, rendered right after the cover in the order given —
    * the shelf reads cover → clips → the rest.
@@ -91,6 +93,7 @@ const clickDownloadLink = (href: string, filename: string, openInNewTab = false)
 /** Compact, touch-friendly screenshot shelf shared by website and Dashboard details. */
 export function TemplateScreenshotShowcase({
   screenshots,
+  thumbnailImages,
   videoTiles = [],
   label,
   previousLabel,
@@ -250,7 +253,9 @@ export function TemplateScreenshotShowcase({
                     selectPreview(tile.imageIndex);
                   }}
                 >
-                  <TemplateDetailImage src={screenshot.src} alt={screenshot.alt} />
+                  {thumbnailImages?.[tile.imageIndex] ?? (
+                    <TemplateDetailImage src={screenshot.src} alt={screenshot.alt} />
+                  )}
                   <span className="pointer-events-none absolute end-2 top-2 inline-flex size-8 items-center justify-center rounded-md bg-background/90 text-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
                     <Expand className="size-4" aria-hidden="true" />
                   </span>

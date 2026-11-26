@@ -8,6 +8,7 @@ import { CoreI18nProvider, fmt } from "../../../i18n";
 import { coreMessagesByLocale } from "../../../i18n/catalog";
 import { isPinnableNode } from "../../dashboard/components/side-panel-sources";
 import { TopbarNodeActionsSlot } from "../../dashboard/components/topbar";
+import { ContentNavigationProvider } from "../../dashboard/content-navigation-context";
 import { DashboardVisitorProvider } from "../../dashboard/visitor-context";
 import { HtmlDetailView, HtmlPreviewSurface } from "./html-detail-view";
 import "./register";
@@ -347,6 +348,54 @@ describe("HtmlDetailView preview", () => {
     unmount();
     send();
     expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the content host handle a validated preview link without bypassing bridge checks", async () => {
+    const navigate = vi.fn(() => true);
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const activation = { isActive: true };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ContentNavigationProvider navigate={navigate}>
+          <DashboardVisitorProvider visitorKind="anonymous">
+            <HtmlDetailView orpc={orpc} slug="html-1" />
+          </DashboardVisitorProvider>
+        </ContentNavigationProvider>
+      </QueryClientProvider>,
+    );
+    const frame = (await screen.findByTitle(
+      fmt(coreMessagesByLocale.en.richNodes.previewFrame, { name: detail.node.name }),
+    )) as HTMLIFrameElement;
+    const sessionId = /"sessionId":"([^"]+)"/.exec(frame.getAttribute("srcdoc") ?? "")?.[1];
+    expect(sessionId).toBeTruthy();
+    const data = {
+      type: "busabase:html-preview:navigate",
+      sessionId,
+      href: `${window.location.origin}/doc/unshared`,
+    };
+    const send = (overrides: MessageEventInit = {}) =>
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: frame.contentWindow,
+          origin: "null",
+          data,
+          ...overrides,
+        }),
+      );
+    send({ source: window });
+    send({ origin: window.location.origin });
+    send({ data: { ...data, sessionId: "another-frame" } });
+    send({ data: { ...data, href: "javascript:alert(1)" } });
+    activation.isActive = false;
+    send();
+    expect(navigate).not.toHaveBeenCalled();
+
+    activation.isActive = true;
+    send();
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(data.href);
+    expect(open).not.toHaveBeenCalled();
   });
 
   it("exposes only fullscreen through the public reading slot and clears it on unmount", async () => {

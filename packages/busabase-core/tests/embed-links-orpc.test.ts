@@ -53,11 +53,11 @@ describe("embed links — Desktop oRPC integration", () => {
     expect(resolved).toMatchObject({
       id: created.id,
       type: "node",
-      detail: {
-        type: "doc",
-        doc: { body: expect.stringContaining("Desktop embed content") },
-      },
+      targetName: "Embed Runbook",
+      node: { id: doc.node.id, type: "doc", slug: doc.node.slug, name: "Embed Runbook" },
     });
+    // Identity only: the page reads the content with the workbench's own views.
+    expect(JSON.stringify(resolved)).not.toContain("Desktop embed content");
     await expect(resolveEmbedLink(created.id, "x".repeat(43))).resolves.toBeNull();
 
     await expect(client.embedLinks.revoke({ id: created.id })).resolves.toEqual({ revoked: true });
@@ -350,7 +350,7 @@ describe("embed links — Desktop oRPC integration", () => {
     expect(sdkCreated.iframeUrl).toContain("view=iframe");
     await expect(resolveEmbedLink(sdkCreated.id, sdkToken)).resolves.toMatchObject({
       type: "node",
-      detail: { type: "doc" },
+      node: { id: doc.node.id, type: "doc" },
     });
 
     const pendingDoc = await client.nodes.updateContent({

@@ -37,7 +37,7 @@ import {
 // `SPALink` appends `?demo=1` on <Link> clicks; `useAddDemoParam` wraps
 // programmatic `setLocation` targets — together they keep the demo across all
 // navigation (the proxy reads `?demo` via Referer and keeps serving the demo router).
-import { iStringParse } from "openlib/i18n/i-string";
+import { type iString, iStringParse } from "openlib/i18n/i-string";
 import { useAddDemoParam } from "openlib/ui/dashboard";
 import {
   type ComponentProps,
@@ -80,6 +80,7 @@ import {
   getRecordTitle,
   getRestoreToastMessage,
 } from "./helpers/change-request";
+import { invalidateRecordHistory } from "./helpers/record-history-query";
 // Side-effect import: registers the skill/doc/folder node-detail renderers.
 import "./components/node-detail-views";
 // Side-effect import: registers Whiteboard, Workflow, and HTML renderers.
@@ -145,13 +146,17 @@ import {
   shouldMountResidentAirApp,
   shouldShowRouteGuardSkeleton,
 } from "./helpers/node-route-guard";
-import {
-  retryRecordRead,
-  retryUnlessNotFound,
-  shouldShowInitialLoadingState,
-} from "./helpers/query-state";
+import { retryUnlessNotFound, shouldShowInitialLoadingState } from "./helpers/query-state";
 import { hasStaleRecordFind, readRecordFind, writeRecordFind } from "./helpers/record-find-url";
-import { readRecordPagination, writeRecordPagination } from "./helpers/record-pagination-url";
+import {
+  readRememberedRecordPageSize,
+  rememberRecordPageSize,
+} from "./helpers/record-page-size-preference";
+import {
+  type RecordPageSize,
+  resolveRecordPagination,
+  writeRecordPagination,
+} from "./helpers/record-pagination-url";
 import { readRecordPreviewId, writeRecordPreviewId } from "./helpers/record-preview-url";
 import {
   isFullReadBehind,
@@ -178,6 +183,7 @@ import { useKeyboardShortcut } from "./hooks/use-keyboard-shortcut";
 import { useLinkedRecords } from "./hooks/use-linked-records";
 import { useBusabaseLiveSync } from "./hooks/use-live-sync";
 import { useRecordFind } from "./hooks/use-record-find";
+import { useRecordsPageQuery } from "./hooks/use-records-page-query";
 import { useReorderView } from "./hooks/use-reorder-view";
 import { UploadLimitsProvider } from "./hooks/use-upload-limits";
 import { getNodeDetail, type LoadedNode } from "./node-detail-registry";
@@ -196,6 +202,7 @@ export {
 } from "./utils/workbench-link";
 
 const EMPTY_BASES: BaseVO[] = [];
+const NO_PAGE_RECORDS: RecordVO[] = [];
 
 /** A Base route names its Base by id, nodeId or slug — the same three `bases.get` accepts. */
 const findBaseByRef = (bases: readonly BaseVO[], ref: string): BaseVO | null =>
@@ -368,6 +375,9 @@ interface BusabaseDashboardProps {
    * inside the (refused) `bases.list` result. Anonymous hosts pass the shared
    * base in via the `bases` prop instead, and `activeBase` is read from it.
    *
+   * `"embed"` is an Embed Link holder: the same session-less render, served
+   * under the link's own capability and `EMBED_READ_ALLOWLIST`.
+   *
    * Defaults to `"member"` so every existing consumer is untouched.
    */
   visitorKind?: DashboardVisitorKind;
@@ -463,8 +473,8 @@ function BusabaseDashboardContent({
   // logic/anonymous-allowlist.ts), so this is a correctness fix — firing them
   // anyway produced a page of 403s and, because `activeBase` was looked up in the
   // refused `bases.list` result, an empty base. The shared base is seeded via the
-  // `bases` prop instead.
-  const isAnon = visitorKind === "anonymous";
+  // `bases` prop instead. An Embed Link holder is session-less in the same way.
+  const isAnon = visitorKind !== "member";
   const orpc = useMemo(
     () => createBusabaseQueryUtils(apiBasePath, apiClientOptions ?? {}, cacheSpaceKey),
     [apiBasePath, apiClientOptions, cacheSpaceKey],
@@ -642,6 +652,9 @@ function BusabaseDashboardContent({
       recordsPage: orpc.records.listPage.key() as QueryKey,
       recordDetail: orpc.records.get.key() as QueryKey,
       recordsCount: orpc.records.count.key() as QueryKey,
+      // The grid's own group/summary reads sit under `recordsPage` (so the
+      // invalidations above reach them); this covers direct `records.groupBy`.
+      recordsGroupBy: orpc.records.groupBy.key() as QueryKey,
       bases: orpc.bases.list.queryOptions({ input: {} }).queryKey as QueryKey,
       // Partial key: one invalidation covers the open Base however the route
       // named it (id, nodeId or slug).
@@ -921,7 +934,15 @@ function BusabaseDashboardContent({
               !isBaseActivityRoute &&
               baseChildParams?.childId !== "new")))),
   );
-  const recordPaginationUrl = useMemo(() => readRecordPagination(search), [search]);
+  const pageSizeScope = JSON.stringify([cacheSpaceKey, currentUserId ?? "anonymous"]);
+  const recordPaginationUrl = useMemo(
+    () =>
+      resolveRecordPagination(
+        search,
+        activeBase ? readRememberedRecordPageSize(pageSizeScope, activeBase.id) : null,
+      ),
+    [activeBase, pageSizeScope, search],
+  );
   // Table and Gallery render the parent page. Calendar and Gantt read their
   // own date windows; Kanban owns its bounded column reads and their totals.
   // No view drains the entire Base.
@@ -931,8 +952,9 @@ function BusabaseDashboardContent({
   const supportsRecordFind =
     usesCompactRecordList ||
     selectedBaseView?.type === "gallery" ||
-    selectedBaseView?.type === "kanban";
-  const recordsLoadedByView = selectedBaseView?.type === "kanban";
+    selectedBaseView?.type === "kanban" ||
+    selectedBaseView?.type === "calendar" ||
+    selectedBaseView?.type === "gantt";
   const setRecordPaginationUrl = useCallback(
     (page: number, pageSize = recordPaginationUrl.pageSize, replace = false) => {
       const nextSearch = writeRecordPagination(search, { page, pageSize });
@@ -978,48 +1000,29 @@ function BusabaseDashboardContent({
     pagination: recordPaginationUrl,
     onPaginationChange: setRecordPaginationUrl,
   });
-  const recordsPageQuery = useQuery({
-    ...orpc.records.listPage.queryOptions({
-      input: {
-        baseId: activeBase?.id ?? "",
-        viewId: selectedBaseView?.id,
-        listMode: usesCompactRecordList ? "table" : undefined,
-        find: recordFindInput,
-        page: recordPaginationUrl.page,
-        pageSize: recordPaginationUrl.pageSize,
-      },
-    }),
-    enabled:
-      Boolean(activeBase?.id) &&
-      !recordsLoadedByView &&
-      !readOnlyRecordPreview &&
-      !isResolvingBaseRoute,
-    retry: recordFindInput ? false : retryRecordRead,
-    placeholderData: (previousData, previousQuery) => {
-      const previousInput = (
-        previousQuery?.queryKey[1] as
-          | {
-              input?: {
-                baseId?: string;
-                viewId?: string;
-                listMode?: "full" | "table";
-                find?: { query: string; fieldId?: string };
-              };
-            }
-          | undefined
-      )?.input;
-      return previousInput?.baseId === activeBase?.id &&
-        previousInput?.viewId === selectedBaseView?.id &&
-        previousInput?.listMode === (usesCompactRecordList ? "table" : undefined) &&
-        previousInput?.find?.query === recordFindInput?.query &&
-        previousInput?.find?.fieldId === recordFindInput?.fieldId
-        ? previousData
-        : undefined;
+  // Kanban columns, grouped tables, and date views read their own records, so
+  // the parent page read stays off for them (`recordsLoadedByView`).
+  const { query: recordsPageQuery, readsOwnRecords: recordsLoadedByView } = useRecordsPageQuery({
+    orpc,
+    base: activeBase,
+    view: selectedBaseView,
+    blocked: readOnlyRecordPreview || isResolvingBaseRoute,
+    input: {
+      baseId: activeBase?.id,
+      viewId: selectedBaseView?.id,
+      listMode: usesCompactRecordList ? "table" : undefined,
+      find: recordFindInput,
+      page: recordPaginationUrl.page,
+      pageSize: recordPaginationUrl.pageSize,
     },
   });
+  // A disabled query can still hold the page cached before the view was
+  // grouped (same key); it is not what the screen shows, so it never feeds
+  // linked-record loads, previews or the record list.
+  const pageRecords = recordsPageQuery.data?.records;
   const baseRecords = useMemo(
-    () => recordsPageQuery.data?.records ?? [],
-    [recordsPageQuery.data?.records],
+    () => (recordsLoadedByView ? NO_PAGE_RECORDS : (pageRecords ?? NO_PAGE_RECORDS)),
+    [recordsLoadedByView, pageRecords],
   );
   const recordsPagination = useMemo(() => {
     if (recordsLoadedByView) return undefined;
@@ -1047,7 +1050,8 @@ function BusabaseDashboardContent({
           ))
         : null,
       onPageChange: changePage,
-      onPageSizeChange: (pageSize: 25 | 50 | 100) => {
+      onPageSizeChange: (pageSize: RecordPageSize) => {
+        if (activeBase) rememberRecordPageSize(pageSizeScope, activeBase.id, pageSize);
         setRecordPaginationUrl(1, pageSize, true);
         document.querySelector<HTMLElement>("[data-base-detail-scroll]")?.scrollTo({ top: 0 });
       },
@@ -1063,24 +1067,28 @@ function BusabaseDashboardContent({
       },
     };
   }, [
-    locationPath,
+    activeBase,
+    collectionSearch,
     locale,
+    locationPath,
     messages,
+    pageSizeScope,
     recordPaginationUrl.page,
     recordPaginationUrl.pageSize,
+    recordsLoadedByView,
     recordsPageQuery.data,
     recordsPageQuery.error,
     recordsPageQuery.isFetching,
     recordsPageQuery.isLoading,
     recordsPageQuery.refetch,
-    collectionSearch,
     setRecordPaginationUrl,
-    recordsLoadedByView,
   ]);
   const isBaseViewRoute = Boolean(isBaseChildRoute && selectedBaseView);
   // A record deletion can make the current page disappear. Converge to the new
   // last page rather than leaving an empty, out-of-range table.
   useEffect(() => {
+    // A view that pages its own records has no page number to correct.
+    if (recordsLoadedByView) return;
     const totalPages = recordsPageQuery.data?.totalPages;
     if (totalPages !== undefined && recordPaginationUrl.page > Math.max(1, totalPages)) {
       setRecordPaginationUrl(Math.max(1, totalPages), recordPaginationUrl.pageSize, true);
@@ -1088,6 +1096,7 @@ function BusabaseDashboardContent({
   }, [
     recordPaginationUrl.page,
     recordPaginationUrl.pageSize,
+    recordsLoadedByView,
     recordsPageQuery.data?.totalPages,
     setRecordPaginationUrl,
   ]);
@@ -1732,44 +1741,49 @@ function BusabaseDashboardContent({
     routeNodeRef,
   ]);
 
-  const refresh = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: listKeys.changeRequests }),
-      queryClient.invalidateQueries({ queryKey: listKeys.changeRequestsPaged }),
-      queryClient.invalidateQueries({ queryKey: listKeys.inboxSnapshot }),
-      queryClient.invalidateQueries({ queryKey: listKeys.changeRequestCounts }),
-      queryClient.invalidateQueries({ queryKey: listKeys.changeRequestDetail }),
-      queryClient.invalidateQueries({ queryKey: listKeys.records }),
-      queryClient.invalidateQueries({ queryKey: listKeys.recordsPage }),
-      queryClient.invalidateQueries({ queryKey: listKeys.recordDetail }),
-      queryClient.invalidateQueries({ queryKey: ["busabase", "relation-options"] }),
-      queryClient.invalidateQueries({ queryKey: ["busabase", "relation-selected"] }),
-      queryClient.invalidateQueries({ queryKey: ["busabase", "relation-bases"] }),
-      queryClient.invalidateQueries({ queryKey: listKeys.recordsCount }),
-      queryClient.invalidateQueries({ queryKey: listKeys.recordDetail }),
-      queryClient.invalidateQueries({ queryKey: listKeys.bases }),
-      queryClient.invalidateQueries({ queryKey: listKeys.baseDetail }),
-      queryClient.invalidateQueries({ queryKey: listKeys.deletedFields }),
-      queryClient.invalidateQueries({ queryKey: listKeys.nodes }),
-      queryClient.invalidateQueries({ queryKey: listKeys.archivedNodes }),
-      queryClient.invalidateQueries({ queryKey: listKeys.archivedBases }),
-      queryClient.invalidateQueries({ queryKey: listKeys.nodeDetail }),
-      queryClient.invalidateQueries({ queryKey: listKeys.nodeRouteState }),
-      // The board's per-column reads and its header aggregate use hand-written
-      // keys, so the orpc-derived keys above do not cover them. Without this a
-      // dragged card lands in its new column while both counts stay stale.
-      queryClient.invalidateQueries({ queryKey: ["busabase", "kanban-column"] }),
-      queryClient.invalidateQueries({ queryKey: ["busabase", "kanban-counts"] }),
-      // Same reasoning for Calendar's month-scoped and per-day reads.
-      queryClient.invalidateQueries({ queryKey: ["busabase", "calendar-range"] }),
-      queryClient.invalidateQueries({ queryKey: ["busabase", "calendar-day"] }),
-      queryClient.invalidateQueries({ queryKey: listKeys.auditEvents }),
-      queryClient.invalidateQueries({
-        queryKey: orpc.bases.listViews.queryOptions({ input: { baseId: activeBase?.id ?? "" } })
-          .queryKey,
-      }),
-    ]);
-  }, [activeBase?.id, listKeys, orpc, queryClient]);
+  const refresh = useCallback(
+    async (historyRecordIds?: readonly string[]) => {
+      await Promise.all([
+        invalidateRecordHistory(queryClient, orpc, historyRecordIds),
+        queryClient.invalidateQueries({ queryKey: listKeys.changeRequests }),
+        queryClient.invalidateQueries({ queryKey: listKeys.changeRequestsPaged }),
+        queryClient.invalidateQueries({ queryKey: listKeys.inboxSnapshot }),
+        queryClient.invalidateQueries({ queryKey: listKeys.changeRequestCounts }),
+        queryClient.invalidateQueries({ queryKey: listKeys.changeRequestDetail }),
+        queryClient.invalidateQueries({ queryKey: listKeys.records }),
+        queryClient.invalidateQueries({ queryKey: listKeys.recordsPage }),
+        queryClient.invalidateQueries({ queryKey: listKeys.recordDetail }),
+        queryClient.invalidateQueries({ queryKey: ["busabase", "relation-options"] }),
+        queryClient.invalidateQueries({ queryKey: ["busabase", "relation-selected"] }),
+        queryClient.invalidateQueries({ queryKey: ["busabase", "relation-bases"] }),
+        queryClient.invalidateQueries({ queryKey: listKeys.recordsCount }),
+        queryClient.invalidateQueries({ queryKey: listKeys.recordsGroupBy }),
+        queryClient.invalidateQueries({ queryKey: listKeys.recordDetail }),
+        queryClient.invalidateQueries({ queryKey: listKeys.bases }),
+        queryClient.invalidateQueries({ queryKey: listKeys.baseDetail }),
+        queryClient.invalidateQueries({ queryKey: listKeys.deletedFields }),
+        queryClient.invalidateQueries({ queryKey: listKeys.nodes }),
+        queryClient.invalidateQueries({ queryKey: listKeys.archivedNodes }),
+        queryClient.invalidateQueries({ queryKey: listKeys.archivedBases }),
+        queryClient.invalidateQueries({ queryKey: listKeys.nodeDetail }),
+        queryClient.invalidateQueries({ queryKey: listKeys.nodeRouteState }),
+        // The board's per-column reads and its header aggregate use hand-written
+        // keys, so the orpc-derived keys above do not cover them. Without this a
+        // dragged card lands in its new column while both counts stay stale.
+        queryClient.invalidateQueries({ queryKey: ["busabase", "kanban-column"] }),
+        queryClient.invalidateQueries({ queryKey: ["busabase", "kanban-counts"] }),
+        // Same reasoning for Calendar's month-scoped and per-day reads.
+        queryClient.invalidateQueries({ queryKey: ["busabase", "calendar-range"] }),
+        queryClient.invalidateQueries({ queryKey: ["busabase", "calendar-day"] }),
+        queryClient.invalidateQueries({ queryKey: listKeys.auditEvents }),
+        queryClient.invalidateQueries({
+          queryKey: orpc.bases.listViews.queryOptions({ input: { baseId: activeBase?.id ?? "" } })
+            .queryKey,
+        }),
+      ]);
+    },
+    [activeBase?.id, listKeys, orpc, queryClient],
+  );
 
   const fetchInboxQueuePage = useCallback(
     (context: InboxQueueContext, page: number) =>
@@ -2198,7 +2212,7 @@ function BusabaseDashboardContent({
         { [fieldSlug]: value },
         { autoMerge: options.mergeImmediately, baseCommitId: options.baseCommitId },
       );
-      void refresh();
+      void refresh([record.id]);
       return result.materialized
         ? { materialized: true as const, headCommitId: result.headCommitId }
         : { materialized: false as const, changeRequestId: result.id };
@@ -2617,16 +2631,16 @@ function BusabaseDashboardContent({
       fieldId: string,
       newType: FieldType,
       selectChoiceMode: "auto_create" | "null_on_missing",
-      options?: { mergeImmediately?: boolean },
+      options?: { mergeImmediately?: boolean; name?: iString },
     ) => {
       setError(null);
       const field = base.fields.find((candidate) => candidate.id === fieldId);
-      // Its own change request, never bundled with a rename: `update`'s patch
-      // declares `type` as `z.never()` precisely because a bundled type change
-      // used to be stripped silently and still report success.
+      // A conversion can carry the edited name atomically; the ordinary
+      // update endpoint cannot accept type changes.
       const changeRequest = await client.createConvertFieldChangeRequest(base.id, {
         fieldId,
         newType,
+        name: options?.name,
         selectChoiceMode,
         submittedBy: "local-editor",
         message: fmt(messages.base.convertFieldMessage, {
@@ -3561,9 +3575,11 @@ function BusabaseDashboardContent({
       }
       return (
         <RecordDetailView
+          basePermissionLevel={activeBase?.viewerPermissionLevel}
           baseSlug={activeBase?.slug ?? activeBase?.nodeId ?? activeBase?.id ?? ""}
           client={client}
           onDeleteChangeRequest={submitDeleteRecord}
+          onReverted={refresh}
           records={records}
           record={activeRecord}
         />
@@ -3789,6 +3805,12 @@ function BusabaseDashboardContent({
           }
         >
           <RecordDetailDialog
+            // The open Base's level only speaks for a record that belongs to it.
+            basePermissionLevel={
+              activeRecord && activeRecord.base.id === activeBase?.id
+                ? activeBase.viewerPermissionLevel
+                : undefined
+            }
             // A pasted `?record=` can name a record from another Base; its own
             // links (full page, edit, activity) must follow the record.
             baseSlug={
@@ -3813,6 +3835,7 @@ function BusabaseDashboardContent({
             key={previewRecordId}
             onClose={closeRecordPreview}
             onDeleteChangeRequest={submitDeleteRecord}
+            onReverted={refresh}
             record={fallbackRecordQuery.error ? null : activeRecord}
             records={records}
             returnFocusTo={recordPreview?.trigger ?? null}

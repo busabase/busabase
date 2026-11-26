@@ -21,7 +21,11 @@ export default defineConfig({
     // Keep the virtualizer on the renderer's React instance in workspace installs.
     // External Node resolution can otherwise pick its nested React 18 beside React 19.
     server: { deps: { inline: ["@tanstack/react-virtual"] } },
-    setupFiles: ["./tests/setup-core-i18n.ts", "./tests/setup-dom-teardown.ts"],
+    setupFiles: [
+      "./tests/setup-core-i18n.ts",
+      "./tests/setup-dom-teardown.ts",
+      "./tests/setup-match-media.ts",
+    ],
     // An allowlist, so a co-located test under a directory not named here is silently never
     // run — it looks green because it never executed. Add the directory when you add the test.
     include: [
@@ -45,6 +49,7 @@ export default defineConfig({
       "src/domains/dashboard/components/**/*.test.tsx",
       "src/domains/doc/components/**/*.test.tsx",
       "src/domains/embed-links/**/*.test.ts",
+      "src/domains/embed-links/**/*.test.tsx",
       "src/domains/filetree/utils/**/*.test.ts",
       "src/domains/form/components/**/*.test.tsx",
       "src/domains/form/utils/**/*.test.ts",

@@ -4,6 +4,7 @@ import {
   buildAssetDownloadUrl,
   extractAssetContentIds,
   rewriteAssetContentIds,
+  rewriteAssetContentUrls,
 } from "./asset-content-url";
 
 describe("asset content URL", () => {
@@ -51,5 +52,16 @@ describe("asset content URL", () => {
   it("is a no-op for an empty map", () => {
     const body = "![a](/api/assets/astold/raw)";
     expect(rewriteAssetContentIds(body, new Map())).toBe(body);
+  });
+
+  it("points root-relative references at another route for rendering", () => {
+    const body =
+      '![a](/api/assets/astaaa/raw)\n<img src="/api/assets/astbbb/raw">\n' +
+      "![abs](https://host.example/api/assets/astccc/raw) [x](/docs/api/assets/astddd/raw)";
+    expect(rewriteAssetContentUrls(body, (id) => `/embed/emb_1/assets/${id}/raw?token=t`)).toBe(
+      "![a](/embed/emb_1/assets/astaaa/raw?token=t)\n" +
+        '<img src="/embed/emb_1/assets/astbbb/raw?token=t">\n' +
+        "![abs](https://host.example/api/assets/astccc/raw) [x](/docs/api/assets/astddd/raw)",
+    );
   });
 });

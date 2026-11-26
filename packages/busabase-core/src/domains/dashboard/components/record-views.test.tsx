@@ -3,7 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
-import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import { createBusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { BaseFieldVO, RecordVO } from "busabase-contract/types";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -65,6 +65,37 @@ const record = {
 const client = {
   listRecordChangeRequests: async () => [],
 } as unknown as BusabaseDashboardApiClient;
+
+const createRecordDetailOrpc = ({
+  listNodes = async () => [],
+  listLinks = async () => [],
+  getSource = async () => record,
+}: {
+  listNodes?: () => Promise<unknown[]>;
+  listLinks?: () => Promise<unknown[]>;
+  getSource?: () => Promise<RecordVO>;
+} = {}) =>
+  createBusabaseQueryUtils(
+    "http://localhost/api/rpc",
+    {
+      batch: false,
+      fetch: async (request) => {
+        const path = new URL(request.url).pathname.replace("/api/rpc/", "");
+        const readers: Record<string, () => Promise<unknown>> = {
+          "nodes/list": listNodes,
+          "records/listLinks": listLinks,
+          "records/get": getSource,
+          "records/listChangeRequests": async () => [],
+        };
+        const read = readers[path];
+        if (!read) throw new Error(`Unexpected record detail RPC: ${path}`);
+        return new Response(JSON.stringify({ json: await read() }), {
+          headers: { "content-type": "application/json" },
+        });
+      },
+    },
+    "record-detail-test",
+  );
 
 const useStaticLocation = (): [string, (path: string) => void] => [
   "/base/customers/rec_preview",
@@ -328,22 +359,7 @@ describe("Record source references", () => {
       path: `/base/customers/rec_preview?${currentSearch}`,
       record: true,
     });
-    const orpc = {
-      nodes: {
-        list: { queryOptions: () => ({ queryKey: ["nodes"], queryFn: async () => [] }) },
-      },
-      records: {
-        listLinks: {
-          queryOptions: () => ({ queryKey: ["inbound", target.id], queryFn: listLinks }),
-        },
-        get: {
-          queryOptions: ({ input }: { input: { recordId: string } }) => ({
-            queryKey: ["record", input.recordId],
-            queryFn: getSource,
-          }),
-        },
-      },
-    } as unknown as BusabaseQueryUtils;
+    const orpc = createRecordDetailOrpc({ listLinks, getSource });
     const result = render(
       <QueryClientProvider
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
@@ -459,13 +475,7 @@ const renderRecordShare = (publicState: "private" | "public" | "inherited") => {
     shared: publicState === "public",
     sharedViaAncestor: publicState === "inherited",
   };
-  const orpc = {
-    nodes: {
-      list: {
-        queryOptions: () => ({ queryKey: ["nodes", "list"], queryFn: async () => [baseNode] }),
-      },
-    },
-  } as unknown as BusabaseQueryUtils;
+  const orpc = createRecordDetailOrpc({ listNodes: async () => [baseNode] });
   render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}

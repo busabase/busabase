@@ -171,7 +171,8 @@ export function AirAppSiteDomains({
 
   const mutationPending = bind.isPending || unbind.isPending || makePrimary.isPending;
   const hasCnameTarget = Boolean(domains.data?.cnameTarget);
-  const canBind = hasCnameTarget && state.engine === "available" && state.liveVersion !== null;
+  const canPublish = state.engine === "available" && !state.publicationLock;
+  const canBind = hasCnameTarget && canPublish && state.liveVersion !== null;
   const inputError = validationError ?? (bind.isError ? errorMessage(bind.error) : null);
   // An older website host cannot redirect, so it shows no primary controls at all.
   const primarySupported = domains.data?.primarySupported === true;
@@ -261,67 +262,105 @@ export function AirAppSiteDomains({
     </DomainSetupGuide>
   );
 
-  const setupRecords = (binding: AirAppSiteDomainBindingVO) => (
-    <div className="@container min-w-0 space-y-2">
-      {binding.dnsRecords.some((record) => record.type !== "HTTP") ? (
-        <>
-          <p className="text-muted-foreground text-xs">{copy.dnsInstructions}</p>
-          <p className="text-muted-foreground text-xs" data-airapp-site-domain-name-hint="">
-            {copy.recordNameHint}
-          </p>
-        </>
-      ) : null}
-      {binding.dnsRecords.some((record) => record.type === "HTTP") ? (
-        <p className="text-muted-foreground text-xs">{copy.httpInstructions}</p>
-      ) : null}
-      <dl className="space-y-3">
-        {binding.dnsRecords.map((record) => {
-          const isHttp = record.type === "HTTP";
-          const recordId = `${binding.hostname}-${record.type}-${record.name}-${record.value}`;
-          return (
-            <div
-              className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-start gap-x-2 gap-y-1 @lg:grid-cols-[3rem_minmax(0,1fr)_minmax(0,1fr)]"
-              data-airapp-site-dns-record={record.type}
-              key={recordId}
-            >
-              <dt className="pt-1 font-medium text-foreground text-xs">{record.type}</dt>
-              <dd className="flex min-w-0 items-start gap-1">
-                <div className="min-w-0 flex-1">
-                  <p className="text-muted-foreground text-xs">
-                    {isHttp ? copy.httpUrl : copy.dnsName}
-                  </p>
-                  <p className="select-all break-all font-mono text-foreground text-xs" dir="ltr">
-                    {record.name}
-                  </p>
-                </div>
-                {copyButton(
-                  `${recordId}-name`,
-                  record.name,
-                  isHttp ? copy.copyHttpUrl : copy.copyName,
-                )}
-              </dd>
-              <dd className="col-start-2 flex min-w-0 items-start gap-1 @lg:col-auto">
-                <div className="min-w-0 flex-1">
-                  <p className="text-muted-foreground text-xs">
-                    {isHttp ? copy.httpBody : copy.dnsValue}
-                  </p>
-                  <p className="select-all break-all font-mono text-foreground text-xs" dir="ltr">
-                    {record.value}
-                  </p>
-                </div>
-                {copyButton(
-                  `${recordId}-value`,
-                  record.value,
-                  isHttp ? copy.copyHttpBody : copy.copyValue,
-                )}
-              </dd>
-            </div>
-          );
-        })}
-      </dl>
-      {guideLink}
-    </div>
+  const recordRows = (
+    binding: AirAppSiteDomainBindingVO,
+    records: AirAppSiteDomainBindingVO["dnsRecords"],
+  ) => (
+    <dl className="space-y-3">
+      {records.map((record) => {
+        const isHttp = record.type === "HTTP";
+        const recordId = `${binding.hostname}-${record.type}-${record.name}-${record.value}`;
+        return (
+          <div
+            className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-start gap-x-2 gap-y-1 @lg:grid-cols-[3rem_minmax(0,1fr)_minmax(0,1fr)]"
+            data-airapp-site-dns-record={record.type}
+            key={recordId}
+          >
+            <dt className="pt-1 font-medium text-foreground text-xs">{record.type}</dt>
+            <dd className="flex min-w-0 items-start gap-1">
+              <div className="min-w-0 flex-1">
+                <p className="text-muted-foreground text-xs">
+                  {isHttp ? copy.httpUrl : copy.dnsName}
+                </p>
+                <p className="select-all break-all font-mono text-foreground text-xs" dir="ltr">
+                  {record.name}
+                </p>
+              </div>
+              {copyButton(
+                `${recordId}-name`,
+                record.name,
+                isHttp ? copy.copyHttpUrl : copy.copyName,
+              )}
+            </dd>
+            <dd className="col-start-2 flex min-w-0 items-start gap-1 @lg:col-auto">
+              <div className="min-w-0 flex-1">
+                <p className="text-muted-foreground text-xs">
+                  {isHttp ? copy.httpBody : copy.dnsValue}
+                </p>
+                <p className="select-all break-all font-mono text-foreground text-xs" dir="ltr">
+                  {record.value}
+                </p>
+              </div>
+              {copyButton(
+                `${recordId}-value`,
+                record.value,
+                isHttp ? copy.copyHttpBody : copy.copyValue,
+              )}
+            </dd>
+          </div>
+        );
+      })}
+    </dl>
   );
+
+  const setupRecords = (binding: AirAppSiteDomainBindingVO) => {
+    const cnameTarget = domains.data?.cnameTarget;
+    const dnsValue = (value: string) => value.trim().toLowerCase().replace(/\.$/, "");
+    const routingIndex = binding.dnsRecords.findIndex(
+      (record) =>
+        record.type === "CNAME" &&
+        dnsValue(record.name) === dnsValue(binding.hostname) &&
+        Boolean(cnameTarget) &&
+        dnsValue(record.value) === dnsValue(cnameTarget ?? ""),
+    );
+    // Older responses may omit this routing record; the declared target still
+    // provides setup instructions, without changing the provider's status.
+    const routing =
+      routingIndex >= 0
+        ? binding.dnsRecords[routingIndex]
+        : cnameTarget
+          ? { type: "CNAME" as const, name: binding.hostname, value: cnameTarget }
+          : null;
+    const verification = binding.dnsRecords.filter((_record, index) => index !== routingIndex);
+    return (
+      <div className="@container min-w-0 space-y-3">
+        {routing ? (
+          <div className="space-y-2" data-airapp-site-domain-routing="">
+            <p className="text-muted-foreground text-xs">{copy.dnsInstructions}</p>
+            <p className="text-muted-foreground text-xs" data-airapp-site-domain-name-hint="">
+              {copy.recordNameHint}
+            </p>
+            {recordRows(binding, [routing])}
+          </div>
+        ) : null}
+        {verification.length > 0 ? (
+          <div data-airapp-site-domain-advanced="">
+            <DomainSetupGuide
+              id={`${id}-advanced-${binding.hostname}`}
+              label={copy.advancedVerification}
+            >
+              <p className="text-muted-foreground text-xs">{copy.advancedHint}</p>
+              {verification.some((record) => record.type === "HTTP") ? (
+                <p className="text-muted-foreground text-xs">{copy.httpInstructions}</p>
+              ) : null}
+              {recordRows(binding, verification)}
+            </DomainSetupGuide>
+          </div>
+        ) : null}
+        {guideLink}
+      </div>
+    );
+  };
 
   return (
     <section
@@ -466,7 +505,7 @@ export function AirAppSiteDomains({
                                 hostname: binding.hostname,
                               })}
                               className="text-muted-foreground"
-                              disabled={mutationPending || state.engine !== "available"}
+                              disabled={mutationPending || !canPublish}
                               onClick={() => makePrimary.mutate(binding.hostname)}
                               size="sm"
                               type="button"
@@ -517,7 +556,7 @@ export function AirAppSiteDomains({
                         ))}
                       </ul>
                     ) : null}
-                    {binding.dnsRecords.length > 0 ? (
+                    {binding.dnsRecords.length > 0 || domains.data.cnameTarget ? (
                       binding.status === "active" ? (
                         <details className="min-w-0" data-airapp-site-domain-setup="">
                           <summary
@@ -574,7 +613,7 @@ export function AirAppSiteDomains({
                 );
               })}
             </ul>
-          ) : domains.data.cnameTarget && state.engine === "available" ? (
+          ) : domains.data.cnameTarget && canPublish ? (
             setupGuide(domains.data.cnameTarget)
           ) : (
             <p className="text-muted-foreground text-xs">{copy.empty}</p>
@@ -656,7 +695,7 @@ export function AirAppSiteDomains({
               {!canBind
                 ? !hasCnameTarget
                   ? copy.unavailable
-                  : state.engine !== "available"
+                  : !canPublish
                     ? copy.planLocked
                     : copy.publishFirst
                 : copy.hostnameHint}

@@ -114,9 +114,7 @@ describe("lookup typed result", () => {
     });
     expect(screen.getAllByRole("link")).toHaveLength(3);
     fireEvent.click(screen.getByRole("link", { name: "report0.pdf" }));
-    expect(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "report3.pdf" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "report3.pdf" })).toBeTruthy();
   });
   it("formats calendar dates without raw JSON", () => {
     show({

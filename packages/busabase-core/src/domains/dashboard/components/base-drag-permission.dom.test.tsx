@@ -9,7 +9,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 import { SubmitPermissionProvider } from "./split-submit-button";
 
-vi.mock("wouter", () => ({ useSearch: () => "?spaceId=space" }));
+vi.mock("wouter", () => {
+  const navigate = vi.fn();
+  return {
+    useSearch: () => "?spaceId=space",
+    useLocation: () => ["/base/tasks/board", navigate],
+  };
+});
 vi.mock("openlib/ui/dashboard", () => ({
   SPALink: ({ children, ...props }: { children: ReactNode; href: string }) => (
     <a {...props}>{children}</a>

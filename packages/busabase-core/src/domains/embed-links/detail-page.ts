@@ -14,7 +14,12 @@ import {
 } from "./logic";
 import type { AirAppEmbedRuntimeVO, ResolvedPolymorphicEmbedVO } from "./types";
 
-export type EmbedDetailType = "change-request" | "record-detail";
+/**
+ * The typed embed pages: Change Requests, record details, and `node` — every
+ * other node type an Embed Link can point at, rendered with the workbench's own
+ * Node Detail components. AirApps keep their dedicated runtime page.
+ */
+export type EmbedDetailType = "change-request" | "record-detail" | "node";
 
 export type ResolvedEmbedDetail<T extends EmbedDetailType> = Extract<
   ResolvedPolymorphicEmbedVO,
@@ -67,6 +72,9 @@ export const loadEmbedDetail = async <T extends EmbedDetailType>({
     return expired?.type === expect ? { expired: true } : null;
   }
   if (embed.type !== expect) return null;
+  // An AirApp link is a `node` link too, but it boots in its own runtime page
+  // (`/airapp`); the Node Detail page must not try to render it.
+  if (embed.type === "node" && embed.node.type === "airapp") return null;
   return { embed: embed as ResolvedEmbedDetail<T>, secret };
 };
 

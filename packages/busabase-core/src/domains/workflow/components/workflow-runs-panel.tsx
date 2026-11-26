@@ -24,7 +24,7 @@ import { Button } from "kui/button";
 import { Input } from "kui/input";
 import { Textarea } from "kui/textarea";
 import { Ban, Check, FastForward, Play, RotateCcw, X } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { type CoreI18nMessages, fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { formatListDateTime } from "../../dashboard/helpers/format";
@@ -78,7 +78,8 @@ const STATUS_BADGE_CLASS: Record<WorkflowRunStatus, string> = {
   running: "border-primary/40 bg-primary/10 text-primary",
   waiting: "border-primary/40 bg-background text-foreground",
   waiting_approval: "border-primary/40 bg-background text-foreground",
-  completed: "border-primary/30 bg-primary/10 text-primary",
+  completed:
+    "border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300",
   failed: "border-destructive/40 bg-destructive/10 text-destructive",
   cancelled: "border-border bg-muted text-muted-foreground",
 };
@@ -501,6 +502,10 @@ export function WorkflowRunsPanel({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   // The run a notification link asked for. It may be older than the first page.
   const [linkedRunId, setLinkedRunId] = useState<string | null>(null);
+  const detailsRef = useRef<HTMLDivElement>(null);
+  const [linkVisit, setLinkVisit] = useState(0);
+  const [legacyApprovalVisit, setLegacyApprovalVisit] = useState(0);
+  const followedLegacyVisit = useRef(0);
   // Pages loaded with "Load older runs". They are not polled.
   const [olderRuns, setOlderRuns] = useState<WorkflowRun[]>([]);
   const [olderDecidable, setOlderDecidable] = useState<string[]>([]);
@@ -512,9 +517,17 @@ export function WorkflowRunsPanel({
   useEffect(() => {
     const follow = () => {
       const { runId } = parseWorkflowRunLink(window.location.hash);
+      if (window.location.hash === "#approval") {
+        setLinkedRunId(null);
+        setLegacyApprovalVisit((visit) => visit + 1);
+        return;
+      }
+      setLegacyApprovalVisit(0);
+      followedLegacyVisit.current = 0;
       if (!runId) return;
       setLinkedRunId(runId);
       setSelectedRunId(runId);
+      setLinkVisit((visit) => visit + 1);
     };
     follow();
     window.addEventListener("hashchange", follow);
@@ -563,6 +576,61 @@ export function WorkflowRunsPanel({
   const queuedCount = listQuery.data?.queuedCount ?? 0;
   // Nothing picked yet (or the pick fell off the list): show the newest run.
   const selectedRun = runs.find((run) => run.id === selectedRunId) ?? runs[0] ?? null;
+
+  // Older coalesced notifications have no run ID. Find the newest run this
+  // viewer can decide, including runs beyond the first page.
+  useEffect(() => {
+    if (
+      !legacyApprovalVisit ||
+      !listQuery.data ||
+      followedLegacyVisit.current === legacyApprovalVisit
+    )
+      return;
+    let cancelled = false;
+    const followLegacy = async () => {
+      let page = listQuery.data;
+      try {
+        while (page && !cancelled) {
+          const candidate = page.runs.find((run) => page.decidableRunIds.includes(run.id));
+          if (candidate) {
+            followedLegacyVisit.current = legacyApprovalVisit;
+            setLinkedRunId(candidate.id);
+            setSelectedRunId(candidate.id);
+            setLinkVisit((visit) => visit + 1);
+            return;
+          }
+          if (!page.nextCursor) break;
+          page = await queryClient.fetchQuery(
+            orpc.workflows.list.queryOptions({
+              input: { nodeId: workflowNodeId, limit: RUN_LIST_LIMIT, cursor: page.nextCursor },
+            }),
+          );
+        }
+      } catch {
+        // Keep the existing list visible if an older page cannot be loaded.
+      }
+      if (!cancelled && listQuery.data?.runs[0]) {
+        followedLegacyVisit.current = legacyApprovalVisit;
+        setLinkedRunId(listQuery.data.runs[0].id);
+        setSelectedRunId(listQuery.data.runs[0].id);
+        setLinkVisit((visit) => visit + 1);
+      }
+    };
+    void followLegacy();
+    return () => {
+      cancelled = true;
+    };
+  }, [legacyApprovalVisit, listQuery.data, orpc, queryClient, workflowNodeId]);
+
+  // Wait for the linked run (including an older page) before revealing its actions.
+  // Run once per notification visit, not on each background polling update.
+  const scrolledVisit = useRef(0);
+  useEffect(() => {
+    if (!linkedRunId || selectedRun?.id !== linkedRunId || scrolledVisit.current === linkVisit)
+      return;
+    detailsRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    scrolledVisit.current = linkVisit;
+  }, [linkedRunId, selectedRun?.id, linkVisit]);
 
   // A mutation returns the run as it stands now; show that at once, then let
   // the refetch bring the rest of the list up to date.
@@ -910,37 +978,41 @@ export function WorkflowRunsPanel({
       </section>
 
       {selectedRun ? (
-        <WorkflowRunDetails
-          actionError={
-            runActionError
-              ? presentCoreError(messages, locale, runActionError, copy.actionFailed)
-              : null
-          }
-          actorNames={actorNames}
-          busy={
-            resumeMutation.isPending ||
-            decideMutation.isPending ||
-            cancelMutation.isPending ||
-            retryMutation.isPending
-          }
-          canCancel={canRun}
-          canContinue={canRun}
-          canDecide={decidableRunIds.includes(selectedRun.id)}
-          canRetry={retryableRunIds.includes(selectedRun.id)}
-          onCancel={() => cancelMutation.mutate({ runId: selectedRun.id })}
-          onOpenRun={selectRun}
-          onRetry={() => retryMutation.mutate({ runId: selectedRun.id })}
-          retriedAs={
-            typeof selectedRun.payload.retriedAs === "string" ? selectedRun.payload.retriedAs : null
-          }
-          retryOf={
-            typeof selectedRun.payload.retryOf === "string" ? selectedRun.payload.retryOf : null
-          }
-          onContinue={() => resumeMutation.mutate({ runId: selectedRun.id, force: true })}
-          onDecide={(decision) => decideMutation.mutate({ runId: selectedRun.id, decision })}
-          run={selectedRun}
-          steps={steps}
-        />
+        <div ref={detailsRef}>
+          <WorkflowRunDetails
+            actionError={
+              runActionError
+                ? presentCoreError(messages, locale, runActionError, copy.actionFailed)
+                : null
+            }
+            actorNames={actorNames}
+            busy={
+              resumeMutation.isPending ||
+              decideMutation.isPending ||
+              cancelMutation.isPending ||
+              retryMutation.isPending
+            }
+            canCancel={canRun}
+            canContinue={canRun}
+            canDecide={decidableRunIds.includes(selectedRun.id)}
+            canRetry={retryableRunIds.includes(selectedRun.id)}
+            onCancel={() => cancelMutation.mutate({ runId: selectedRun.id })}
+            onOpenRun={selectRun}
+            onRetry={() => retryMutation.mutate({ runId: selectedRun.id })}
+            retriedAs={
+              typeof selectedRun.payload.retriedAs === "string"
+                ? selectedRun.payload.retriedAs
+                : null
+            }
+            retryOf={
+              typeof selectedRun.payload.retryOf === "string" ? selectedRun.payload.retryOf : null
+            }
+            onContinue={() => resumeMutation.mutate({ runId: selectedRun.id, force: true })}
+            onDecide={(decision) => decideMutation.mutate({ runId: selectedRun.id, decision })}
+            run={selectedRun}
+            steps={steps}
+          />
+        </div>
       ) : null}
     </div>
   );

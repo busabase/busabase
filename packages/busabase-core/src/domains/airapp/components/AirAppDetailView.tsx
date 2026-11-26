@@ -1,23 +1,10 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
-import { CodeBlock } from "kui/ai-elements/code-block";
+import { useQuery } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { Files, MonitorPlay, Terminal } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
-import { presentCoreError } from "../../../i18n/localize-error";
-import { AssetMediaPreview, isPreviewableAssetMime } from "../../dashboard/components/assets";
-import {
-  buildFileTree,
-  collectFolderPaths,
-  DriveFileTree,
-  guessFileTreeLanguage,
-  renderFileTree,
-} from "../../dashboard/components/file-tree-browser";
-import { FileTreeUploadControl } from "../../dashboard/components/file-tree-file-actions";
-import { useFileUploadTasks } from "../../dashboard/components/file-upload-tasks";
+import { useState } from "react";
+import { fmt, useCoreI18n } from "../../../i18n";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { NodeAgentPromptsButton } from "../../dashboard/components/node-agent-prompts-button";
 import {
@@ -25,19 +12,22 @@ import {
   PREVIEW_DETAIL_TAB_TRIGGER_CLASS,
 } from "../../dashboard/components/preview-fullscreen";
 import { EmptyState } from "../../dashboard/components/primitives";
-import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
-import { useWorkspacePermissionLevel } from "../../dashboard/components/split-submit-button";
-import { fileTreeParentPath } from "../../dashboard/helpers/file-tree-files";
+import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useRegisterTopbarNodeActions } from "../../dashboard/hooks/use-register-topbar-node-actions";
 import { useRegisterTopbarNodeInfo } from "../../dashboard/hooks/use-register-topbar-node-info";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
-import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
-import { useAirAppPreviewState } from "../hooks/use-airapp-preview-state";
+import { type AirAppSiteViewsState, useAirAppSiteViews } from "../hooks/use-airapp-site-views";
 import { disposeDeletedAirAppSession } from "../store/airapp-session-cleanup";
+import { AirAppFilesPanel } from "./AirAppFilesPanel";
 import { useAirAppKeepAliveActive, useAirAppKeepAliveScope } from "./AirAppKeepAliveHost";
 import { AirAppPublishToSite } from "./AirAppPublishToSite";
+import {
+  AirAppSiteContextActions,
+  AirAppSiteModeSwitch,
+  AirAppSiteToolbarActions,
+} from "./AirAppSiteViews";
 import {
   AirAppPinButton,
   AirAppRunControls,
@@ -51,31 +41,73 @@ import {
  *  unmounting them — unmounting the "App" tab would dispose the live Nodepod
  *  runner every time the user switched to Files or Logs. */
 const TAB_CONTENT_CLASS =
-  "mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden data-[state=inactive]:pointer-events-none";
+  "mt-0 flex min-h-0 min-w-0 flex-1 flex-col data-[state=inactive]:hidden data-[state=inactive]:pointer-events-none";
+
+/** Primary Site modes precede subordinate actions; other engines keep their view tabs. */
+export function AirAppDetailViewSwitcher({ siteViews }: { siteViews?: AirAppSiteViewsState }) {
+  const messages = useCoreI18n();
+  if (siteViews?.isSite)
+    return (
+      <div className="flex shrink-0 items-center gap-1" data-airapp-view-switcher="">
+        <AirAppSiteModeSwitch views={siteViews} />
+        <AirAppSiteContextActions views={siteViews} />
+      </div>
+    );
+  return (
+    <div className="flex min-w-0 max-w-full items-center gap-1" data-airapp-view-switcher="">
+      <TabsList className={PREVIEW_DETAIL_TAB_LIST_CLASS}>
+        <TabsTrigger
+          aria-label={messages.airapp.tabFiles}
+          className={`${PREVIEW_DETAIL_TAB_TRIGGER_CLASS} w-8 px-0 @min-[500px]/airapp-toolbar:w-auto @min-[500px]/airapp-toolbar:px-2.5`}
+          value="files"
+        >
+          <Files className="size-3.5" />
+          <span className="hidden @min-[500px]/airapp-toolbar:inline">
+            {messages.airapp.tabFiles}
+          </span>
+        </TabsTrigger>
+        <TabsTrigger
+          aria-label={messages.airapp.tabPreview}
+          className={`${PREVIEW_DETAIL_TAB_TRIGGER_CLASS} w-8 px-0 @min-[500px]/airapp-toolbar:w-auto @min-[500px]/airapp-toolbar:px-2.5`}
+          value="app"
+        >
+          <MonitorPlay className="size-3.5" />
+          <span className="hidden @min-[500px]/airapp-toolbar:inline">
+            {messages.airapp.tabPreview}
+          </span>
+        </TabsTrigger>
+        <TabsTrigger
+          aria-label={messages.airapp.tabLogs}
+          className={`${PREVIEW_DETAIL_TAB_TRIGGER_CLASS} w-8 px-0 @min-[500px]/airapp-toolbar:w-auto @min-[500px]/airapp-toolbar:px-2.5`}
+          value="logs"
+        >
+          <Terminal className="size-3.5" />
+          <span className="hidden @min-[500px]/airapp-toolbar:inline">
+            {messages.airapp.tabLogs}
+          </span>
+        </TabsTrigger>
+      </TabsList>
+    </div>
+  );
+}
+
+export { AirAppFileViewer } from "./AirAppFilesPanel";
 
 /**
  * AirApp node detail: the shared topbar owns identity, Agent prompts, Pin and node settings;
- * one local toolbar owns Files/App/Logs and the preview actions. The live
- * preview gets every remaining vertical pixel. "App" (default) is the live run
- * preview iframe, since the primary thing a user wants when opening an AirApp
- * is to see it working; the Run button lives in the toolbar. "Files" is the
- * file-tree browser with reviewable uploads. "Logs" is the streaming install/start console.
- * All three tabs stay mounted (forceMount + CSS hide) so switching away from
- * "App" never tears down the running dev server. HEAD-only: previewing a
+ * Sites use a primary Preview/Deployed Site mode switch with contextual
+ * Files/Logs actions; other engines retain Files/App/Logs tabs. The running
+ * preview gets the remaining vertical space, and inactive frames stay mounted
+ * so changing modes or opening source/logs preserves their app state.
+ * "Files" is the file-tree browser with reviewable uploads. Non-Site "Logs"
+ * is the streaming install/start console. HEAD-only: previewing a
  * pending (unmerged) ChangeRequest's file snapshot is out of scope for V1
  * (see the airapp changelog's Follow-up Tasks).
  */
 export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
   const messages = useCoreI18n();
-  const locale = useCoreLocale();
-  const queryClient = useQueryClient();
-  const uploadTasks = useFileUploadTasks();
-  const isAnonymous = useIsAnonymousVisitor();
-  const permissionLevel = useWorkspacePermissionLevel();
-  const canUploadFiles = !isAnonymous && hasApiKeyLevel(permissionLevel, "changeRequest");
   const keepAliveScopeKey = useAirAppKeepAliveScope();
   const isKeepAliveActive = useAirAppKeepAliveActive();
-  const [openPath, setOpenPath] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState("app");
   const fullscreenState = useAirAppFullscreen({ syncWithUrl: isKeepAliveActive });
 
@@ -87,81 +119,17 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
   const airapp = asNodeDetail(airappQuery.isError ? undefined : airappQuery.data, "airapp");
   useReportLoadedNode(airapp?.node, onNodeLoaded);
 
-  // Reset the open file when switching airapp nodes.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on slug change
-  useEffect(() => {
-    setOpenPath(null);
-  }, [slug]);
-
-  const fileQuery = useQuery({
-    ...orpc.fileTrees.readFile.queryOptions({
-      input: { nodeId: airapp?.node.id ?? "", filePath: openPath ?? "", type: "airapp" },
-    }),
-    enabled: Boolean(airapp && openPath),
-  });
-
-  const tree = useMemo(() => buildFileTree(airapp?.files ?? []), [airapp?.files]);
-  const expandedFolders = useMemo(() => new Set(collectFolderPaths(tree)), [tree]);
-  const filePaths = useMemo(
-    () => new Set((airapp?.files ?? []).map((file) => file.path)),
-    [airapp?.files],
-  );
-
-  const uploadFiles = async (
-    files: File[],
-    folder: string,
-    mode: "changeRequest" | "immediate",
-    replacePaths: string[],
-  ) => {
-    if (!airapp || !canUploadFiles) return;
-    const existingFiles = await Promise.all(
-      replacePaths.map((filePath) =>
-        queryClient.fetchQuery(
-          orpc.fileTrees.readFile.queryOptions({
-            input: { nodeId: airapp.node.id, filePath, type: "airapp" },
-          }),
-        ),
-      ),
-    );
-    const replace = new Map(
-      replacePaths.map((path, index) => [path, existingFiles[index]?.contentHash || null] as const),
-    );
-    uploadTasks.enqueue({
-      files,
-      folder,
-      mode,
-      nodeId: airapp.node.id,
-      nodeName: airapp.node.name,
-      nodeType: "airapp",
-      ...(replace.size > 0 ? { replace } : {}),
-    });
-  };
-
-  useEffect(() => {
-    if (!airapp || openPath) {
-      return;
-    }
-    const entryFile =
-      airapp.files.find((file) => file.path === airapp.entryFile) ?? airapp.files[0];
-    if (entryFile) {
-      setOpenPath(entryFile.path);
-    }
-  }, [airapp, openPath]);
-
-  const selectFile = useCallback(
-    (path: string) => {
-      // FileTreeFolder also fires onSelect; only react to real files.
-      if (filePaths.has(path)) {
-        setOpenPath(path);
-      }
-    },
-    [filePaths],
-  );
-
   // Always called (before the early-return below) so hook order stays stable
   // across renders; the hook itself is a no-op while `airapp` is null.
   const runner = useAirAppRunner({ orpc, airapp });
-  const previewState = useAirAppPreviewState(runner.previewUrl);
+  const siteViews = useAirAppSiteViews({
+    orpc,
+    airapp,
+    kind: runner.runnerKind,
+    previewUrl: runner.previewUrl,
+    status: runner.status,
+  });
+  const previewState = siteViews.preview;
 
   // `enabled: isKeepAliveActive` matters here specifically because
   // `AirAppKeepAliveHost` keeps every visited AirApp's detail view mounted
@@ -225,197 +193,98 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
     );
   }
 
-  const fileCount = airapp.files.length;
+  const selectedViewTab = siteViews.view === "deployed" ? "deployed" : "app";
+  const activeTab = siteViews.isSite
+    ? selectedViewTab
+    : fullscreenState.fullscreen
+      ? "app"
+      : selectedTab;
 
-  return (
-    <div className="@container/airapp-toolbar flex h-full min-h-0 w-full flex-col bg-background">
-      {/* Node identity (name, description, Info dialog) lives in the shared
-          topbar; this header carries only the local view switcher. */}
-      {/* Controlled so entering fullscreen can force the "App" panel active:
-          inactive panels are CSS-hidden, and the preview iframe we grow to
-          fill the viewport lives inside that panel. */}
-      <Tabs
-        className="flex min-h-0 flex-1 flex-col"
-        onValueChange={setSelectedTab}
-        value={fullscreenState.fullscreen ? "app" : selectedTab}
+  const content = (
+    <>
+      <header
+        className={`flex min-h-12 min-w-0 shrink-0 items-center justify-between gap-1 border-border/60 border-b px-2 py-1 @min-[600px]/airapp-toolbar:px-4 ${siteViews.isSite ? "flex-nowrap" : "flex-wrap"}`}
+        data-airapp-detail-toolbar=""
       >
-        <header
-          className="flex h-12 min-w-0 shrink-0 items-center justify-between gap-1 border-border/60 border-b px-2 @min-[600px]/airapp-toolbar:px-4"
-          data-airapp-detail-toolbar=""
-        >
-          <TabsList className={PREVIEW_DETAIL_TAB_LIST_CLASS}>
-            <TabsTrigger
-              aria-label={messages.airapp.tabFiles}
-              className={`${PREVIEW_DETAIL_TAB_TRIGGER_CLASS} w-8 px-0 @min-[500px]/airapp-toolbar:w-auto @min-[500px]/airapp-toolbar:px-2.5`}
-              value="files"
-            >
-              <Files className="size-3.5" />
-              <span className="hidden @min-[500px]/airapp-toolbar:inline">
-                {messages.airapp.tabFiles}
-              </span>
-            </TabsTrigger>
-            <TabsTrigger
-              aria-label={messages.airapp.tabPreview}
-              className={`${PREVIEW_DETAIL_TAB_TRIGGER_CLASS} w-8 px-0 @min-[500px]/airapp-toolbar:w-auto @min-[500px]/airapp-toolbar:px-2.5`}
-              value="app"
-            >
-              <MonitorPlay className="size-3.5" />
-              <span className="hidden @min-[500px]/airapp-toolbar:inline">
-                {messages.airapp.tabPreview}
-              </span>
-            </TabsTrigger>
-            <TabsTrigger
-              aria-label={messages.airapp.tabLogs}
-              className={`${PREVIEW_DETAIL_TAB_TRIGGER_CLASS} w-8 px-0 @min-[500px]/airapp-toolbar:w-auto @min-[500px]/airapp-toolbar:px-2.5`}
-              value="logs"
-            >
-              <Terminal className="size-3.5" />
-              <span className="hidden @min-[500px]/airapp-toolbar:inline">
-                {messages.airapp.tabLogs}
-              </span>
-            </TabsTrigger>
-          </TabsList>
-          <AirAppPublishToSite
-            compact
-            key={airapp.node.id}
-            nodeId={airapp.node.id}
-            nodeName={airapp.node.name}
-            orpc={orpc}
-            showButton
-            renderButtons={(_publish, releases, publishMenuItem) => (
+        <AirAppDetailViewSwitcher siteViews={siteViews} />
+        <AirAppPublishToSite
+          buttonWhenNeeded
+          compact
+          filesRevision={airapp.files.map((file) => `${file.path}:${file.updatedAt}`).join("|")}
+          key={airapp.node.id}
+          nodeId={airapp.node.id}
+          nodeName={airapp.node.name}
+          orpc={orpc}
+          publicationBusy={runner.runnerKind === "site" && runner.isBusy}
+          placement="menu"
+          renderButtons={(publishButton, _releases, publish) => {
+            const controls = (
               <AirAppRunControls
                 airapp={airapp}
                 fullscreenState={fullscreenState}
-                previewState={previewState}
-                releasesAction={releases}
-                siteActionItems={publishMenuItem}
+                previewState={siteViews.isSite ? siteViews.activePreview : previewState}
+                siteViews={siteViews}
+                publishAction={publish}
+                publishButton={publishButton}
                 runner={runner}
                 showPinToSidePanel={false}
                 showSitePublish={false}
               />
-            )}
-          />
-        </header>
+            );
+            return siteViews.isSite ? (
+              <AirAppSiteToolbarActions views={siteViews} controls={controls} />
+            ) : (
+              controls
+            );
+          }}
+          showButton
+        />
+      </header>
 
-        <TabsContent className={TAB_CONTENT_CLASS} forceMount value="app">
-          <AirAppRunPreview
-            airapp={airapp}
-            fullscreenState={fullscreenState}
-            runner={runner}
-            previewState={previewState}
-            showToolbar={false}
-          />
-        </TabsContent>
+      <div
+        className={
+          activeTab === "app" || activeTab === "deployed"
+            ? "flex min-h-0 min-w-0 flex-1 flex-col"
+            : "hidden"
+        }
+      >
+        <AirAppRunPreview
+          airapp={airapp}
+          fullscreenState={fullscreenState}
+          runner={runner}
+          previewState={previewState}
+          siteViews={siteViews}
+          tabbed={!siteViews.isSite}
+          showToolbar={false}
+        />
+      </div>
 
+      {!siteViews.isSite ? (
         <TabsContent className={TAB_CONTENT_CLASS} forceMount value="files">
-          <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-            <aside className="min-h-[220px] shrink-0 border-border/60 border-b bg-muted/20 md:min-h-0 md:w-[260px] md:border-r md:border-b-0">
-              <div className="flex h-full min-h-0 flex-col">
-                <div className="flex min-h-11 items-center justify-between gap-3 border-border/50 border-b px-4">
-                  <div className="font-medium text-muted-foreground text-xs uppercase">
-                    {messages.nodeDetail.files}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {canUploadFiles ? (
-                      <FileTreeUploadControl
-                        availableFolders={collectFolderPaths(tree)}
-                        defaultAction="changeRequest"
-                        defaultFolder={openPath ? fileTreeParentPath(openPath) : ""}
-                        existingPaths={filePaths}
-                        labels={{
-                          root: messages.airapp.filesRoot,
-                          duplicateUploadNames: messages.airapp.duplicateUploadNames,
-                          invalidFilePath: messages.airapp.invalidFilePath,
-                          invalidUploadFileName: messages.airapp.invalidUploadFileName,
-                        }}
-                        onSubmit={uploadFiles}
-                      />
-                    ) : null}
-                    <div className="rounded-md border border-border/70 bg-card px-1.5 py-0.5 font-mono text-muted-foreground text-[11px]">
-                      {fileCount}
-                    </div>
-                  </div>
-                </div>
-                {canUploadFiles ? (
-                  <p className="border-border/50 border-b px-4 py-2 text-muted-foreground text-xs">
-                    {messages.airapp.filesUploadHint}
-                  </p>
-                ) : null}
-                <div className="min-h-0 flex-1 overflow-auto p-2">
-                  {airapp.files.length === 0 ? (
-                    <div className="px-2 py-3 text-muted-foreground text-sm">
-                      {messages.nodeDetail.noFilesYet}
-                    </div>
-                  ) : (
-                    <DriveFileTree
-                      className="rounded-none border-0 bg-transparent font-sans text-[13px]"
-                      defaultExpanded={expandedFolders}
-                      key={airapp.node.id}
-                      onSelect={selectFile}
-                      selectedPath={openPath ?? undefined}
-                    >
-                      {renderFileTree(tree)}
-                    </DriveFileTree>
-                  )}
-                </div>
-              </div>
-            </aside>
-
-            <main className="flex min-h-0 flex-1 flex-col">
-              <div className="flex min-h-11 items-center border-border/60 border-b px-4 py-2">
-                <div className="min-w-0 truncate font-mono text-muted-foreground text-xs">
-                  {openPath ?? messages.nodeDetail.selectFile}
-                </div>
-              </div>
-              <div className="min-h-0 flex-1 overflow-auto">
-                {!openPath ? (
-                  <div className="grid h-full min-h-[320px] place-items-center p-8 text-center text-muted-foreground text-sm">
-                    {messages.nodeDetail.selectFile}
-                  </div>
-                ) : fileQuery.isLoading ? (
-                  <FileContentSkeleton />
-                ) : fileQuery.isError ? (
-                  <div className="border-border/60 border-b bg-destructive/5 p-4 text-destructive text-sm">
-                    {presentCoreError(
-                      messages,
-                      locale,
-                      fileQuery.error,
-                      messages.nodeDetail.couldNotReadFile,
-                    )}
-                  </div>
-                ) : fileQuery.data &&
-                  fileQuery.data.encoding !== "utf8" &&
-                  fileQuery.data.assetUrl &&
-                  isPreviewableAssetMime(fileQuery.data.mimeType) ? (
-                  <div className="grid h-full min-h-[320px] place-items-center overflow-hidden p-4">
-                    <AssetMediaPreview
-                      mediaClassName="max-h-[65vh] w-full object-contain"
-                      mimeType={fileQuery.data.mimeType}
-                      name={fileQuery.data.displayName ?? openPath}
-                      url={fileQuery.data.assetUrl}
-                    />
-                  </div>
-                ) : fileQuery.data && fileQuery.data.encoding !== "utf8" ? (
-                  <div className="p-5 text-muted-foreground text-sm">
-                    {messages.nodeDetail.assetFilePreview}
-                  </div>
-                ) : (
-                  <CodeBlock
-                    className="min-h-[calc(100vh-15rem)] !rounded-none !border-0 !bg-transparent"
-                    code={fileQuery.data?.content ?? ""}
-                    language={guessFileTreeLanguage(openPath)}
-                    showLineNumbers
-                  />
-                )}
-              </div>
-            </main>
-          </div>
+          <AirAppFilesPanel airapp={airapp} orpc={orpc} />
         </TabsContent>
+      ) : null}
 
+      {!siteViews.isSite ? (
         <TabsContent className={TAB_CONTENT_CLASS} forceMount value="logs">
           <AirAppRunLogs runner={runner} />
         </TabsContent>
-      </Tabs>
+      ) : null}
+    </>
+  );
+  return (
+    <div className="@container/airapp-toolbar flex h-full min-h-0 w-full flex-col bg-background">
+      {siteViews.isSite ? (
+        <div className="flex min-h-0 flex-1 flex-col">{content}</div>
+      ) : (
+        <Tabs
+          className="flex min-h-0 flex-1 flex-col"
+          onValueChange={setSelectedTab}
+          value={activeTab}
+        >
+          {content}
+        </Tabs>
+      )}
     </div>
   );
 }

@@ -1,0 +1,85 @@
+:root {
+  --busabase-dialog-enter-duration: 120ms;
+  --busabase-dialog-exit-duration: 100ms;
+  --busabase-dialog-enter-easing: ease-out;
+  --busabase-dialog-exit-easing: ease-in;
+}
+
+:is(
+    [role="dialog"],
+    [role="alertdialog"]
+  )[class~="fixed"][class~="data-[state=open]:zoom-in-95"]:not(
+    [data-side],
+    [data-attachment-preview-surface]
+  )[data-state="open"],
+[data-state="open"]:not([role]):has(
+    + :is(
+        [role="dialog"],
+        [role="alertdialog"]
+      )[class~="fixed"][class~="data-[state=open]:zoom-in-95"]:not(
+        [data-side],
+        [data-attachment-preview-surface]
+      )
+  ) {
+  animation: busabase-dialog-in var(--busabase-dialog-enter-duration)
+    var(--busabase-dialog-enter-easing) both;
+}
+
+:is(
+    [role="dialog"],
+    [role="alertdialog"]
+  )[class~="fixed"][class~="data-[state=open]:zoom-in-95"]:not(
+    [data-side],
+    [data-attachment-preview-surface]
+  )[data-state="closed"],
+[data-state="closed"]:not([role]):has(
+    + :is(
+        [role="dialog"],
+        [role="alertdialog"]
+      )[class~="fixed"][class~="data-[state=open]:zoom-in-95"]:not(
+        [data-side],
+        [data-attachment-preview-surface]
+      )
+  ) {
+  animation: busabase-dialog-out var(--busabase-dialog-exit-duration)
+    var(--busabase-dialog-exit-easing) both;
+}
+
+@keyframes busabase-dialog-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes busabase-dialog-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(
+      [role="dialog"],
+      [role="alertdialog"]
+    )[class~="fixed"][class~="data-[state=open]:zoom-in-95"]:not(
+      [data-side],
+      [data-attachment-preview-surface]
+    )[data-state],
+  [data-state]:not([role]):has(
+      + :is(
+          [role="dialog"],
+          [role="alertdialog"]
+        )[class~="fixed"][class~="data-[state=open]:zoom-in-95"]:not(
+          [data-side],
+          [data-attachment-preview-surface]
+        )
+    ) {
+    animation: none;
+  }
+}

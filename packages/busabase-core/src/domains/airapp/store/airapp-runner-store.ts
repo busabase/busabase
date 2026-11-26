@@ -6,6 +6,7 @@ import type { AirAppRunner, AirAppRunnerKind } from "../components/runners/types
 import type { AirAppRuntimeKind } from "../utils/airapp-runtime-descriptor";
 import type { AirAppEngineLockState } from "../utils/engine-plan-gate";
 import type { NodepodServiceWorkerErrorCode } from "../utils/nodepod-service-worker";
+import type { SiteAccessDenial } from "../utils/site-access";
 import type { SiteBundleBlocker } from "../utils/site-bundle";
 
 export const DEFAULT_RUNNER_KIND: AirAppRunnerKind = "browser";
@@ -121,6 +122,7 @@ export interface AirAppRunEntry {
    * at render time, in the viewer's locale, the way `engineUnavailable` does.
    */
   siteBlockers: SiteBundleBlocker[] | null;
+  siteAccessDenied?: SiteAccessDenial | null;
   /** File listing used when this run began; never replaced by a later listing. */
   filesRevision: string | null;
   /** Keeps edits made during automatic site recovery pending until checked. */
@@ -151,6 +153,7 @@ export const IDLE_ENTRY: AirAppRunEntry = {
   engineUnavailable: null,
   engineLock: null,
   siteBlockers: null,
+  siteAccessDenied: null,
   filesRevision: null,
   recoveringSite: false,
   siteCheckedRevisions: [],
@@ -218,6 +221,7 @@ interface AirAppRunnerStoreState {
     errorCode?: NodepodServiceWorkerErrorCode,
     engineLock?: AirAppEngineLockState,
     siteBlockers?: SiteBundleBlocker[],
+    siteAccessDenied?: SiteAccessDenial,
   ) => void;
   /** Records a failure that happened BEFORE a runner could be constructed —
    *  e.g. a malformed `airapp.json`, or no engine on this deployment able to
@@ -272,6 +276,7 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
               engineUnavailable: null,
               engineLock: null,
               siteBlockers: null,
+              siteAccessDenied: null,
               filesRevision: filesRevision ?? null,
               recoveringSite,
               siteCheckedRevisions,
@@ -341,7 +346,7 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
           };
         }),
 
-      setError: (nodeId, runner, message, errorCode, engineLock, siteBlockers) =>
+      setError: (nodeId, runner, message, errorCode, engineLock, siteBlockers, siteAccessDenied) =>
         set((state) => {
           const current = state.entries[nodeId];
           if (current?.runner !== runner) {
@@ -357,6 +362,7 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
                 engineUnavailable: null,
                 engineLock: engineLock ?? null,
                 siteBlockers: siteBlockers ?? null,
+                siteAccessDenied: siteAccessDenied ?? null,
                 status: "error",
               },
             },
@@ -377,6 +383,7 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
               engineUnavailable: engineUnavailable ?? null,
               engineLock: engineLock ?? null,
               siteBlockers: null,
+              siteAccessDenied: null,
               filesRevision: null,
               recoveringSite: false,
               siteCheckedRevisions: [],

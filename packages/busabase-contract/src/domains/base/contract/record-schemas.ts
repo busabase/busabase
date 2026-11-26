@@ -251,22 +251,35 @@ export const listRecordsResponseSchema = z.object({
 export const RECORD_EXACT_COUNT_LIMIT = 1_000_000;
 /** `records.listPage` page numbers reach this many records, then report `pagesCapped`. */
 export const RECORD_PAGE_DEPTH_LIMIT = 100_000;
+/**
+ * One numbered page (`records.listPage`) returns at most this many records.
+ * The Base grid offers this as its largest "rows per page" choice. The cursor
+ * listing (`records.list`) stays capped at 100; that path is for walking a
+ * whole Base, not for one screen.
+ */
+export const RECORD_LIST_PAGE_SIZE_MAX = 1_000;
+
+/**
+ * The record search box: a temporary literal find, shared by `records.listPage`
+ * and `records.groupBy` so a grid's counts and summaries match its rows.
+ */
+export const recordFindInputSchema = z.object({
+  query: z.string().trim().min(1).max(500),
+  fieldId: z.string().min(1).optional(),
+});
 
 export const listRecordsPageInputSchema = z.object({
   baseId: z
     .string()
     .min(1)
     .describe("Required here, unlike `records.list` where omitting it spans the whole space."),
-  find: z
-    .object({
-      query: z.string().trim().min(1).max(500),
-      fieldId: z.string().min(1).optional(),
-    })
+  find: recordFindInputSchema
     .optional()
     .describe(
       "Temporary, literal case-insensitive find within this Base and saved View. " +
         "Matches complete current values before counting and paging. Omit fieldId to search " +
-        "common text/label fields; pass a stable field id for one supported field. " +
+        "the common text/label fields the saved View shows (all of them without viewId); " +
+        "pass a stable field id for one supported field, including a hidden one. " +
         "Does not update the saved View.",
     ),
   listMode: z
@@ -375,10 +388,10 @@ export const listRecordsPageInputSchema = z.object({
     .number()
     .int()
     .min(1)
-    .max(100)
+    .max(RECORD_LIST_PAGE_SIZE_MAX)
     .optional()
     .default(50)
-    .describe("Records per page. Capped at 100."),
+    .describe("Records per page. Capped at 1000."),
   totalLimit: z.coerce
     .number()
     .int()
@@ -406,7 +419,7 @@ export const listRecordsPageResponseSchema = z.object({
     .nonnegative()
     .describe("Pages reachable by number: at most the first 100,000 records (see `pagesCapped`)."),
   page: z.number().int().min(1),
-  pageSize: z.number().int().min(1).max(100),
+  pageSize: z.number().int().min(1).max(RECORD_LIST_PAGE_SIZE_MAX),
   totalCapped: z
     .boolean()
     .optional()
@@ -507,19 +520,27 @@ export const countRecordsResponseSchema = z.object({
 });
 
 /**
- * A numeric aggregate over the records in a group.
+ * An aggregate over the records in a group.
  *
- * Exact for the same reason `valueFilters` are: `value_number` holds the value
- * itself, so `sum`/`avg`/`min`/`max` are ordinary SQL over a real column with
- * no formatting layer to diverge from. Restricted to number-shaped fields for
- * exactly that reason — there is no column to add up on the others.
+ * `sum`/`avg`/`min`/`max`/`count` are exact for the same reason `valueFilters`
+ * are: `value_number` holds the value itself, so they are ordinary SQL over a
+ * real column with no formatting layer to diverge from. Restricted to
+ * number-shaped fields for exactly that reason — there is no column to add up
+ * on the others.
  *
  * `count` here counts rows whose value is PRESENT, which is not the same as the
  * group's `count` (that one counts records, present value or not). Both are
  * useful and SQL distinguishes them, so both are available.
+ *
+ * `filled` works on any field type (except a reverse relation) and counts the
+ * records the `not_empty` view filter would keep, using the very same test.
+ * `checked` works only on a checkbox and counts the records the `is_true`
+ * filter would keep. Neither has a stored column to read, so a request
+ * containing one evaluates every candidate row in process — exact, but not
+ * free on a large Base.
  */
 export const recordAggregateSchema = z.object({
-  fn: z.enum(["sum", "avg", "min", "max", "count"]),
+  fn: z.enum(["sum", "avg", "min", "max", "count", "filled", "checked"]),
   fieldSlug: z.string().min(1),
 });
 
@@ -583,11 +604,15 @@ export const groupRecordsInputSchema = z.object({
     .array(recordAggregateSchema)
     .optional()
     .describe(
-      'Numeric aggregates evaluated per group, keyed in the response as `"<fn>:<fieldSlug>"`. ' +
-        "Only number-shaped fields can be aggregated; anything else is a 400. " +
+      'Aggregates evaluated per group, keyed in the response as `"<fn>:<fieldSlug>"`. ' +
+        "`sum`/`avg`/`min`/`max`/`count` need a number-shaped field; anything else is a 400. " +
         "`sum`/`avg`/`min`/`max` of a group holding no values are NULL rather than 0, and `count` " +
         "over a FIELD counts present values — which is not the same as the group's own `count`, " +
-        "which counts records.",
+        "which counts records. `filled` works on any field type and counts the records the " +
+        "`not_empty` view filter keeps; `checked` works only on a checkbox field (anything " +
+        "else is a 400) and counts the records the `is_true` filter keeps. Both are evaluated " +
+        "by reading every candidate row server-side, so they cost like an unprovable filter " +
+        "rather than one GROUP BY.",
     ),
   viewId: z
     .string()
@@ -595,6 +620,13 @@ export const groupRecordsInputSchema = z.object({
     .optional()
     .describe(
       "Group only what this saved View would display. Its filters apply; its sort is ignored.",
+    ),
+  find: recordFindInputSchema
+    .optional()
+    .describe(
+      "The same temporary find as `records.listPage`'s, applied with the same semantics, so " +
+        "counts match the rows a searching grid shows. Evaluated by reading every candidate " +
+        "row server-side rather than in one GROUP BY.",
     ),
   filters: z
     .array(listRecordsFilterSchema)
@@ -850,6 +882,97 @@ export const restoreRecordInputSchema = z.object({
   ),
 });
 
+const toBeforeChangeRequestIdSchema = z
+  .string()
+  .min(1)
+  .describe(
+    "A merged change request from this record's history (`records.listChangeRequests`). The record returns to its state just before it: that change request and every later merged change request that touched this record are undone, newest first. Other records they touched are left alone.",
+  );
+
+export const revertRecordInputSchema = z.object({
+  toBeforeChangeRequestId: toBeforeChangeRequestIdSchema,
+  message: z
+    .string()
+    .optional()
+    .describe(
+      "Explanation shown to the human reviewer. Omit for a generated `Revert to before …` message.",
+    ),
+  submittedBy: z.string().optional().default("local-editor"),
+  autoMerge: destructiveAutoMerge(
+    "A revert is an ordinary change request: it appears in the record's history and can itself be reverted.",
+  ),
+  expectedPlanFingerprint: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "The `planFingerprint` from `records.revertPreview`. Send it to submit exactly the plan that was shown: if the record or its history changed since, the revert is refused with 409 `plan_changed` and nothing is written — preview again.",
+    ),
+});
+
+export const recordRevertPreviewInputSchema = z.object({
+  recordId: z.string().min(1),
+  toBeforeChangeRequestId: toBeforeChangeRequestIdSchema,
+});
+
+const recordRevertChangeRequestSummarySchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  submittedBy: z.string(),
+  submittedByUser: userRefSchema.nullable(),
+  message: z.string().describe("The change request's own commit message for this record."),
+  operations: z
+    .array(z.string())
+    .describe("What it did to this record: `record_create`, `record_update`, …"),
+  createdAt: z.string(),
+  mergedAt: z.string().nullable(),
+});
+
+export const recordRevertPreviewSchema = z.object({
+  recordId: z.string(),
+  baseId: z.string(),
+  toBeforeChangeRequestId: z.string(),
+  action: z
+    .enum(["update", "delete", "restore"])
+    .describe(
+      "What the revert change request will do: `update` sets fields back, `delete` moves the record to the Trash (reverting its creation), `restore` brings it back from the Trash (reverting its deletion).",
+    ),
+  undoneChangeRequests: z
+    .array(recordRevertChangeRequestSummarySchema)
+    .describe("Every merged change request the revert undoes, newest first."),
+  currentFields: z.record(z.string(), z.unknown()).describe("The record's fields right now."),
+  fields: z
+    .record(z.string(), z.unknown())
+    .describe("The field values the revert writes. Empty unless `action` is `update`."),
+  fieldChanges: z
+    .array(
+      z.object({
+        slug: z.string(),
+        beforeValue: z.unknown().describe("The current value."),
+        afterValue: z.unknown().describe("The value after the revert."),
+      }),
+    )
+    .describe("Each field the revert changes, current → reverted value."),
+  pendingChangeRequests: z
+    .array(recordRevertChangeRequestSummarySchema)
+    .describe(
+      "Unmerged change requests touching this record. They are not part of its current state and the revert leaves them as they are.",
+    ),
+  viewerCanRevert: z
+    .boolean()
+    .describe("Whether the caller may submit this revert (the same access as editing the record)."),
+  willAutoMerge: z
+    .boolean()
+    .describe(
+      "Whether submitting it without `autoMerge: false` lands immediately (write access) instead of waiting for review.",
+    ),
+  planFingerprint: z
+    .string()
+    .describe(
+      "Identifies this exact plan. Pass it as `expectedPlanFingerprint` when submitting, so a record that changed in between is refused instead of reverting something not shown here.",
+    ),
+});
+
 /**
  * Every record change request in one shape. These three used to be PUT, DELETE,
  * and a POST on a `/restore/` sub-path — three endpoints addressing the same
@@ -867,6 +990,7 @@ export const recordChangeRequestInputSchema = z.discriminatedUnion("operation", 
   }),
   createDeleteChangeRequestInputSchema.extend({ operation: z.literal("delete"), ...withRecordId }),
   restoreRecordInputSchema.extend({ operation: z.literal("restore"), ...withRecordId }),
+  revertRecordInputSchema.extend({ operation: z.literal("revert"), ...withRecordId }),
 ]);
 
 export const recordLinkSchema = z.object({

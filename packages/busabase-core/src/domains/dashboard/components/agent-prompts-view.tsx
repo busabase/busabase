@@ -139,10 +139,13 @@ function LocatorCard({ locator, onCopy }: { locator: AgentLocator; onCopy: () =>
       <MapPin aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         <p
-          className="line-clamp-2 break-words text-foreground text-sm leading-snug"
+          className={cn(
+            "break-words text-foreground text-sm leading-snug",
+            !locator.displayTarget && "line-clamp-2",
+          )}
           title={locator.target}
         >
-          {locator.target}
+          {locator.displayTarget ?? locator.target}
         </p>
         <p className="mt-0.5 text-muted-foreground text-xs">
           {messages.agentPrompts.locatorCardHint}
@@ -323,6 +326,7 @@ export function AgentPromptsView({
   compact = false,
   locator: locatorProp,
   recents,
+  footerSummary,
 }: {
   scenarios: NodePrompt[];
   capabilities: NodePrompt[];
@@ -356,6 +360,8 @@ export function AgentPromptsView({
   locator?: AgentLocator;
   /** Where "Recently used" is remembered. Omit to not remember anything. */
   recents?: RecentPromptsContext;
+  /** Non-node hosts can describe their own footer instead of node merge rules. */
+  footerSummary?: string;
 }) {
   const messages = useCoreI18n();
   const agentIntegrationFromContext = useAgentIntegrationTarget();
@@ -727,6 +733,7 @@ export function AgentPromptsView({
           fullPromptOpen={fullPromptOpen}
           onFullPromptOpenChange={setFullPromptOpen}
           footerOpen={footerOpen}
+          footerSummary={footerSummary}
           onFooterOpenChange={setFooterOpen}
           snippetRef={snippetRef}
         />
@@ -785,6 +792,7 @@ function PromptPanel({
   fullPromptOpen,
   onFullPromptOpenChange,
   footerOpen,
+  footerSummary,
   onFooterOpenChange,
 }: {
   sections: PromptSection[];
@@ -812,6 +820,7 @@ function PromptPanel({
   fullPromptOpen: boolean;
   onFullPromptOpenChange: (open: boolean) => void;
   footerOpen: boolean;
+  footerSummary?: string;
   onFooterOpenChange: (open: boolean) => void;
 }) {
   const messages = useCoreI18n();
@@ -1171,7 +1180,7 @@ function PromptPanel({
                   className="size-3.5 shrink-0 transition-transform group-open/included:rotate-90"
                 />
                 {fmt(messages.agentPrompts.footerIncluded, {
-                  parts: includedParts(segments, active, messages).join(" · "),
+                  parts: footerSummary ?? includedParts(segments, active, messages).join(" · "),
                 })}
               </summary>
               <div className="mt-2 space-y-3">

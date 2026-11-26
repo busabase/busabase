@@ -9,8 +9,10 @@ import { isPubliclyReadableNodeType } from "busabase-contract/domains";
 import { and, eq } from "drizzle-orm";
 import {
   getContextCredentialPermissionCeiling,
+  getContextEmbedRecordScope,
   getContextSpaceId,
   isAnonymousVisitor,
+  isPublicVisitor,
   resolveActorId,
 } from "../../../context";
 import { getDb } from "../../../db";
@@ -40,6 +42,8 @@ export const assertAssetPermission = async (
     .limit(1);
   if (!asset) throw assetNotFound(assetId);
 
+  const recordScope = getContextEmbedRecordScope();
+
   const usages = await db
     .select({
       nodeId: busabaseAssetUsages.nodeId,
@@ -49,11 +53,28 @@ export const assertAssetPermission = async (
     })
     .from(busabaseAssetUsages)
     .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseAssetUsages.nodeId))
-    .where(and(eq(busabaseAssetUsages.assetId, assetId), eq(busabaseAssetUsages.spaceId, spaceId)));
+    .where(
+      and(
+        eq(busabaseAssetUsages.assetId, assetId),
+        eq(busabaseAssetUsages.spaceId, spaceId),
+        // A record capability cannot borrow another row's asset mount merely
+        // because both records live in the same readable Base.
+        recordScope
+          ? and(
+              eq(busabaseAssetUsages.nodeId, recordScope.baseNodeId),
+              eq(busabaseAssetUsages.recordId, recordScope.recordId),
+            )
+          : undefined,
+      ),
+    );
   const nodeIds = [...new Set(usages.map((usage) => usage.nodeId))];
   if (nodeIds.length === 0) {
+    if (recordScope) throw assetNotFound(assetId);
+    // Link-authorized visitors never stage uploads. An Embed Link runs as its
+    // creator for attribution only, so "the creator's own staging upload" must
+    // not become readable to whoever holds the link.
     const creatorMayStageForChangeRequest =
-      !isAnonymousVisitor() &&
+      !isPublicVisitor() &&
       asset.createdBy === resolveActorId("local-producer") &&
       hasApiKeyLevel("changeRequest", required) &&
       hasApiKeyLevel(getContextCredentialPermissionCeiling(), required);

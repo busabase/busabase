@@ -87,6 +87,18 @@ export {
   updateRecordChangeRequestInputSchema,
 };
 
+/**
+ * How an internal caller marks the change request one of the record creators
+ * below makes — record revert (`./record-revert.ts`) submits through them
+ * and tags its change request as a revert here. `sourceMeta` lands on the
+ * change request (public, so history can show what a revert undid);
+ * `auditMetadata` is merged over the audit event's default metadata.
+ */
+export interface RecordChangeRequestTag {
+  sourceMeta: Record<string, unknown>;
+  auditMetadata: Record<string, unknown>;
+}
+
 /** Caller-supplied recordId doesn't resolve — a genuine "not found" client error. */
 const recordNotFound = (recordId: string) =>
   new ORPCError("NOT_FOUND", { message: `Record not found: ${recordId}` });
@@ -1312,6 +1324,7 @@ export const createBulkUpdateChangeRequest = async (
 export const createDeleteChangeRequest = async (
   recordId: string,
   input: z.infer<typeof createDeleteChangeRequestInputSchema>,
+  tag?: RecordChangeRequestTag,
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -1329,6 +1342,9 @@ export const createDeleteChangeRequest = async (
       message: `Record is already archived: ${recordId}`,
     });
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(record.baseId);
 
   const [headCommit] = await db
     .select()
@@ -1364,7 +1380,7 @@ export const createDeleteChangeRequest = async (
     baseId: record.baseId,
     status: "in_review",
     submittedBy: resolveActorId(parsed.submittedBy),
-    sourceMeta: withContextSourceMeta({}),
+    sourceMeta: withContextSourceMeta(tag?.sourceMeta),
     reviewPolicySnapshot: {},
     mergeSummary: {},
     rejectedReason: null,
@@ -1410,7 +1426,7 @@ export const createDeleteChangeRequest = async (
     changeRequestId,
     operationId,
     commitId,
-    metadata: { deleteMode: parsed.deleteMode, operation: "record_delete" },
+    metadata: { deleteMode: parsed.deleteMode, operation: "record_delete", ...tag?.auditMetadata },
   });
   // Permission-aware, exactly like `update` above. Archiving used to be pinned
   // review-first for everyone; it no longer is (see
@@ -1457,6 +1473,7 @@ export const createDeleteChangeRequest = async (
 export const createUpdateChangeRequest = async (
   recordId: string,
   input: z.infer<typeof updateRecordChangeRequestInputSchema>,
+  tag?: RecordChangeRequestTag,
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -1550,7 +1567,7 @@ export const createUpdateChangeRequest = async (
     baseId: record.baseId,
     status: "in_review",
     submittedBy,
-    sourceMeta: withContextSourceMeta({}),
+    sourceMeta: withContextSourceMeta(tag?.sourceMeta),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -1596,7 +1613,7 @@ export const createUpdateChangeRequest = async (
     changeRequestId,
     operationId,
     commitId,
-    metadata: { operation: "record_update" },
+    metadata: { operation: "record_update", ...tag?.auditMetadata },
   });
   // Live event only, at its historical position (see the record-create path).
   await broadcastChangeRequestPendingReview({
@@ -1642,6 +1659,7 @@ export const createRestoreChangeRequest = async (
   submittedBy = "local-editor",
   message?: string,
   autoMerge?: boolean,
+  tag?: RecordChangeRequestTag,
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -1656,6 +1674,9 @@ export const createRestoreChangeRequest = async (
   if (record.status !== "archived") {
     throw new ORPCError("CONFLICT", { message: `Record is not archived: ${recordId}` });
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(record.baseId);
 
   const [headCommit] = await db
     .select()
@@ -1697,7 +1718,7 @@ export const createRestoreChangeRequest = async (
     baseId: record.baseId,
     status: "in_review",
     submittedBy: resolveActorId(submittedBy),
-    sourceMeta: withContextSourceMeta({}),
+    sourceMeta: withContextSourceMeta(tag?.sourceMeta),
     reviewPolicySnapshot: base.reviewPolicy,
     mergeSummary: {},
     rejectedReason: null,
@@ -1736,7 +1757,7 @@ export const createRestoreChangeRequest = async (
     changeRequestId,
     operationId,
     commitId,
-    metadata: { operation: "record_restore" },
+    metadata: { operation: "record_restore", ...tag?.auditMetadata },
   });
   // Permission-aware — see the note on the delete path above. Restoring is the
   // undo of an archive, so if anything it has less at stake than the delete.
@@ -1779,6 +1800,9 @@ export const createArchiveBaseChangeRequest = async (
   if (!base) {
     throw baseNotFound(baseId);
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(base.id);
 
   const changeRequestId = id("crq");
   const operationId = id("opr");
@@ -1893,6 +1917,9 @@ export const createRestoreBaseChangeRequest = async (
   if (!baseRow) {
     throw baseNotFound(baseId);
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(baseRow.id);
   if (baseRow.deletedAt) {
     throw new ORPCError("CONFLICT", {
       message: `Base was permanently deleted and cannot be restored: ${baseId}`,

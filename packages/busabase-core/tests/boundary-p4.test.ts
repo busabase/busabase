@@ -290,5 +290,6 @@ describe("Boundary P4 — oRPC", () => {
     const archived = await client.bases.list({ status: "archived" });
     expect(active.some((b) => b.id === base.id)).toBe(false);
     expect(archived.some((b) => b.id === base.id)).toBe(true);
+    expect(archived.find((b) => b.id === base.id)?.archivedAt).toMatch(/^\d{4}-/);
   });
 });

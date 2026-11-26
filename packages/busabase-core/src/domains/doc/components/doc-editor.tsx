@@ -2,10 +2,10 @@
 
 import { type ComponentType, useEffect, useState } from "react";
 import { DocContentSkeleton } from "../../dashboard/components/skeletons";
-import type { DocEditorCrepeProps, DocOutlineItem } from "./doc-editor-crepe";
+import type { DocEditorCrepeProps, DocEditorHandle, DocOutlineItem } from "./doc-editor-crepe";
 
 export type DocEditorProps = DocEditorCrepeProps;
-export type { DocOutlineItem };
+export type { DocEditorHandle, DocOutlineItem };
 
 /**
  * Public entry point for the Doc node's Markdown editor. Defers loading the

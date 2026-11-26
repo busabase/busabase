@@ -25,8 +25,11 @@ export const highlightSearchText = (value: string, query: string): ReactNode => 
   for (const match of value.matchAll(matcher)) {
     const start = match.index;
     if (start > cursor) parts.push(value.slice(cursor, start));
+    // Monochrome on purpose: chroma in product chrome is reserved for review
+    // states (design-system.md), so a match reads through weight and a firmer
+    // neutral tint instead of a yellow marker.
     parts.push(
-      <mark className="bg-primary/15 text-inherit" key={`${start}-${match[0]}`}>
+      <mark className="bg-primary/30 font-semibold text-inherit" key={`${start}-${match[0]}`}>
         {match[0]}
       </mark>,
     );

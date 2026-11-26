@@ -1,3 +1,4 @@
+import { siteEnvironmentMessages } from "./site-environment";
 // Shared dashboard string catalog — the "sub" i18n strings owned by busabase-core
 // and reused by every host (apps/busabase, Busabase Cloud).
 //
@@ -523,10 +524,23 @@ export const coreMessagesEn = {
     requireSignInHint:
       "Anyone with the link can still open the form; only signed-in visitors can submit it.",
     passwordLabel: "Password",
-    passwordHint: "Leave empty for no password",
-    passwordPlaceholder: "Set a password",
-    passwordSet: "A password is set — type a new one to change it, or clear it",
-    passwordClear: "Remove password",
+    // Feishu-style password control: turning it on generates a code that the
+    // managers who can open this dialog see in plaintext, so they can send the
+    // link and the password together.
+    passwordProtectionLabel: "Password protection",
+    passwordProtectionHint: "Visitors must enter the password to open this link.",
+    passwordChange: "Change",
+    passwordSave: "Save",
+    passwordCancel: "Cancel",
+    passwordLengthHint: "Use 4 to 64 characters.",
+    // A link locked before passwords became retrievable: only its hash exists.
+    passwordLegacy:
+      "A password is set, but it can't be shown here. Change it to a new one to see and copy it.",
+    copyLinkAndPassword: "Copy link and password",
+    linkAndPasswordCopied: "Link and password copied",
+    // What lands on the clipboard. Keep the two labelled lines: it is pasted
+    // as-is into chat and email, where a bare URL and code read as noise.
+    linkAndPasswordClipboard: "Link: {url}\nPassword: {password}",
     expiryLabel: "Expires",
     expiryHint: "The link stops working automatically at the selected time.",
     expiryNever: "Never",
@@ -830,6 +844,8 @@ export const coreMessagesEn = {
       phone: "Preview on your phone",
       signIn:
         "Scan to open this private preview. Sign in with the same account on your phone. This is a preview, not the published Site.",
+      sharedLink:
+        "Anyone with this link can preview this version for up to 24 hours. Keep the link private. This is a preview, not the published Site.",
       browserOnly:
         "This preview runs in this browser. To open it on your phone, prepare a Site preview using Publish Site.",
       loopback:
@@ -840,10 +856,40 @@ export const coreMessagesEn = {
       openLink: "Open preview",
     },
     site: {
+      environment: siteEnvironmentMessages.en,
       publishUpdate: "Publish update",
+      logs: {
+        contentHiddenTitle: "Log content hidden",
+        contentHiddenDescription:
+          "The Secret settings used for some logs cannot be confirmed. Their messages and request paths are hidden to protect sensitive data. Request times, methods, and status codes remain visible.",
+
+        button: "Logs",
+        versionButton: "View logs for {version}",
+        title: "Logs · {version}",
+        description:
+          "Production logs from this version’s deployment periods in the last 24 hours. Requests crossing a release change may overlap.",
+        collectionHint:
+          "New deployments collect logs. Earlier versions may have none; publish an update and allow time for logs to appear.",
+        loading: "Loading production logs…",
+        loadFailed: "Could not load logs. Try again.",
+        unavailable: "Production logs are not available on this deployment.",
+        empty: "No logs found for this version’s deployment periods in the last 24 hours.",
+        refresh: "Refresh logs",
+        close: "Close logs",
+        checkedAt: "Checked at {time}",
+        truncated:
+          "Showing the latest available logs. More events or deployment periods may be omitted.",
+        levels: {
+          debug: "Debug",
+          info: "Info",
+          log: "Log",
+          warn: "Warning",
+          error: "Error",
+        },
+      },
       releases: {
         busy: "A release is being applied. This list will refresh automatically.",
-        manage: "Release management",
+        manage: "Deployments",
         versions: "Versions",
         history: "Release history",
         current: "Current",
@@ -872,6 +918,9 @@ export const coreMessagesEn = {
           "Scan to open the published Site. Unpublished draft changes are not included.",
       },
       publish: {
+        alreadyLive:
+          "This version is already live. Change the app, then prepare a new preview to publish an update.",
+        readyToPublish: "Preview checked. Ready to publish.",
         previewStale:
           "The files changed after this preview. Create or refresh the website preview, then go live.",
         noPreview: "Create a website preview before going live.",
@@ -883,10 +932,10 @@ export const coreMessagesEn = {
         preserveBrowser: "Your browser preview keeps running while you prepare the website.",
         checking: "Checking website readiness…",
         checkFailed: "Could not check this website. Try again.",
-        planRequired: "Website hosting is included with {plan} and above.",
-        paidPlanRequired: "This space needs a paid plan to host a website.",
+        planRequired: "Public website publishing is included with {plan} and above.",
+        paidPlanRequired: "This space needs a paid plan to publish a public website.",
         upgradeHint:
-          "Prepare your app now, then upgrade this space to preview and publish it. A browser preview link is not an always-on website.",
+          "You can preview privately now. Upgrade this space when you are ready to publish an always-on public website.",
         prepareTitle: "Prepare the app for the web",
         prepareHint:
           "Ask your agent to prepare a website version. This may require code changes before it can be published.",
@@ -901,7 +950,7 @@ export const coreMessagesEn = {
         refreshPreview: "Refresh website preview",
         previewTitle: "Private website preview",
         publishConsent:
-          "Go live publishes this reviewed version. Anyone with the address can use the website, including the data and actions its code exposes.",
+          "Anyone with the Site address can access this version and the data and actions it exposes.",
       },
       statusNotLive: "Not live",
       statusLive: "Live",
@@ -935,7 +984,7 @@ export const coreMessagesEn = {
         guideNameHint:
           "Use the part before your root domain, e.g. shop for shop.company.com. Some providers want the full name.",
         guideStepCheck:
-          "Come back and click “{check}”. DNS can take a few minutes to a few hours; HTTPS is set up automatically once it resolves. If a TXT verification record is also needed, it appears here after you add the domain.",
+          "After the routing CNAME resolves, Cloudflare automatically verifies the hostname and prepares HTTPS. Click “{check}” to see the latest status; DNS changes can take time to appear.",
         guideRootDomain:
           "Using a root domain such as company.com? That only works if your DNS provider supports a CNAME at the root (CNAME flattening, ALIAS or ANAME; Cloudflare does). Otherwise use a subdomain such as www or shop.",
         guideLink: "Read the setup guide",
@@ -952,7 +1001,7 @@ export const coreMessagesEn = {
         adding: "Adding…",
         pending: "Setup pending",
         pendingDnsHint:
-          "Add the DNS records below at your DNS provider, then check again. DNS changes can take time to appear.",
+          "Add the routing CNAME at your DNS provider, then check again. DNS changes can take time to appear.",
         pendingHttpsHint:
           "Domain ownership is verified. HTTPS is being prepared; check again shortly.",
         active: "Connected",
@@ -968,8 +1017,11 @@ export const coreMessagesEn = {
           "check-failed": "Couldn't check this domain right now. Check again.",
         },
         offlineHint: "The site is offline. All website addresses show a not-found page.",
+        advancedVerification: "Advanced verification",
+        advancedHint:
+          "For migration or verification before switching traffic, use these optional ownership and certificate checks. Normal subdomain setup starts with the routing CNAME above.",
         dnsInstructions:
-          "Add these records at your DNS provider. Keep any other records your domain needs. Cloudflare proxying is supported once the website route is verified.",
+          "Add this CNAME at your DNS provider, then check again. Cloudflare proxying is supported once the website route is verified.",
         dnsName: "Name",
         dnsValue: "Value / target",
         httpInstructions:
@@ -1821,6 +1873,7 @@ export const coreMessagesEn = {
     typeToSearchBody: "Type a few characters to search record and file content on this tab.",
   },
   trash: {
+    deletedAt: "Deleted",
     title: "Trash",
     body: "Archived items are hidden from the sidebar. Restore to make them active again.",
     bases: "Bases",
@@ -1828,7 +1881,7 @@ export const coreMessagesEn = {
     noArchivedBasesBody: "Bases you archive will appear here.",
     foldersDocsSkills: "Folders, docs & skills",
     noArchivedItemsTitle: "No archived items",
-    noArchivedItemsBody: "Folders, docs, and skills you delete will appear here.",
+    noArchivedItemsBody: "Deleted items will appear here.",
     deleteForever: "Delete forever",
     deletePermanentlyTitle: "Delete permanently?",
     deletePermanentlyBody: 'Permanently delete "{name}"? This cannot be undone.',
@@ -1882,6 +1935,8 @@ export const coreMessagesEn = {
     changeIcon: "Change icon",
     iconUploadLabel: "Upload image",
     iconUploadFormatHint: "PNG, JPG, GIF, or WebP, up to 2MB",
+    restoreDefaultIcon: "Restore default icon",
+    restoreDefaultIconHint: "Remove the custom image or emoji",
     cropDialogTitle: "Edit icon",
     confirmCrop: "Apply",
     iconFileMustBeImage: "Please select an image file",
@@ -2509,6 +2564,8 @@ export const coreMessagesEn = {
       'This opens a delete change request for "{title}". The canonical record stays visible until the request is reviewed and merged.',
     editRecord: "Edit record",
     newRecordTitle: "New {base} record",
+    newRecordHelp:
+      "Need an example? Open Agent prompts → Create a practice record. Review a clearly fictional example before saving it. For real records, provide your own facts and files.",
     failedSaveChangeRequest: "Failed to save change request",
     invalidFields: "Check the following fields: {fields}.",
     submitRequest: "Submit Request",
@@ -2949,6 +3006,8 @@ export const coreMessagesEn = {
     untitledStep: "Untitled step",
     completed: "Completed",
     previewFrame: "{name} preview",
+    htmlSourcePlainText:
+      "Large source shown as plain text to keep the preview responsive. Nothing is omitted.",
     save: "Save",
     saved: "Saved",
     unsaved: "Unsaved changes",

@@ -1,4 +1,5 @@
 import type { CoreI18nMessages } from "./messages";
+import { siteEnvironmentMessages } from "./site-environment";
 
 export const dashboardJa: CoreI18nMessages = {
   lookup: lookupJa,
@@ -497,10 +498,17 @@ export const dashboardJa: CoreI18nMessages = {
     requireSignInHint:
       "リンクを知っていれば誰でもフォームを開けますが、送信できるのはサインイン済みの訪問者だけです。",
     passwordLabel: "パスワード",
-    passwordHint: "空欄の場合はパスワードなし",
-    passwordPlaceholder: "パスワードを設定",
-    passwordSet: "パスワードが設定されています。新しいものを入力して変更するか、削除できます",
-    passwordClear: "パスワードを削除",
+    passwordProtectionLabel: "パスワード保護",
+    passwordProtectionHint: "このリンクを開くには、訪問者がパスワードを入力する必要があります。",
+    passwordChange: "変更",
+    passwordSave: "保存",
+    passwordCancel: "キャンセル",
+    passwordLengthHint: "4〜64文字で入力してください。",
+    passwordLegacy:
+      "パスワードは設定されていますが、ここには表示できません。新しいパスワードに変更すると、表示とコピーができるようになります。",
+    copyLinkAndPassword: "リンクとパスワードをコピー",
+    linkAndPasswordCopied: "リンクとパスワードをコピーしました",
+    linkAndPasswordClipboard: "リンク：{url}\nパスワード：{password}",
     expiryLabel: "有効期限",
     expiryHint: "選択した時刻になるとリンクは自動的に無効になります。",
     expiryNever: "無期限",
@@ -772,6 +780,8 @@ export const dashboardJa: CoreI18nMessages = {
       phone: "スマートフォンでプレビュー",
       signIn:
         "スキャンして非公開プレビューを開きます。スマートフォンでも同じアカウントにログインしてください。公開済み Site とは異なります。",
+      sharedLink:
+        "このリンクを知っている人は、最長24時間このバージョンをプレビューできます。リンクは大切に管理してください。公開済みの Site とは異なります。",
       browserOnly:
         "このプレビューは現在のブラウザーで動作します。「Site を公開」から Site プレビューを作成してスマートフォンで開いてください。",
       loopback:
@@ -782,7 +792,37 @@ export const dashboardJa: CoreI18nMessages = {
       openLink: "プレビューを開く",
     },
     site: {
+      environment: siteEnvironmentMessages.ja,
       publishUpdate: "更新を公開",
+      logs: {
+        contentHiddenTitle: "ログ内容を非表示にしています",
+        contentHiddenDescription:
+          "一部のログが生成された際のシークレット設定を確認できません。機密情報を保護するため、該当するログ本文とリクエストパスを非表示にしています。リクエスト時刻、メソッド、ステータスコードは表示されます。",
+
+        button: "ログ",
+        versionButton: "{version} のログを表示",
+        title: "ログ · {version}",
+        description:
+          "過去24時間のうち、このバージョンがデプロイされていた期間の本番ログを表示します。バージョン切り替えをまたぐリクエストは重複する場合があります。",
+        collectionHint:
+          "新しいデプロイからログが収集されます。古いバージョンにはログがない場合があります。更新を公開して、ログが表示されるまでお待ちください。",
+        loading: "本番ログを読み込み中…",
+        loadFailed: "ログを読み込めませんでした。再試行してください。",
+        unavailable: "このデプロイでは本番ログを利用できません。",
+        empty: "過去24時間のこのバージョンのデプロイ期間にログが見つかりません。",
+        refresh: "ログを更新",
+        close: "ログを閉じる",
+        checkedAt: "確認日時：{time}",
+        truncated:
+          "最新の利用可能なログを表示しています。一部のイベントやデプロイ期間は省略される場合があります。",
+        levels: {
+          debug: "デバッグ",
+          info: "情報",
+          log: "ログ",
+          warn: "警告",
+          error: "エラー",
+        },
+      },
       releases: {
         busy: "公開操作を適用中です。完了すると自動的に更新されます。",
         manage: "公開管理",
@@ -813,6 +853,9 @@ export const dashboardJa: CoreI18nMessages = {
         publicQrHint: "スキャンして公開済みの Site を開きます。未公開の下書き変更は含まれません。",
       },
       publish: {
+        alreadyLive:
+          "このバージョンは公開済みです。アプリを変更して新しいプレビューを作成すると、更新を公開できます。",
+        readyToPublish: "プレビューを確認しました。このバージョンを公開できます。",
         previewStale:
           "このプレビュー後にファイルが変更されました。サイトプレビューを作成または更新してから公開してください。",
         noPreview: "公開する前にサイトプレビューを作成してください。",
@@ -823,10 +866,10 @@ export const dashboardJa: CoreI18nMessages = {
         preserveBrowser: "ウェブサイトの準備中もブラウザーのプレビューは動作し続けます。",
         checking: "公開の準備状況を確認中…",
         checkFailed: "確認できませんでした。再試行してください。",
-        planRequired: "{plan} 以上のプランにはサイトのホスティングが含まれます。",
-        paidPlanRequired: "サイトのホスティングには、このスペースの有料プランが必要です。",
+        planRequired: "{plan} 以上のプランでウェブサイトを公開できます。",
+        paidPlanRequired: "ウェブサイトの公開には、このスペースの有料プランが必要です。",
         upgradeHint:
-          "先にアプリを準備してからスペースをアップグレードし、プレビューして公開できます。ブラウザープレビューのリンクは常時稼働するサイトではありません。",
+          "今すぐメンバー限定のプレビューを確認できます。常時稼働するウェブサイトを公開する準備ができたら、スペースをアップグレードしてください。",
         prepareTitle: "ウェブ版を準備",
         prepareHint:
           "エージェントにウェブ版の準備を依頼してください。公開前にコードの変更が必要な場合があります。",
@@ -840,7 +883,7 @@ export const dashboardJa: CoreI18nMessages = {
         refreshPreview: "サイトプレビューを更新",
         previewTitle: "非公開サイトプレビュー",
         publishConsent:
-          "公開すると、確認したバージョンが公開されます。アドレスを持つ人は誰でも、コードが公開するデータや操作を利用できます。",
+          "Site のアドレスを知る人は、このバージョンと公開されるデータや操作にアクセスできます。",
       },
       statusNotLive: "未公開",
       statusLive: "公開中",
@@ -876,7 +919,7 @@ export const dashboardJa: CoreI18nMessages = {
         guideNameHint:
           "ルートドメインより前の部分を入力します（shop.company.com なら shop）。完全なドメイン名を求めるプロバイダーもあります。",
         guideStepCheck:
-          "ここに戻って「{check}」をクリックします。DNS の反映には数分から数時間かかることがあり、反映後に HTTPS が自動で設定されます。TXT 認証レコードも必要な場合は、ドメインを追加した後にここに表示されます。",
+          "ルーティング CNAME が反映されると、Cloudflare がホスト名を自動検証し HTTPS を準備します。「{check}」で最新の状態を確認してください。DNS の反映には時間がかかる場合があります。",
         guideRootDomain:
           "company.com のようなルートドメインを使うには、DNS プロバイダーがルートでの CNAME（CNAME フラット化、ALIAS、ANAME。Cloudflare は対応）に対応している必要があります。対応していない場合は www や shop などのサブドメインを使ってください。",
         guideLink: "設定ガイドを見る",
@@ -893,7 +936,7 @@ export const dashboardJa: CoreI18nMessages = {
         adding: "追加中…",
         pending: "設定待ち",
         pendingDnsHint:
-          "DNS プロバイダーで以下のレコードを追加し、再確認してください。DNS の反映には時間がかかる場合があります。",
+          "DNS プロバイダーでルーティング CNAME を追加し、再確認してください。DNS の反映には時間がかかる場合があります。",
         pendingHttpsHint:
           "ドメインの所有権は確認済みです。HTTPS を準備中です。しばらくしてから再確認してください。",
         active: "接続済み",
@@ -910,8 +953,11 @@ export const dashboardJa: CoreI18nMessages = {
         },
         offlineHint:
           "サイトは非公開です。すべてのサイトアドレスに「見つかりません」と表示されます。",
+        advancedVerification: "高度な検証",
+        advancedHint:
+          "既存ドメインの移行や、トラフィック切り替え前の所有権・証明書の確認に使う任意の手順です。通常のサブドメイン設定では、まず上のルーティング CNAME を追加します。",
         dnsInstructions:
-          "DNS プロバイダーでこれらのレコードを追加してください。ドメインに必要な他のレコードは残してください。ドメインがこのサイトに接続していることを確認できれば、Cloudflare プロキシも利用できます。",
+          "DNS プロバイダーでこの CNAME を追加して、再確認してください。サイトのルートが検証されると Cloudflare プロキシを利用できます。",
         dnsName: "名前",
         dnsValue: "値 / ターゲット",
         httpInstructions:
@@ -1705,6 +1751,7 @@ export const dashboardJa: CoreI18nMessages = {
     typeToSearchBody: "数文字入力すると、このタブでレコードとファイルの内容を検索します。",
   },
   trash: {
+    deletedAt: "削除日時",
     title: "ゴミ箱",
     body: "アーカイブされたアイテムはサイドバーから非表示になります。復元すると再び有効になります。",
     bases: "ベース",
@@ -1712,7 +1759,7 @@ export const dashboardJa: CoreI18nMessages = {
     noArchivedBasesBody: "アーカイブしたベースはここに表示されます。",
     foldersDocsSkills: "フォルダー、ドキュメント、スキル",
     noArchivedItemsTitle: "アーカイブ済みアイテムはありません",
-    noArchivedItemsBody: "削除したフォルダー、ドキュメント、スキルはここに表示されます。",
+    noArchivedItemsBody: "削除した項目がここに表示されます。",
     deleteForever: "完全に削除",
     deletePermanentlyTitle: "完全に削除しますか？",
     deletePermanentlyBody: "「{name}」を完全に削除しますか？この操作は元に戻せません。",
@@ -1755,6 +1802,8 @@ export const dashboardJa: CoreI18nMessages = {
     changeIcon: "アイコンを変更",
     iconUploadLabel: "画像をアップロード",
     iconUploadFormatHint: "PNG、JPG、GIF、WebP、最大2MB",
+    restoreDefaultIcon: "デフォルトのアイコンに戻す",
+    restoreDefaultIconHint: "カスタム画像や絵文字を削除します",
     cropDialogTitle: "アイコンを編集",
     confirmCrop: "適用",
     iconFileMustBeImage: "画像ファイルを選択してください",
@@ -2380,6 +2429,8 @@ export const dashboardJa: CoreI18nMessages = {
       "「{title}」の削除変更リクエストを開きます。レビューされマージされるまで、正式レコードは表示されたままです。",
     editRecord: "レコードを編集",
     newRecordTitle: "新しい {base} レコード",
+    newRecordHelp:
+      "記入例が必要ですか？「Agent プロンプト」→「練習用レコードを作る」で、架空と明示された例を確認してから保存できます。実際のレコードにはご自身の情報やファイルを使ってください。",
     failedSaveChangeRequest: "変更リクエストの保存に失敗しました",
     invalidFields: "次のフィールドを確認してください：{fields}。",
     submitRequest: "リクエストを送信",
@@ -2815,6 +2866,8 @@ export const dashboardJa: CoreI18nMessages = {
     untitledStep: "無題のステップ",
     completed: "完了",
     previewFrame: "{name} のプレビュー",
+    htmlSourcePlainText:
+      "プレビューを快適に保つため、大きなソースはプレーンテキストで表示しています。内容は省略されていません。",
     save: "保存",
     saved: "保存済み",
     unsaved: "未保存の変更",

@@ -1,9 +1,11 @@
 // View objects owned by the base domain (structured records + views).
 import type { AttachmentRef } from "open-domains/attachments/types";
 import type { iString } from "openlib/i18n/i-string";
+import type { z } from "zod";
 import type { ApiKeyPermissionLevel } from "../../access-control/api-key-level";
 import type { CommitVO, FieldType, LookupRollup, UserRefVO } from "../../types";
 import type { FieldHelp } from "./contract/base-schemas";
+import type { recordRevertPreviewSchema } from "./contract/record-schemas";
 
 export interface AssetAttachmentRef extends AttachmentRef {
   attachmentId: string;
@@ -91,6 +93,7 @@ export interface BaseVO {
     requiredApprovals: number;
   };
   createdAt: string;
+  archivedAt?: string | null;
   fields: BaseFieldVO[];
   /**
    * The viewer's effective node-level permission on this Base (workspace
@@ -189,6 +192,108 @@ export const isGridRowHeight = (value: unknown): value is GridRowHeight =>
 export const getGridRowHeight = (value: unknown): number =>
   isGridRowHeight(value) ? GRID_ROW_HEIGHTS[value] : GRID_ROW_HEIGHTS.medium;
 
+/**
+ * Field types whose STORED value is itself a grouping key under the grid's
+ * bucketing (a select choice id, a checkbox boolean), so a SQL GROUP BY yields
+ * exactly the buckets a client builds from the same records. `records.groupBy`
+ * accepts only these by default, and a table view may group only by these.
+ */
+export const GROUPABLE_FIELD_TYPES: ReadonlySet<string> = new Set(["select", "checkbox"]);
+
+/**
+ * Field types with a numeric value column, the only ones `records.groupBy` can
+ * `sum` / `avg` / `min` / `max` exactly (other types have nothing to add up).
+ */
+export const NUMERIC_AGGREGATE_FIELD_TYPES: ReadonlySet<string> = new Set([
+  "number",
+  "auto_number",
+]);
+
+/** A table view groups by at most this many fields. Stored as an array so it can grow. */
+export const VIEW_GROUP_MAX_LEVELS = 1;
+
+/**
+ * Field types whose value is always set by the system (timestamps, authors,
+ * running numbers): "filled" / "empty" would always read every record / none,
+ * so those summaries are not offered for them.
+ */
+export const ALWAYS_SET_FIELD_TYPES: ReadonlySet<string> = new Set([
+  "created_time",
+  "updated_time",
+  "created_by",
+  "updated_by",
+  "auto_number",
+]);
+
+/**
+ * Column summary functions a table view can show in its footer row.
+ * `filled` / `empty` / `percent_filled` follow the `not_empty` view filter;
+ * `checked` / `unchecked` / `percent_checked` follow the `is_true` filter.
+ */
+export const VIEW_SUMMARY_FUNCTIONS = [
+  "sum",
+  "avg",
+  "min",
+  "max",
+  "filled",
+  "empty",
+  "percent_filled",
+  "checked",
+  "unchecked",
+  "percent_checked",
+] as const;
+export type ViewSummaryFunction = (typeof VIEW_SUMMARY_FUNCTIONS)[number];
+
+/** Functions that need a numeric value column (see `NUMERIC_AGGREGATE_FIELD_TYPES`). */
+export const NUMERIC_VIEW_SUMMARY_FUNCTIONS: readonly ViewSummaryFunction[] = [
+  "sum",
+  "avg",
+  "min",
+  "max",
+];
+/** The filled family: whether a value is present, for fields that can be left empty. */
+export const FILLED_VIEW_SUMMARY_FUNCTIONS: readonly ViewSummaryFunction[] = [
+  "filled",
+  "empty",
+  "percent_filled",
+];
+/** The checked family, offered instead of the filled family on a checkbox. */
+export const CHECKBOX_VIEW_SUMMARY_FUNCTIONS: readonly ViewSummaryFunction[] = [
+  "checked",
+  "unchecked",
+  "percent_checked",
+];
+
+export const isViewSummaryFunction = (value: unknown): value is ViewSummaryFunction =>
+  typeof value === "string" && (VIEW_SUMMARY_FUNCTIONS as readonly string[]).includes(value);
+
+/**
+ * The summary functions a field of this type supports, in menu order — the
+ * one list both the footer menu and the server's write validation read.
+ * A checkbox counts checked boxes (an unchecked box is still a value, so
+ * "filled" would always be 100%); always-set system fields get no filled
+ * family. Some types (created time, created by, ...) therefore get nothing.
+ */
+export const getViewSummaryFunctions = (fieldType: string): readonly ViewSummaryFunction[] => {
+  if (fieldType === "checkbox") return CHECKBOX_VIEW_SUMMARY_FUNCTIONS;
+  const numeric = NUMERIC_AGGREGATE_FIELD_TYPES.has(fieldType)
+    ? NUMERIC_VIEW_SUMMARY_FUNCTIONS
+    : [];
+  const filled = ALWAYS_SET_FIELD_TYPES.has(fieldType) ? [] : FILLED_VIEW_SUMMARY_FUNCTIONS;
+  return [...numeric, ...filled];
+};
+
+/** Whether `fn` is a summary a field of this type supports. */
+export const isViewSummaryFunctionAllowed = (fieldType: string, fn: unknown): boolean =>
+  isViewSummaryFunction(fn) && getViewSummaryFunctions(fieldType).includes(fn);
+
+export interface ViewGroupByVO {
+  fieldSlug: string;
+  /** Stable field identity — survives slug reuse; preferred over the slug when present. */
+  fieldId?: string;
+  direction: "asc" | "desc";
+}
+
 export interface ViewConfigVO {
   filters: ViewFilterConditionVO[];
   /** Legacy configs omit this and retain their implicit AND semantics. */
@@ -205,6 +310,13 @@ export interface ViewConfigVO {
   fieldWidths?: Record<string, number>;
   /** Table-only row density; omitted legacy views retain medium (48px). */
   rowHeight?: GridRowHeight;
+  /**
+   * Table-only grouping. At most `VIEW_GROUP_MAX_LEVELS` entries, each a
+   * `select` or `checkbox` field. Omitted or empty means ungrouped.
+   */
+  groupBy?: ViewGroupByVO[];
+  /** Table-only footer summary per column, keyed by field slug. */
+  fieldSummaries?: Record<string, ViewSummaryFunction>;
   /** Attachment cover: gallery defaults to automatic; Kanban defaults to no cover. */
   coverFieldSlug?: string | null;
   coverFit?: GalleryCoverFit;
@@ -264,6 +376,9 @@ export interface LookupComputedVO {
   /** Server read-start time, not a causal database revision. */
   dependencyReadAt?: number;
 }
+
+/** `records.revertPreview`: what rolling a record back to before a change request would do. */
+export type RecordRevertPreviewVO = z.infer<typeof recordRevertPreviewSchema>;
 
 export interface RecordVO {
   id: string;

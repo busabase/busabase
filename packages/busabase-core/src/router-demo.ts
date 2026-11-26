@@ -5,7 +5,14 @@ import {
   PlaybookSearchInputSchema,
 } from "busabase-contract/contract/playbook-schemas";
 import { COMMON_RECORD_FIND_FIELD_TYPES } from "busabase-contract/domains/base/contract/record-find";
-import { combineViewFilters } from "busabase-contract/types";
+import {
+  type BaseFieldVO,
+  type BaseVO,
+  combineViewFilters,
+  NUMERIC_AGGREGATE_FIELD_TYPES,
+  type RecordVO,
+  type ViewConfigVO,
+} from "busabase-contract/types";
 import {
   getContextDemoLocale,
   getContextSpaceId,
@@ -33,6 +40,8 @@ import {
   DATE_RANGE_FIELD_TYPES,
   GROUPABLE_FIELD_TYPES,
   groupKeyForValue,
+  isViewValueChecked,
+  isViewValueFilled,
 } from "./domains/base/utils/view-records";
 import { folderEntriesFromFiles } from "./domains/filetree/utils/folder-entries";
 import { guidesRouter } from "./domains/guides/router";
@@ -181,6 +190,54 @@ const demoSortRecordsForPage = <
     }
     return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
   });
+};
+
+/**
+ * `records.listPage`'s find over the demo space's VOs. Shared with
+ * `records.groupBy` so a searching demo grid's counts match its rows.
+ */
+const demoFilterRecordsForFind = async (
+  base: BaseVO,
+  records: RecordVO[],
+  find: { query: string; fieldId?: string } | undefined,
+  viewConfig?: ViewConfigVO | null,
+): Promise<RecordVO[]> => {
+  if (!find) return records;
+  // Without a chosen field, the default scope is the fields the View shows.
+  const findFields = resolveRecordFindFields(base.fields, find, viewConfig);
+  const query = find.query.toLowerCase();
+  const relation = findFields.find((field) => field.type === "relation");
+  const targetTitles = new Map<string, string[]>();
+  if (relation?.options.targetBaseId) {
+    const targetBase = demoGetBase(relation.options.targetBaseId);
+    const primary = getPrimaryField(targetBase);
+    if (primary && !COMMON_RECORD_FIND_FIELD_TYPES.has(primary.type)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "Find by this relation requires a supported stored record title.",
+        data: { reason: "unsupported_find_relation_title", fieldId: relation.id },
+      });
+    }
+    if (primary) {
+      for (const target of await demoListRecords({ baseId: targetBase.id })) {
+        targetTitles.set(
+          target.id,
+          getRecordFindTexts(primary, target.headCommit.payload[primary.slug]),
+        );
+      }
+    }
+  }
+  return records.filter((record) =>
+    findFields.some((field) => {
+      const value = record.headCommit.payload[field.slug];
+      const texts =
+        field.type === "relation"
+          ? (Array.isArray(value) ? value : [value]).flatMap((id) =>
+              typeof id === "string" ? (targetTitles.get(id) ?? []) : [],
+            )
+          : getRecordFindTexts(field, value);
+      return recordFindTextMatches(texts, query);
+    }),
+  );
 };
 
 const DEMO_RECORD_CURSOR_PREFIX = "demo-record:";
@@ -733,6 +790,20 @@ export const busabaseDemoRouter: EnhancedRouter<
     }),
   },
   airapps: {
+    previewStart: os.airapps.previewStart.handler(() => {
+      throw demoUnsupported("Runtime preview");
+    }),
+    previewState: os.airapps.previewState.handler(() => ({
+      status: "stopped" as const,
+      engine: null,
+      previewUrl: null,
+      logs: [],
+      error: null,
+      exitCode: null,
+    })),
+    previewStop: os.airapps.previewStop.handler(() => {
+      throw demoUnsupported("Runtime preview");
+    }),
     // Server-side process execution has no meaningful demo equivalent (no
     // filesystem/process to spawn against in the stateless demo dataset).
     runLocal: os.airapps.runLocal.handler(() => {
@@ -744,12 +815,28 @@ export const busabaseDemoRouter: EnhancedRouter<
     siteState: os.airapps.siteState.handler(() => {
       throw demoUnsupported("Website publishing");
     }),
+    siteEnvironment: os.airapps.siteEnvironment.handler(() => ({
+      available: false,
+      sources: [],
+      bindings: [],
+    })),
+    siteSaveEnvironment: os.airapps.siteSaveEnvironment.handler(() => {
+      throw demoUnsupported("Website Vault bindings");
+    }),
     siteReleases: os.airapps.siteReleases.handler(() => ({
       available: false,
       versions: [],
       history: [],
       status: "idle" as const,
       lastError: null,
+    })),
+    siteLogs: os.airapps.siteLogs.handler(({ input }) => ({
+      available: false,
+      version: input.version,
+      from: new Date(Date.now() - 24 * 60 * 60 * 1_000).toISOString(),
+      to: new Date().toISOString(),
+      entries: [],
+      truncated: false,
     })),
     siteRollback: os.airapps.siteRollback.handler(() => {
       throw demoUnsupported("Website rollback");
@@ -1392,42 +1479,7 @@ export const busabaseDemoRouter: EnhancedRouter<
         ),
         sort,
       );
-      if (input.find) {
-        const findFields = resolveRecordFindFields(base.fields, input.find);
-        const query = input.find.query.toLowerCase();
-        const relation = findFields.find((field) => field.type === "relation");
-        const targetTitles = new Map<string, string[]>();
-        if (relation?.options.targetBaseId) {
-          const targetBase = demoGetBase(relation.options.targetBaseId);
-          const primary = getPrimaryField(targetBase);
-          if (primary && !COMMON_RECORD_FIND_FIELD_TYPES.has(primary.type)) {
-            throw new ORPCError("BAD_REQUEST", {
-              message: "Find by this relation requires a supported stored record title.",
-              data: { reason: "unsupported_find_relation_title", fieldId: relation.id },
-            });
-          }
-          if (primary) {
-            for (const target of await demoListRecords({ baseId: targetBase.id })) {
-              targetTitles.set(
-                target.id,
-                getRecordFindTexts(primary, target.headCommit.payload[primary.slug]),
-              );
-            }
-          }
-        }
-        ordered = ordered.filter((record) =>
-          findFields.some((field) => {
-            const value = record.headCommit.payload[field.slug];
-            const texts =
-              field.type === "relation"
-                ? (Array.isArray(value) ? value : [value]).flatMap((id) =>
-                    typeof id === "string" ? (targetTitles.get(id) ?? []) : [],
-                  )
-                : getRecordFindTexts(field, value);
-            return recordFindTextMatches(texts, query);
-          }),
-        );
-      }
+      ordered = await demoFilterRecordsForFind(base, ordered, input.find, view?.config);
       const total = ordered.length;
       const totalPages = Math.ceil(total / input.pageSize);
       const page = totalPages === 0 ? 1 : Math.min(input.page, totalPages);
@@ -1513,19 +1565,66 @@ export const busabaseDemoRouter: EnhancedRouter<
       if (input.viewId && !view) {
         throw new ORPCError("NOT_FOUND", { message: `View not found: ${input.viewId}` });
       }
-      const matched = applyViewConfigToRecords(await demoListRecords({ baseId: base.id }), {
-        filters: combineViewFilters(view?.config, input.filters),
-        sorts: [],
-      });
+      const requested = input.aggregates ?? [];
+      // Same validation as the real handler: numeric aggregates need a number
+      // field, `filled` (the not_empty filter's own test) takes any field.
+      const aggregateFields = new Map<string, BaseFieldVO>();
+      for (const aggregate of requested) {
+        const target = base.fields.find((entry) => entry.slug === aggregate.fieldSlug);
+        if (!target) {
+          throw new ORPCError("NOT_FOUND", {
+            message: `Field not found in Base ${input.baseId}: ${aggregate.fieldSlug}`,
+          });
+        }
+        if (aggregate.fn === "checked" && target.type !== "checkbox") {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `Cannot count checked values of a ${target.type} field: ${aggregate.fieldSlug}. The checked aggregate needs a checkbox field.`,
+          });
+        }
+        if (
+          aggregate.fn !== "filled" &&
+          aggregate.fn !== "checked" &&
+          !NUMERIC_AGGREGATE_FIELD_TYPES.has(target.type)
+        ) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `Cannot ${aggregate.fn} a ${target.type} field: ${aggregate.fieldSlug}. Aggregates need a numeric value column; only ${[...NUMERIC_AGGREGATE_FIELD_TYPES].join(", ")} have one.`,
+          });
+        }
+        aggregateFields.set(target.slug, target);
+      }
+      const matched = await demoFilterRecordsForFind(
+        base,
+        applyViewConfigToRecords(await demoListRecords({ baseId: base.id }), {
+          filters: combineViewFilters(view?.config, input.filters),
+          sorts: [],
+        }),
+        input.find,
+        view?.config,
+      );
       const counts = new Map<string | number | boolean | null, number>();
       const numbers = new Map<string | number | boolean | null, Map<string, number[]>>();
-      const requested = input.aggregates ?? [];
+      const filled = new Map<string | number | boolean | null, Map<string, number>>();
       for (const record of matched) {
         const key = groupSlug ? bucketKeyFor(record.headCommit.payload[groupSlug]) : null;
         counts.set(key, (counts.get(key) ?? 0) + 1);
         if (!requested.length) continue;
         const bucket = numbers.get(key) ?? new Map<string, number[]>();
+        const filledBucket = filled.get(key) ?? new Map<string, number>();
         for (const aggregate of requested) {
+          if (aggregate.fn === "filled" || aggregate.fn === "checked") {
+            const target = aggregateFields.get(aggregate.fieldSlug);
+            const value = target ? record.headCommit.payload[target.slug] : undefined;
+            const counts =
+              target &&
+              (aggregate.fn === "filled"
+                ? isViewValueFilled(target, value)
+                : isViewValueChecked(value));
+            if (counts) {
+              const tally = `${aggregate.fn}:${aggregate.fieldSlug}`;
+              filledBucket.set(tally, (filledBucket.get(tally) ?? 0) + 1);
+            }
+            continue;
+          }
           const raw = record.headCommit.payload[aggregate.fieldSlug];
           const numeric = typeof raw === "number" ? raw : Number(raw);
           if (raw !== null && raw !== undefined && raw !== "" && Number.isFinite(numeric)) {
@@ -1533,6 +1632,7 @@ export const busabaseDemoRouter: EnhancedRouter<
           }
         }
         numbers.set(key, bucket);
+        filled.set(key, filledBucket);
       }
       const aggregatesFor = (key: string | number | boolean | null) => {
         if (!requested.length) return undefined;
@@ -1541,7 +1641,9 @@ export const busabaseDemoRouter: EnhancedRouter<
         for (const aggregate of requested) {
           const values = bucket.get(aggregate.fieldSlug) ?? [];
           const label = `${aggregate.fn}:${aggregate.fieldSlug}`;
-          if (aggregate.fn === "count") {
+          if (aggregate.fn === "filled" || aggregate.fn === "checked") {
+            result[label] = filled.get(key)?.get(label) ?? 0;
+          } else if (aggregate.fn === "count") {
             result[label] = values.length;
           } else if (values.length === 0) {
             result[label] = null;
@@ -1599,7 +1701,12 @@ export const busabaseDemoRouter: EnhancedRouter<
           };
         case "restore":
           throw demoUnsupported("Restore Record change request");
+        case "revert":
+          throw demoUnsupported("Revert Record change request");
       }
+    }),
+    revertPreview: os.records.revertPreview.handler(() => {
+      throw demoUnsupported("Record revert preview");
     }),
     listChangeRequests: os.records.listChangeRequests.handler(({ input }) =>
       demoListRecordChangeRequests(input.recordId).slice(0, input.limit),

@@ -20,7 +20,11 @@ import {
 } from "../../../logic/cr-lifecycle";
 import { id, now } from "../../../logic/kernel";
 import { publishChangeRequestPendingReview } from "../../../logic/live-events";
-import { hasNodePermission, shouldAutoMerge } from "../../../logic/node-acl";
+import {
+  assertBaseChangeRequestPermission,
+  hasNodePermission,
+  shouldAutoMerge,
+} from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
 import {
   createViewInputSchema,
@@ -32,6 +36,7 @@ import { normalizeViewConfig } from "../../../logic/vo";
 import { deriveViewSlug } from "../utils/view-slug";
 import { baseNotFound, lastViewDeleteRejected } from "./errors";
 import { getBase, listViews } from "./queries";
+import { assertViewPresentationConfig } from "./view-presentation";
 
 export {
   createViewInputSchema,
@@ -106,8 +111,12 @@ export const createViewChangeRequest = async (
   if (!base) {
     throw baseNotFound(baseId);
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(base.id);
 
   const rawParsed = createViewInputSchema.parse(input);
+  assertViewPresentationConfig(base.fields, rawParsed.config);
   const existingViews = await listViews(base.id);
   const takenSlugs = new Set(existingViews.map((view) => view.slug));
   if (rawParsed.slug !== undefined && takenSlugs.has(rawParsed.slug)) {
@@ -217,6 +226,9 @@ export const createUpdateViewChangeRequest = async (
     // the caller passed a bad id. Keep as a plain Error (500) to surface the bug.
     throw new Error(`Base not found: ${view.baseId}`);
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(base.id);
 
   const parsed = updateViewInputSchema.parse(input);
   const changeRequestId = id("crq");
@@ -230,6 +242,7 @@ export const createUpdateViewChangeRequest = async (
   const configPatch = parsed.config
     ? Object.fromEntries(Object.entries(parsed.config).filter(([, value]) => value !== undefined))
     : undefined;
+  assertViewPresentationConfig(base.fields, configPatch);
   const currentConfig = normalizeViewConfig(view.config);
   const fields = {
     ...(configPatch !== undefined
@@ -333,6 +346,9 @@ export const createDeleteViewChangeRequest = async (
     // Internal FK, not client input — see comment in createUpdateViewChangeRequest.
     throw new Error(`Base not found: ${view.baseId}`);
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(base.id);
 
   // A Base keeps at least one view (it opens on the leftmost). Checked here so
   // the caller hears it immediately instead of after a reviewer approves, and
@@ -450,6 +466,9 @@ export const createRestoreViewChangeRequest = async (
     // Internal FK, not client input — see comment in createUpdateViewChangeRequest.
     throw new Error(`Base not found: ${view.baseId}`);
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(base.id);
 
   const parsed = restoreViewInputSchema.parse(input ?? {});
   const changeRequestId = id("crq");

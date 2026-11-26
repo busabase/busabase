@@ -5,7 +5,9 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
+import { AssetContentUrlProvider } from "../../assets/hooks/asset-content-url-context";
 import { DashboardVisitorProvider } from "../visitor-context";
+import { FileViewerSlotProvider, type HostFileViewer } from "./file-viewer-slot";
 
 vi.mock("wouter", () => ({ useLocation: () => ["/drive/shared", vi.fn()], useSearch: () => "" }));
 const prompts = vi.hoisted(() => vi.fn());
@@ -16,8 +18,14 @@ vi.mock("./field-preview", () => ({
 
 const { DriveDetailView, SkillDetailView } = await import("./node-detail-views");
 
-function makeOrpc(type: "skill" | "drive") {
-  const filePath = type === "skill" ? "SKILL.md" : "README.md";
+function makeOrpc(type: "skill" | "drive", binary: false | "pptx" | "pdf" = false) {
+  const filePath = binary ? `delivery.${binary}` : type === "skill" ? "SKILL.md" : "README.md";
+  const mimeType =
+    binary === "pdf"
+      ? "application/pdf"
+      : binary === "pptx"
+        ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        : "text/markdown";
   const node = {
     id: `nod_${type}`,
     type,
@@ -33,7 +41,7 @@ function makeOrpc(type: "skill" | "drive") {
     path: filePath,
     name: filePath,
     assetId: "asset_shared",
-    mimeType: "text/markdown",
+    mimeType,
     displayName: filePath,
     size: 20,
     updatedAt: null,
@@ -41,11 +49,11 @@ function makeOrpc(type: "skill" | "drive") {
   const readFile = vi.fn(async () => ({
     nodeId: node.id,
     path: filePath,
-    content: "Public file contents",
-    encoding: "utf8",
-    mimeType: "text/markdown",
+    content: binary ? "UEs=" : "Public file contents",
+    encoding: binary ? "base64" : "utf8",
+    mimeType,
     assetId: file.assetId,
-    assetUrl: "/file.md",
+    assetUrl: binary ? `/storage/${filePath}` : "/file.md",
     contentHash: "test",
   }));
   const previewConfig = vi.fn(async () => ({ provider: "previewfile", status: "ready" }));
@@ -83,6 +91,57 @@ afterEach(() => {
 });
 
 describe("public file-tree node details", () => {
+  it.each([
+    { embedded: false, kind: "pptx" },
+    { embedded: true, kind: "pptx" },
+    { embedded: false, kind: "pdf" },
+    { embedded: true, kind: "pdf" },
+  ] as const)(
+    "passes Drive's $kind preview options and resource address (embedded: $embedded)",
+    async ({ embedded, kind }) => {
+      const state = makeOrpc("drive", kind);
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const renderViewer = vi.fn<HostFileViewer["render"]>((file) => (
+        <div data-testid="drive-binary-viewer" data-url={file.url}>
+          File preview
+        </div>
+      ));
+      const viewer: HostFileViewer = {
+        canRender: (file) => file.name === `delivery.${kind}`,
+        render: renderViewer,
+      };
+      const content = <DriveDetailView orpc={state.orpc} slug="shared" />;
+      render(
+        <CoreI18nProvider locale="en">
+          <QueryClientProvider client={queryClient}>
+            <DashboardVisitorProvider visitorKind="anonymous">
+              <FileViewerSlotProvider value={viewer}>
+                {embedded ? (
+                  <AssetContentUrlProvider
+                    value={(id) => `/embed/emb_example/assets/${id}/raw?token=link-secret`}
+                  >
+                    {content}
+                  </AssetContentUrlProvider>
+                ) : (
+                  content
+                )}
+              </FileViewerSlotProvider>
+            </DashboardVisitorProvider>
+          </QueryClientProvider>
+        </CoreI18nProvider>,
+      );
+      const preview = await screen.findByTestId("drive-binary-viewer");
+      expect(preview.getAttribute("data-url")).toBe(
+        embedded
+          ? "/embed/emb_example/assets/asset_shared/raw?token=link-secret"
+          : `/storage/delivery.${kind}`,
+      );
+      expect(renderViewer).toHaveBeenLastCalledWith(
+        expect.objectContaining({ name: `delivery.${kind}` }),
+        kind === "pdf" ? { fitToContainer: true, pdfScrollMode: "continuous" } : undefined,
+      );
+    },
+  );
   it.each(["skill", "drive"] as const)(
     "opens %s's entry file without member controls or private queries",
     async (type) => {

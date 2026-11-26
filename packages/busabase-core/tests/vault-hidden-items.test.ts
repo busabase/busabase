@@ -101,11 +101,13 @@ describe("hidden Vault items", () => {
     });
   });
 
-  it("ignores an attempt to set the hidden key through ordinary Vault settings", async () => {
+  it("refuses an attempt to set the hidden key through ordinary Vault settings", async () => {
     await run(async () => {
-      await updateVaultSettings(db, OWNER, {
-        items: [{ ...userItem, key: "PREVIEWFILE_API_KEY", value: "smuggled" }],
-      });
+      await expect(
+        updateVaultSettings(db, OWNER, {
+          items: [{ ...userItem, key: "PREVIEWFILE_API_KEY", value: "smuggled" }],
+        }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
       await expect(getVaultRuntimeEnv(db, OWNER)).resolves.toEqual({});
     });

@@ -125,3 +125,92 @@ export const getFieldOrderDiffModel = (
     ),
   };
 };
+
+// ============================================================================
+// Field-level before → after extraction. Pure and isomorphic on purpose: the
+// review UI renders it (`components/operation-diff.tsx`) and the server's
+// record revert (`base/logic/record-revert.ts`) inverts it, so both read a
+// Change Request's stored change through this one function.
+// ============================================================================
+
+export const stableStringify = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  if (typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(",")}}`;
+};
+
+export const valuesEqual = (left: unknown, right: unknown) =>
+  stableStringify(left) === stableStringify(right);
+
+export type FieldChangeStatus = "added" | "changed";
+
+export const isViewOperation = (operation: Pick<OperationVO, "operation">) =>
+  operation.operation.startsWith("view_");
+
+/** Merge guards belong to the commit, not to the author's editable field settings. */
+export const isInternalFormulaMetadata = (
+  operation: Pick<OperationVO, "operation">,
+  slug: string,
+) =>
+  (operation.operation === "base_add_field" || operation.operation === "base_update_field") &&
+  (slug === "formulaDependencies" || slug === "formulaBaseExpression");
+
+/** The source-view identity is routing intent, not an editable field setting. */
+const isInternalFieldOrigin = (operation: Pick<OperationVO, "operation">, slug: string) =>
+  operation.operation === "base_add_field" && slug === "originViewId";
+
+/** Review the resulting configuration, not the bookkeeping used to merge it safely. */
+const isInternalViewConfigMetadata = (operation: Pick<OperationVO, "operation">, slug: string) =>
+  operation.operation === "view_update" && (slug === "configPatch" || slug === "configBase");
+
+export interface OperationFieldValueChange {
+  slug: string;
+  beforeValue: unknown;
+  afterValue: unknown;
+  status: FieldChangeStatus;
+}
+
+/**
+ * The keys an operation actually changed, as stored values: `baseFields` is the
+ * canonical prior state (null for creations) and `headCommit.payload` the
+ * result. Only keys whose value differs are returned; a key with no prior value
+ * is `added` (its `beforeValue` is `undefined`).
+ */
+export const extractOperationFieldChanges = (
+  operation: Pick<OperationVO, "operation" | "baseFields"> & {
+    headCommit: Pick<OperationVO["headCommit"], "payload">;
+  },
+): OperationFieldValueChange[] => {
+  const before = operation.baseFields;
+  return Object.entries(operation.headCommit.payload)
+    .filter(
+      ([slug, value]) =>
+        value !== undefined &&
+        !isInternalFormulaMetadata(operation, slug) &&
+        !isInternalFieldOrigin(operation, slug) &&
+        !isInternalViewConfigMetadata(operation, slug),
+    )
+    .map(([slug, afterValue]): OperationFieldValueChange => {
+      const hasBefore = before != null && slug in before && before[slug] !== undefined;
+      return {
+        slug,
+        beforeValue: hasBefore ? before[slug] : undefined,
+        afterValue,
+        status: hasBefore ? "changed" : "added",
+      };
+    })
+    .filter(
+      (change) => change.status === "added" || !valuesEqual(change.beforeValue, change.afterValue),
+    );
+};

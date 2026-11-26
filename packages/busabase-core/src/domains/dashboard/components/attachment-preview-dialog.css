@@ -1,0 +1,53 @@
+[data-attachment-preview-surface] {
+  --attachment-preview-max-width: 1600px;
+}
+
+[data-attachment-preview-surface],
+[data-state]:not([role]):has(+ [data-attachment-preview-surface]) {
+  --attachment-preview-enter-duration: 120ms;
+  --attachment-preview-exit-duration: 100ms;
+
+  transform: none;
+  transition: none;
+}
+
+[data-attachment-preview-surface][data-state="open"],
+[data-state="open"]:not([role]):has(+ [data-attachment-preview-surface]) {
+  animation: busabase-attachment-preview-in var(--attachment-preview-enter-duration) ease-out both;
+}
+
+[data-attachment-preview-surface][data-state="closed"],
+[data-state="closed"]:not([role]):has(+ [data-attachment-preview-surface]) {
+  animation: busabase-attachment-preview-out var(--attachment-preview-exit-duration) ease-in both;
+}
+
+[data-state="open"]:not([role]):has(+ [role="dialog"][data-state="open"])
+  ~ [data-state]:not([role]):has(+ [data-attachment-preview-surface]) {
+  background-color: transparent;
+  animation: none;
+}
+
+@keyframes busabase-attachment-preview-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes busabase-attachment-preview-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-attachment-preview-surface][data-state],
+  [data-state]:not([role]):has(+ [data-attachment-preview-surface]) {
+    animation: none;
+  }
+}

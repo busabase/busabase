@@ -106,6 +106,8 @@ import {
   nodeShareSchema,
   reviewChangeRequestInputSchema,
   reviseOperationInputSchema,
+  SHARE_PASSWORD_MAX_LENGTH,
+  SHARE_PASSWORD_MIN_LENGTH,
   searchInputSchema,
   searchInteractionInputSchema,
   searchInteractionResponseSchema,
@@ -593,7 +595,7 @@ export const busabaseContractRoutes = {
           tags: ["Nodes", "Sharing"],
           summary: "List every node in the space carrying its own live public share",
           successDescription:
-            'One row per node that someone explicitly published and that is still live — `scope: "public"` and unexpired — joined to just enough of the node (name, slug, type, icon) to render and open it. Rows the caller cannot see are omitted (same node-visibility ACL as `nodes.list`), and the stored share password is never returned, only a `hasPassword` flag. Deliberately does NOT include nodes that are merely reachable because an ANCESTOR is shared: this is the list of grants a person made, each revocable on its own with `nodes.share.disable`, which is the same set the workbench sidebar marks with a globe (`NodeVO.shared`).',
+            'One row per node that someone explicitly published and that is still live — `scope: "public"` and unexpired — joined to just enough of the node (name, slug, type, icon) to render and open it. Rows the caller cannot see are omitted (same node-visibility ACL as `nodes.list`), and no share password is returned in any form, only a `hasPassword` flag (a node manager reads the password of one node through `nodes.share.get`). Deliberately does NOT include nodes that are merely reachable because an ANCESTOR is shared: this is the list of grants a person made, each revocable on its own with `nodes.share.disable`, which is the same set the workbench sidebar marks with a globe (`NodeVO.shared`).',
         })
         // No `.input()` at all, not `z.object({})`: this endpoint genuinely
         // takes nothing, and an empty input schema is not the same thing —
@@ -607,7 +609,7 @@ export const busabaseContractRoutes = {
           tags: ["Nodes", "Sharing"],
           summary: "Read a node's public link-sharing settings",
           successDescription:
-            "The node's public-share settings, or null when the node was never shared. The stored password is never returned — only a `hasPassword` flag. No URL is returned: the shared node keeps its own canonical address, and only the caller knows which origin its reader should use (see `nodeWebUrl` in busabase-sdk).",
+            "The node's public-share settings, or null when the node was never shared. `hasPassword` says whether the link is password-protected. `password` carries that password in plaintext ONLY when the caller has `manage` level on the node, so the link and its password can be sent together; it is null for every other caller, when there is no password, and when the password was set before passwords became retrievable (change it to make it readable again). The stored hash is never returned. No URL is returned: the shared node keeps its own canonical address, and only the caller knows which origin its reader should use (see `nodeWebUrl` in busabase-sdk).",
         })
         .input(z.object({ nodeId: z.string() }))
         .output(nodeShareSchema.nullable()),
@@ -618,14 +620,19 @@ export const busabaseContractRoutes = {
           tags: ["Nodes", "Sharing"],
           summary: "Enable or update a node's public link sharing",
           successDescription:
-            "Turned public sharing on (or updated its capability/password/expiry) and re-materialized the effective public scope down the subtree. Requires `manage` level on the node.",
+            "Turned public sharing on (or updated its capability/password/expiry) and re-materialized the effective public scope down the subtree. Requires `manage` level on the node. `password` is 4–64 characters; `null` removes it and omitting it keeps the current one. Changing the password signs out every visitor who unlocked the old one. The response carries the password in plaintext (see `nodes.share.get`).",
         })
         .input(
           z.object({
             nodeId: z.string(),
             scope: z.enum(["none", "public"]),
             capability: z.enum(["read", "submit"]).optional(),
-            password: z.string().nullable().optional(),
+            password: z
+              .string()
+              .min(SHARE_PASSWORD_MIN_LENGTH)
+              .max(SHARE_PASSWORD_MAX_LENGTH)
+              .nullable()
+              .optional(),
             expiresAt: z.string().datetime().nullable().optional(),
           }),
         )

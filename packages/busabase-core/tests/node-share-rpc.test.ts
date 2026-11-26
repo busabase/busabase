@@ -116,16 +116,33 @@ describe("nodes.share RPC", () => {
     expect(await sharedFlagOf(childNodeId)).toBe(false);
   });
 
-  it("reports hasPassword=true after a password is set, still without the hash", async () => {
+  // The manager (this client runs as the local owner) gets the plaintext back
+  // so the link and its password can be sent together later — but never the
+  // stored verifier or its encrypted copy, under any key.
+  it("returns the password to its manager after it is set, still without the hash or ciphertext", async () => {
     const set = await client.nodes.share.set({ nodeId, scope: "public", password: "hunter2" });
     expect(set?.hasPassword).toBe(true);
+    expect(set?.password).toBe("hunter2");
     expect(set).not.toHaveProperty("passwordHash");
-    expect(JSON.stringify(set)).not.toContain("hunter2");
+    expect(set).not.toHaveProperty("passwordCiphertext");
 
     const got = await client.nodes.share.get({ nodeId });
     expect(got?.hasPassword).toBe(true);
-    expect(JSON.stringify(got)).not.toContain("hunter2");
-    expect(JSON.stringify(got)).not.toContain("passwordHash");
+    expect(got?.password).toBe("hunter2");
+    for (const forbidden of ["passwordHash", "passwordCiphertext", "ciphertext", "scrypt"]) {
+      expect(JSON.stringify(got)).not.toContain(forbidden);
+    }
+    expect(Object.keys(got ?? {}).sort()).toEqual(
+      ["capability", "expiresAt", "hasPassword", "nodeId", "password", "scope", "updatedAt"].sort(),
+    );
+  });
+
+  it("never lists a password in the space-level share listing", async () => {
+    const listed = await client.nodes.share.list();
+    const row = listed.find((entry) => entry.nodeId === nodeId);
+    expect(row?.hasPassword).toBe(true);
+    expect(row).not.toHaveProperty("password");
+    expect(JSON.stringify(listed)).not.toContain("hunter2");
   });
 
   it("disables the share back to scope none", async () => {

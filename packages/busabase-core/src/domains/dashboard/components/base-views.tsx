@@ -13,6 +13,7 @@ import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog
 import { Pencil, PencilRuler, Plus, RotateCcw, Star, Table2, Trash2 } from "lucide-react";
 import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib/i18n/i-string";
 import { SPALink as Link } from "openlib/ui/dashboard";
+import { SegmentedControl, SegmentedControlItem } from "openlib/ui/segmented-control";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
@@ -38,6 +39,7 @@ import {
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { sameLookupConfig } from "../helpers/lookup";
 import { retryUnlessNotFound } from "../helpers/query-state";
+import { RECORD_PAGE_SIZES } from "../helpers/record-pagination-url";
 import {
   buildSelectChoices,
   type ChoiceDraft,
@@ -45,6 +47,7 @@ import {
   type SelectChoice,
 } from "../helpers/select-choices";
 import { SourceViewProvider } from "../helpers/source-view-context";
+import { resolveViewGrouping } from "../helpers/view-grouping";
 import type {
   BaseTableViewState,
   CreateBaseFieldPayload,
@@ -232,8 +235,11 @@ export function BaseDetailView({
   // Table and Gallery page through one flat record list, so the pager stays
   // docked below the scroll area. Kanban columns and the Calendar month load
   // their own slices, and Gantt draws the whole set: none of them has a page.
+  // A grouped table pages each group on its own ("Load more" per group), so it
+  // has no page numbers either.
   const showsPagination =
-    !activeView || activeView.type === "table" || activeView.type === "gallery";
+    (!activeView || activeView.type === "table" || activeView.type === "gallery") &&
+    !resolveViewGrouping(activeView, base?.fields ?? []);
   return (
     <SourceViewProvider slug={activeView?.slug}>
       <section className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col">
@@ -280,6 +286,7 @@ export function BaseDetailView({
         {showsPagination && pagination ? (
           <RecordsPaginationBar
             className="mx-3 shrink-0 sm:mx-6 [&_ul]:flex-wrap [&_ul]:justify-end"
+            pageSizeOptions={RECORD_PAGE_SIZES}
             {...pagination}
           />
         ) : null}
@@ -424,13 +431,14 @@ export function BaseSetupView({
    * Change a field's TYPE. Its own callback, never folded into
    * `onUpdateField`: the update endpoint rejects `type` outright, so a
    * bundled rename+retype would silently drop the retype and report success.
+   * The conversion request may carry the edited display name atomically.
    */
   onConvertFieldType?: (
     base: BaseVO,
     fieldId: string,
     newType: FieldType,
     selectChoiceMode: "auto_create" | "null_on_missing",
-    options?: { mergeImmediately?: boolean },
+    options?: { mergeImmediately?: boolean; name?: iString },
   ) => Promise<void>;
   onCreateField: (
     base: BaseVO,
@@ -911,7 +919,14 @@ export function BaseSetupView({
     setIsFieldConvertSaving(true);
     setFieldRenameError(null);
     try {
-      await onConvertFieldType(base, fieldId, conversionTargetType, selectChoiceMode, options);
+      const name = iStringTrim(editingFieldName);
+      if (iStringIsEmpty(name)) throw new Error(messages.base.fieldNameRequired);
+      await onConvertFieldType(base, fieldId, conversionTargetType, selectChoiceMode, {
+        ...options,
+        ...(JSON.stringify(name) !== JSON.stringify(iStringTrim(editingFieldForQuery?.name ?? ""))
+          ? { name }
+          : {}),
+      });
       resetFieldRenameForm();
     } catch (error) {
       setFieldRenameError(
@@ -959,7 +974,7 @@ export function BaseSetupView({
       return;
     }
     const patch: UpdateBaseFieldPatch = {};
-    if (JSON.stringify(name) !== JSON.stringify(field?.name)) patch.name = name;
+    if (JSON.stringify(name) !== JSON.stringify(iStringTrim(field?.name ?? ""))) patch.name = name;
     if (JSON.stringify(field?.options.help ?? {}) !== JSON.stringify(editingFieldHelp)) {
       patch.help = hasFieldHelp(editingFieldHelp) ? editingFieldHelp : null;
     }
@@ -2334,33 +2349,35 @@ export function BaseTopbarActions({
   // Icons only on a phone: the two labels alone left the Base's name one
   // character wide in the topbar. Each label stays as the link's name.
   return (
-    <nav className="flex rounded-md bg-muted/60 p-0.5 text-xs">
-      <FieldContextLink
-        className={`rounded px-2.5 py-1.5 font-medium transition-colors max-sm:px-2 ${
-          activeTab === "records"
-            ? "bg-card text-foreground"
-            : "text-muted-foreground hover:text-foreground"
-        }`}
-        href={fieldRecordsHref(base.slug, currentSearch, activeView ?? originView)}
-        title={messages.base.recordsTab}
+    <SegmentedControl as="nav">
+      <SegmentedControlItem
+        asChild
+        selected={activeTab === "records"}
+        className="max-sm:px-2 [&_svg]:size-3.5"
       >
-        <Table2 aria-hidden className="size-3.5 sm:hidden" />
-        <span className="max-sm:sr-only">{messages.base.recordsTab}</span>
-      </FieldContextLink>
-      {isAnon ? null : (
         <FieldContextLink
-          className={`rounded px-2.5 py-1.5 font-medium transition-colors max-sm:px-2 ${
-            activeTab === "design"
-              ? "bg-card text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-          href={fieldDesignHref(base.slug, currentSearch, activeView?.id ?? originView?.id)}
-          title={messages.base.designTab}
+          href={fieldRecordsHref(base.slug, currentSearch, activeView ?? originView)}
+          title={messages.base.recordsTab}
         >
-          <PencilRuler aria-hidden className="size-3.5 sm:hidden" />
-          <span className="max-sm:sr-only">{messages.base.designTab}</span>
+          <Table2 aria-hidden className="size-3.5 sm:hidden" />
+          <span className="max-sm:sr-only">{messages.base.recordsTab}</span>
         </FieldContextLink>
+      </SegmentedControlItem>
+      {isAnon ? null : (
+        <SegmentedControlItem
+          asChild
+          selected={activeTab === "design"}
+          className="max-sm:px-2 [&_svg]:size-3.5"
+        >
+          <FieldContextLink
+            href={fieldDesignHref(base.slug, currentSearch, activeView?.id ?? originView?.id)}
+            title={messages.base.designTab}
+          >
+            <PencilRuler aria-hidden className="size-3.5 sm:hidden" />
+            <span className="max-sm:sr-only">{messages.base.designTab}</span>
+          </FieldContextLink>
+        </SegmentedControlItem>
       )}
-    </nav>
+    </SegmentedControl>
   );
 }

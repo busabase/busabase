@@ -1,4 +1,5 @@
 import type { CoreI18nMessages } from "./messages";
+import { siteEnvironmentMessages } from "./site-environment";
 
 export const dashboardVi: CoreI18nMessages = {
   lookup: lookupVi,
@@ -492,10 +493,17 @@ export const dashboardVi: CoreI18nMessages = {
     requireSignInHint:
       "Bất kỳ ai có liên kết vẫn có thể mở biểu mẫu; chỉ người truy cập đã đăng nhập mới có thể gửi.",
     passwordLabel: "Mật khẩu",
-    passwordHint: "Để trống nếu không đặt mật khẩu",
-    passwordPlaceholder: "Đặt mật khẩu",
-    passwordSet: "Đã đặt mật khẩu — nhập mật khẩu mới để thay đổi, hoặc xóa mật khẩu",
-    passwordClear: "Xóa mật khẩu",
+    passwordProtectionLabel: "Bảo vệ bằng mật khẩu",
+    passwordProtectionHint: "Khách truy cập phải nhập mật khẩu để mở liên kết này.",
+    passwordChange: "Đổi",
+    passwordSave: "Lưu",
+    passwordCancel: "Hủy",
+    passwordLengthHint: "Dùng từ 4 đến 64 ký tự.",
+    passwordLegacy:
+      "Đã đặt mật khẩu nhưng không thể hiển thị ở đây. Hãy đổi sang mật khẩu mới để xem và sao chép.",
+    copyLinkAndPassword: "Sao chép liên kết và mật khẩu",
+    linkAndPasswordCopied: "Đã sao chép liên kết và mật khẩu",
+    linkAndPasswordClipboard: "Liên kết: {url}\nMật khẩu: {password}",
     expiryLabel: "Hết hạn",
     expiryHint: "Liên kết sẽ tự động ngừng hoạt động vào thời điểm đã chọn.",
     expiryNever: "Không bao giờ",
@@ -771,6 +779,8 @@ export const dashboardVi: CoreI18nMessages = {
       phone: "Xem trước trên điện thoại",
       signIn:
         "Quét để mở bản xem trước riêng tư. Đăng nhập cùng tài khoản trên điện thoại. Đây không phải Site đã xuất bản.",
+      sharedLink:
+        "Bất kỳ ai có liên kết này đều có thể xem trước phiên bản này trong tối đa 24 giờ. Hãy giữ liên kết riêng tư. Đây là bản xem trước, không phải Site đã xuất bản.",
       browserOnly:
         "Bản xem trước này chạy trong trình duyệt hiện tại. Tạo bản xem trước Site qua «Xuất bản Site» để mở trên điện thoại.",
       loopback:
@@ -781,7 +791,37 @@ export const dashboardVi: CoreI18nMessages = {
       openLink: "Mở bản xem trước",
     },
     site: {
+      environment: siteEnvironmentMessages.vi,
       publishUpdate: "Xuất bản bản cập nhật",
+      logs: {
+        contentHiddenTitle: "Đã ẩn nội dung nhật ký",
+        contentHiddenDescription:
+          "Không thể xác nhận cấu hình bí mật được dùng khi tạo một số nhật ký. Nội dung và đường dẫn liên quan được ẩn để bảo vệ dữ liệu nhạy cảm. Thời gian, phương thức và mã trạng thái vẫn hiển thị.",
+
+        button: "Nhật ký",
+        versionButton: "Xem nhật ký của {version}",
+        title: "Nhật ký · {version}",
+        description:
+          "Nhật ký production trong các khoảng thời gian triển khai phiên bản này thuộc 24 giờ qua. Yêu cầu đi qua thời điểm đổi phiên bản có thể chồng lấn.",
+        collectionHint:
+          "Các bản triển khai mới sẽ thu thập nhật ký. Phiên bản cũ có thể không có nhật ký; hãy xuất bản bản cập nhật và đợi nhật ký xuất hiện.",
+        loading: "Đang tải nhật ký production…",
+        loadFailed: "Không thể tải nhật ký. Hãy thử lại.",
+        unavailable: "Nhật ký production không khả dụng trên bản triển khai này.",
+        empty: "Không tìm thấy nhật ký cho các khoảng triển khai phiên bản này trong 24 giờ qua.",
+        refresh: "Làm mới nhật ký",
+        close: "Đóng nhật ký",
+        checkedAt: "Đã kiểm tra lúc {time}",
+        truncated:
+          "Đang hiển thị nhật ký mới nhất hiện có. Một số sự kiện hoặc khoảng triển khai có thể bị lược bỏ.",
+        levels: {
+          debug: "Gỡ lỗi",
+          info: "Thông tin",
+          log: "Nhật ký",
+          warn: "Cảnh báo",
+          error: "Lỗi",
+        },
+      },
       releases: {
         busy: "Đang áp dụng thao tác xuất bản. Danh sách sẽ tự động làm mới.",
         manage: "Quản lý xuất bản",
@@ -813,6 +853,9 @@ export const dashboardVi: CoreI18nMessages = {
           "Quét để mở Site đã xuất bản. Các thay đổi bản nháp chưa xuất bản không được bao gồm.",
       },
       publish: {
+        alreadyLive:
+          "Phiên bản này đã được xuất bản. Hãy sửa ứng dụng rồi tạo bản xem trước mới để xuất bản bản cập nhật.",
+        readyToPublish: "Đã kiểm tra bản xem trước. Có thể xuất bản phiên bản này.",
         previewStale:
           "Các tệp đã thay đổi sau bản xem trước này. Hãy tạo hoặc làm mới bản xem trước website, rồi xuất bản.",
         noPreview: "Hãy tạo bản xem trước website trước khi xuất bản.",
@@ -823,10 +866,10 @@ export const dashboardVi: CoreI18nMessages = {
         preserveBrowser: "Bản xem trước trong trình duyệt vẫn chạy khi bạn chuẩn bị website.",
         checking: "Đang kiểm tra điều kiện xuất bản…",
         checkFailed: "Không thể kiểm tra website. Hãy thử lại.",
-        planRequired: "Gói {plan} trở lên bao gồm lưu trữ website.",
-        paidPlanRequired: "Không gian này cần gói trả phí để lưu trữ website.",
+        planRequired: "Gói {plan} trở lên cho phép xuất bản website công khai.",
+        paidPlanRequired: "Không gian này cần gói trả phí để xuất bản website công khai.",
         upgradeHint:
-          "Chuẩn bị ứng dụng trước, rồi nâng cấp không gian để xem trước và xuất bản. Liên kết xem trước trong trình duyệt không phải website luôn hoạt động.",
+          "Bạn có thể xem trước riêng tư ngay bây giờ. Nâng cấp không gian khi sẵn sàng xuất bản website công khai luôn hoạt động.",
         prepareTitle: "Chuẩn bị phiên bản web",
         prepareHint: "Nhờ agent chuẩn bị phiên bản web. Có thể cần sửa mã trước khi xuất bản.",
         copyPrompt: "Sao chép lời nhắc cho agent",
@@ -839,7 +882,7 @@ export const dashboardVi: CoreI18nMessages = {
         refreshPreview: "Làm mới bản xem trước website",
         previewTitle: "Bản xem trước website riêng tư",
         publishConsent:
-          "Phiên bản đã kiểm tra sẽ được công khai. Bất kỳ ai có địa chỉ đều có thể sử dụng website, gồm dữ liệu và thao tác mà mã cung cấp.",
+          "Bất kỳ ai có địa chỉ Site đều có thể truy cập phiên bản này cùng dữ liệu và thao tác được cung cấp.",
       },
       statusNotLive: "Chưa xuất bản",
       statusLive: "Đang hoạt động",
@@ -874,7 +917,7 @@ export const dashboardVi: CoreI18nMessages = {
         guideNameHint:
           "Nhập phần đứng trước tên miền gốc, ví dụ shop cho shop.company.com. Một số nhà cung cấp yêu cầu tên đầy đủ.",
         guideStepCheck:
-          "Quay lại đây và nhấn “{check}”. DNS có thể mất vài phút đến vài giờ để có hiệu lực; sau đó HTTPS được thiết lập tự động. Nếu cần thêm bản ghi TXT để xác minh, bản ghi đó sẽ hiện ở đây sau khi bạn thêm tên miền.",
+          "Khi CNAME định tuyến phân giải, Cloudflare tự động xác minh tên máy chủ và chuẩn bị HTTPS. Nhấn “{check}” để xem trạng thái; thay đổi DNS có thể cần thời gian.",
         guideRootDomain:
           "Muốn dùng tên miền gốc như company.com? Chỉ dùng được khi nhà cung cấp DNS hỗ trợ CNAME ở tên miền gốc (CNAME flattening, ALIAS hoặc ANAME; Cloudflare có hỗ trợ). Nếu không, hãy dùng tên miền phụ như www hoặc shop.",
         guideLink: "Xem hướng dẫn thiết lập",
@@ -891,7 +934,7 @@ export const dashboardVi: CoreI18nMessages = {
         adding: "Đang thêm…",
         pending: "Chờ hoàn tất thiết lập",
         pendingDnsHint:
-          "Thêm các bản ghi bên dưới tại nhà cung cấp DNS rồi kiểm tra lại. Thay đổi DNS có thể cần thời gian để có hiệu lực.",
+          "Thêm CNAME định tuyến tại nhà cung cấp DNS rồi kiểm tra lại. Thay đổi DNS có thể cần thời gian để xuất hiện.",
         pendingHttpsHint:
           "Quyền sở hữu tên miền đã được xác minh. HTTPS đang được chuẩn bị; hãy kiểm tra lại sau ít phút.",
         active: "Đã kết nối",
@@ -908,8 +951,11 @@ export const dashboardVi: CoreI18nMessages = {
         },
         offlineHint:
           "Trang web đang ngoại tuyến. Mọi địa chỉ của trang web đều hiển thị trang không tìm thấy.",
+        advancedVerification: "Xác minh nâng cao",
+        advancedHint:
+          "Các bước xác minh quyền sở hữu và chứng chỉ tùy chọn này dành cho việc di chuyển hoặc kiểm tra trước khi chuyển lưu lượng. Với tên miền phụ thông thường, hãy bắt đầu bằng CNAME định tuyến ở trên.",
         dnsInstructions:
-          "Thêm các bản ghi này tại nhà cung cấp DNS. Giữ các bản ghi khác mà tên miền cần. Proxy Cloudflare được hỗ trợ sau khi xác minh tên miền kết nối đúng đến trang web.",
+          "Thêm CNAME này tại nhà cung cấp DNS rồi kiểm tra lại. Có thể dùng proxy Cloudflare sau khi tuyến website được xác minh.",
         dnsName: "Tên",
         dnsValue: "Giá trị / đích",
         httpInstructions:
@@ -1707,6 +1753,7 @@ export const dashboardVi: CoreI18nMessages = {
     typeToSearchBody: "Nhập vài ký tự để tìm trong nội dung bản ghi và tệp ở tab này.",
   },
   trash: {
+    deletedAt: "Đã xóa",
     title: "Thùng rác",
     body: "Các mục đã lưu trữ sẽ bị ẩn khỏi thanh bên. Hãy khôi phục để dùng lại.",
     bases: "Cơ sở dữ liệu",
@@ -1714,7 +1761,7 @@ export const dashboardVi: CoreI18nMessages = {
     noArchivedBasesBody: "Các cơ sở dữ liệu bạn lưu trữ sẽ xuất hiện ở đây.",
     foldersDocsSkills: "Thư mục, tài liệu & kỹ năng",
     noArchivedItemsTitle: "Không có mục đã lưu trữ",
-    noArchivedItemsBody: "Các thư mục, tài liệu và kỹ năng bạn xóa sẽ xuất hiện ở đây.",
+    noArchivedItemsBody: "Các mục đã xóa sẽ xuất hiện ở đây.",
     deleteForever: "Xóa vĩnh viễn",
     deletePermanentlyTitle: "Xóa vĩnh viễn?",
     deletePermanentlyBody: 'Xóa vĩnh viễn "{name}"? Không thể hoàn tác thao tác này.',
@@ -1757,6 +1804,8 @@ export const dashboardVi: CoreI18nMessages = {
     changeIcon: "Đổi biểu tượng",
     iconUploadLabel: "Tải ảnh lên",
     iconUploadFormatHint: "PNG, JPG, GIF hoặc WebP, tối đa 2MB",
+    restoreDefaultIcon: "Khôi phục biểu tượng mặc định",
+    restoreDefaultIconHint: "Xóa ảnh hoặc emoji tùy chỉnh",
     cropDialogTitle: "Chỉnh sửa biểu tượng",
     confirmCrop: "Áp dụng",
     iconFileMustBeImage: "Vui lòng chọn một tệp ảnh",
@@ -2382,6 +2431,8 @@ export const dashboardVi: CoreI18nMessages = {
       'Thao tác này mở một yêu cầu thay đổi để xóa "{title}". Bản ghi chuẩn vẫn hiển thị cho đến khi yêu cầu được xem xét và hợp nhất.',
     editRecord: "Chỉnh sửa bản ghi",
     newRecordTitle: "Bản ghi {base} mới",
+    newRecordHelp:
+      "Cần ví dụ? Mở Lời nhắc cho Agent → Tạo bản ghi thực hành. Xem ví dụ được đánh dấu là hư cấu trước khi lưu. Với bản ghi thật, hãy cung cấp thông tin và tệp của bạn.",
     failedSaveChangeRequest: "Không thể lưu yêu cầu thay đổi",
     invalidFields: "Hãy kiểm tra các trường sau: {fields}.",
     submitRequest: "Gửi yêu cầu",
@@ -2815,6 +2866,8 @@ export const dashboardVi: CoreI18nMessages = {
     untitledStep: "Bước chưa đặt tên",
     completed: "Đã hoàn thành",
     previewFrame: "Xem trước {name}",
+    htmlSourcePlainText:
+      "Mã nguồn lớn được hiển thị dưới dạng văn bản thuần để bản xem trước luôn mượt mà. Nội dung được giữ nguyên đầy đủ.",
     save: "Lưu",
     saved: "Đã lưu",
     unsaved: "Có thay đổi chưa lưu",

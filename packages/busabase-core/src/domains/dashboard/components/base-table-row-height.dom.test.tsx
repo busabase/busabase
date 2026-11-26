@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
@@ -99,6 +100,9 @@ const view = (height?: GridRowHeight): ViewVO => ({
   createdAt: base.createdAt,
   updatedAt: base.createdAt,
 });
+// The dashboard always renders the table under a QueryClient; the summary
+// footer reads through it even before any summary is set.
+const queryClient = new QueryClient();
 const table = (
   height?: GridRowHeight,
   {
@@ -112,35 +116,37 @@ const table = (
 ) => {
   const activeView = { ...view(height), type };
   return (
-    <CoreI18nProvider locale="en">
-      <SubmitPermissionProvider permissionLevel={level as ApiKeyPermissionLevel}>
-        <BusaBaseTable
-          activeView={activeView}
-          archivedRecords={[{ ...record, id: "archived", status: "archived" }]}
-          base={base}
-          client={{} as BusabaseDashboardApiClient}
-          onCreateView={vi.fn()}
-          onDeleteView={vi.fn()}
-          onUpdateView={onUpdateView}
-          records={records}
-          scrollElementRef={{ current: scrollElement }}
-          views={[activeView]}
-          pagination={
-            loading
-              ? {
-                  page: 1,
-                  pageSize: 25,
-                  total: 1,
-                  totalPages: 1,
-                  isLoading: true,
-                  onPageChange: vi.fn(),
-                  onPageSizeChange: vi.fn(),
-                }
-              : undefined
-          }
-        />
-      </SubmitPermissionProvider>
-    </CoreI18nProvider>
+    <QueryClientProvider client={queryClient}>
+      <CoreI18nProvider locale="en">
+        <SubmitPermissionProvider permissionLevel={level as ApiKeyPermissionLevel}>
+          <BusaBaseTable
+            activeView={activeView}
+            archivedRecords={[{ ...record, id: "archived", status: "archived" }]}
+            base={base}
+            client={{} as BusabaseDashboardApiClient}
+            onCreateView={vi.fn()}
+            onDeleteView={vi.fn()}
+            onUpdateView={onUpdateView}
+            records={records}
+            scrollElementRef={{ current: scrollElement }}
+            views={[activeView]}
+            pagination={
+              loading
+                ? {
+                    page: 1,
+                    pageSize: 25,
+                    total: 1,
+                    totalPages: 1,
+                    isLoading: true,
+                    onPageChange: vi.fn(),
+                    onPageSizeChange: vi.fn(),
+                  }
+                : undefined
+            }
+          />
+        </SubmitPermissionProvider>
+      </CoreI18nProvider>
+    </QueryClientProvider>
   );
 };
 
