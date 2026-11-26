@@ -9,10 +9,10 @@
 
 <p>Suggested pronunciation: <code>/ˈbuː.sə.beɪs/</code></p>
 
-<h3>The System of Record for AI Agents</h3>
+<h3>The Base for Agents</h3>
 
 <p>Different agents. One shared base.<br/>
-The open-source database &amp; workspace where Claude Code, Codex, Cursor, and your own agents keep the records, docs, skills, and apps the next task builds on.</p>
+The open-source context database &amp; workspace where Claude Code, Codex, Cursor, and your own agents keep the records, docs, skills, and apps the next task builds on.</p>
 
 <p>
 <a href="./docs/README_zh-CN.md">中文</a> &nbsp;·&nbsp;
@@ -52,7 +52,7 @@ The open-source database &amp; workspace where Claude Code, Codex, Cursor, and y
 
 <br/>
 
-> Busabase is an open-source database and workspace for AI agents — agents and people share the same structured data, docs, skills, and apps, and writes that matter become reviewed, trusted records.
+> Busabase is an open-source context database and workspace for AI agents — agents and people share the same structured data, docs, skills, and apps, and writes that matter become reviewed, trusted records.
 
 Every agent session starts from zero. Your `CLAUDE.md` lives in one repo, the best output dies in a chat, and switching tools means explaining the project all over again.
 
