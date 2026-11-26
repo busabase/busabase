@@ -18,7 +18,15 @@ interface Props extends PublicEmbedDetailHostProps {
   locale: string;
 }
 
-export function PublicEmbedDetailView({ capability, embed, locale, spaceId }: Props) {
+export function PublicEmbedDetailView({
+  capability,
+  embed,
+  expiresAt,
+  locale,
+  publicId,
+  secret,
+  spaceId,
+}: Props) {
   const apiClientOptions = useMemo(
     () => ({ headers: { [EMBED_RUNTIME_CAPABILITY_HEADER]: capability } }),
     [capability],
@@ -28,6 +36,9 @@ export function PublicEmbedDetailView({ capability, embed, locale, spaceId }: Pr
       apiBasePath="/api/rpc"
       apiClientOptions={apiClientOptions}
       embed={embed}
+      expiresAt={expiresAt}
+      publicId={publicId}
+      secret={secret}
       locale={locale}
       provideQueryClient
       spaceId={spaceId}

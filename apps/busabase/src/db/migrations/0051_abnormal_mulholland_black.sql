@@ -1,0 +1,1 @@
+ALTER TABLE "busabase_node_shares" ADD COLUMN "password_ciphertext" jsonb;
