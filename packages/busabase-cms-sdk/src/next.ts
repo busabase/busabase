@@ -13,6 +13,7 @@ import {
   DEFAULT_TAGS_BASE_SLUG,
 } from "./content";
 import { buildCmsAlternateLanguages, type CmsPathHelpers } from "./routing";
+import { warnOnSummaryCacheBudget } from "./summary-cache-budget";
 
 export interface BusabaseCmsCacheOptions {
   revalidate?: number | false;
@@ -87,15 +88,30 @@ export const createCachedBusabaseCms = (
     "posts",
     options.baseSlugs?.posts ?? DEFAULT_POSTS_BASE_SLUG,
   );
+  const cachedSummaryList = <T>(list: () => Promise<T[]>, kind: "posts" | "pages", slug: string) =>
+    cachedList(
+      async () => {
+        const items = await list();
+        warnOnSummaryCacheBudget(items, kind);
+        return items;
+      },
+      kind,
+      `${slug}:summaries`,
+    );
+  const listPostSummaries = cachedSummaryList(
+    cms.posts.listSummaries,
+    "posts",
+    options.baseSlugs?.posts ?? DEFAULT_POSTS_BASE_SLUG,
+  );
   const listPages = cachedList(
     cms.pages.list,
     "pages",
     options.baseSlugs?.pages ?? DEFAULT_PAGES_BASE_SLUG,
   );
-  const listPageSummaries = cachedList(
+  const listPageSummaries = cachedSummaryList(
     cms.pages.listSummaries,
     "pages",
-    `${options.baseSlugs?.pages ?? DEFAULT_PAGES_BASE_SLUG}:summaries`,
+    options.baseSlugs?.pages ?? DEFAULT_PAGES_BASE_SLUG,
   );
   const listCategories = cachedList(
     cms.categories.list,
@@ -126,6 +142,7 @@ export const createCachedBusabaseCms = (
   return {
     posts: {
       list: listPosts,
+      listSummaries: listPostSummaries,
       getByPath: cachedGetByArg(
         cms.posts.getByPath,
         "posts",

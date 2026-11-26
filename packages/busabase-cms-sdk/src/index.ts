@@ -3,6 +3,7 @@ export type {
   BusabaseCmsOptions,
   BusabaseCmsPageCollection,
   BusabaseCmsPathCollection,
+  BusabaseCmsPostCollection,
   BusabaseCmsTaxonomyCollection,
   CmsRecordKind,
   InvalidCmsRecordIssue,
@@ -18,6 +19,7 @@ export {
   mapPublishedPageRecord,
   mapPublishedPageSummaryRecord,
   mapPublishedPostRecord,
+  mapPublishedPostSummaryRecord,
 } from "./content";
 export * from "./content-index";
 export {

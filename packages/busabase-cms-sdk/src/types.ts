@@ -78,6 +78,13 @@ export const postVOSchema = z.object({
   rawFields: rawFieldsSchema,
 });
 
+/** Index identity and metadata only; use PostVO for article bodies and Blog cards. */
+export const postSummaryVOSchema = postVOSchema.omit({
+  body: true,
+  attachments: true,
+  coverImage: true,
+});
+
 export const pageFieldsDTOSchema = z
   .object({
     path: contentPathSchema,
@@ -157,6 +164,7 @@ export type AttachmentVO = z.infer<typeof attachmentVOSchema>;
 export type RelationFieldsDTO = z.infer<typeof relationFieldsDTOSchema>;
 export type PostFieldsDTO = z.infer<typeof postFieldsDTOSchema>;
 export type PostVO = z.infer<typeof postVOSchema>;
+export type PostSummaryVO = z.infer<typeof postSummaryVOSchema>;
 export type PageFieldsDTO = z.infer<typeof pageFieldsDTOSchema>;
 export type PageVO = z.infer<typeof pageVOSchema>;
 export type PageSummaryVO = z.infer<typeof pageSummaryVOSchema>;
