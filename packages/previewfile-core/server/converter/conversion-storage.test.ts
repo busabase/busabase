@@ -2,17 +2,25 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createConversionFileRoute } from "../http/conversion-file-route";
 import {
+  configurePublicConversionStorage,
   getLocalConversionRootDir,
+  getLocalPublicConversionRootDir,
+  getPublicConversionStorage,
+  privateConversionOutputExists,
+  publicConversionOutputKey,
   readConversionOutput,
   resetConversionStorage,
   resolveConversionStorageUrl,
   stageConversionSource,
+  uploadPrivateConversionOutput,
 } from "./conversion-storage";
 
 describe("resolveConversionStorageUrl", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    configurePublicConversionStorage();
   });
 
   const parsedRoot = (url: string) => new URL(url).pathname;
@@ -50,6 +58,40 @@ describe("resolveConversionStorageUrl", () => {
     vi.stubEnv("PREVIEWFILE_STORAGE_URL", "s3://key:secret@s3.example/bucket");
     expect(resolveConversionStorageUrl()).toBe("s3://key:secret@s3.example/bucket");
     expect(getLocalConversionRootDir()).toBeNull();
+  });
+
+  it("uses the host's shared fallback only for public derivatives", () => {
+    vi.stubEnv("PREVIEWFILE_STORAGE_URL", "");
+    vi.stubEnv("BUDA_DRIVE_URL", "");
+    configurePublicConversionStorage("s3://key:secret@s3.example/bucket");
+
+    expect(getLocalPublicConversionRootDir()).toBeNull();
+    expect(getLocalConversionRootDir()).toBe(path.resolve(process.cwd(), ".data/conversions"));
+    expect(getPublicConversionStorage().getPublicUrl("conversions/test.pdf")).toContain(
+      "s3.example",
+    );
+  });
+
+  it("keeps an explicit conversion storage override ahead of the shared fallback", () => {
+    vi.stubEnv("PREVIEWFILE_STORAGE_URL", "local:///srv/dedicated");
+    configurePublicConversionStorage("s3://key:secret@s3.example/bucket");
+    expect(getLocalPublicConversionRootDir()).toBe("/srv/dedicated");
+    expect(getLocalConversionRootDir()).toBe("/srv/dedicated");
+  });
+
+  it("only recognizes generated public output keys", () => {
+    const key = `conversions/${"a".repeat(64)}.pdf`;
+    expect(publicConversionOutputKey(`s3://bucket/${key}`)).toBe(key);
+    expect(publicConversionOutputKey(`local://${key}`)).toBe(key);
+    for (const invalid of [
+      "private-conversions/12345678-1234-1234-1234-123456789abc.pdf",
+      "conversions/sources/source.pdf",
+      "conversions/../secret.pdf",
+      "conversions/file.pdf",
+      `${key}?signature=secret`,
+    ]) {
+      expect(publicConversionOutputKey(invalid)).toBeNull();
+    }
   });
 });
 
@@ -106,4 +148,48 @@ describe("readConversionOutput", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+});
+
+it("writes private derivatives outside every public local conversion-file path", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "private-conversion-"));
+  try {
+    vi.stubEnv("PREVIEWFILE_STORAGE_URL", `local://${root}`);
+    resetConversionStorage();
+    const output = await uploadPrivateConversionOutput({
+      content: Buffer.from("%PDF-private-result"),
+      format: "pdf",
+    });
+    expect(await privateConversionOutputExists(output.uri)).toBe(true);
+    expect(await readConversionOutput(output.uri)).toEqual(Buffer.from("%PDF-private-result"));
+    const { GET } = createConversionFileRoute();
+    const key = output.uri.slice("local://".length).split("/");
+    for (const routeKey of [key, ["conversions", "..", ...key]]) {
+      const response = await GET(new Request("https://host.test/api/convert/pdf-file/hidden"), {
+        params: Promise.resolve({ key: routeKey }),
+      });
+      expect(response.status).toBe(403);
+      expect(await response.text()).not.toContain("PDF-private-result");
+    }
+  } finally {
+    resetConversionStorage();
+    vi.unstubAllEnvs();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("fails closed when a custom local public route could expose the private key", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "private-conversion-custom-route-"));
+  try {
+    vi.stubEnv("PREVIEWFILE_STORAGE_URL", `local://${root}?base_url=/unbounded-public-files`);
+    resetConversionStorage();
+    await expect(
+      uploadPrivateConversionOutput({ content: Buffer.from("%PDF-private"), format: "pdf" }),
+    ).rejects.toThrow("Could not store conversion output privately");
+    const { readdirSync } = await import("node:fs");
+    expect(readdirSync(path.join(root, "private-conversions"))).toEqual([]);
+  } finally {
+    resetConversionStorage();
+    vi.unstubAllEnvs();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

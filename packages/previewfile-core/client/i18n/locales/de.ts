@@ -76,6 +76,7 @@ export const de: Messages = {
   zoomInShortcut: () => "Vergrößern (Strg/Cmd + +)",
   zoomOutShortcut: () => "Verkleinern (Strg/Cmd + -)",
   fitWidth: () => "Breite anpassen",
+  fitPage: () => "Seite anpassen",
   fitHeight: () => "Höhe anpassen",
   fitToWidth: () => "An Breite anpassen",
   fitToHeight: () => "An Höhe anpassen",

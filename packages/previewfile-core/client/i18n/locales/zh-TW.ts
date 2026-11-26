@@ -82,6 +82,7 @@ export const zhTW: Messages = {
   zoomInShortcut: () => "放大（Ctrl/Cmd + +）",
   zoomOutShortcut: () => "縮小（Ctrl/Cmd + -）",
   fitWidth: () => "符合寬度",
+  fitPage: () => "符合整頁",
   fitHeight: () => "符合高度",
   fitToWidth: () => "符合寬度",
   fitToHeight: () => "符合高度",

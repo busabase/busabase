@@ -74,6 +74,7 @@ export const pt: Messages = {
   zoomInShortcut: () => "Aumentar zoom (Ctrl/Cmd + +)",
   zoomOutShortcut: () => "Diminuir zoom (Ctrl/Cmd + -)",
   fitWidth: () => "Ajustar à largura",
+  fitPage: () => "Ajustar à página",
   fitHeight: () => "Ajustar à altura",
   fitToWidth: () => "Ajustar à largura",
   fitToHeight: () => "Ajustar à altura",

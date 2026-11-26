@@ -71,6 +71,7 @@ export const ko: Messages = {
   zoomInShortcut: () => "확대 (Ctrl/Cmd + +)",
   zoomOutShortcut: () => "축소 (Ctrl/Cmd + -)",
   fitWidth: () => "너비에 맞추기",
+  fitPage: () => "페이지에 맞추기",
   fitHeight: () => "높이에 맞추기",
   fitToWidth: () => "너비에 맞추기",
   fitToHeight: () => "높이에 맞추기",

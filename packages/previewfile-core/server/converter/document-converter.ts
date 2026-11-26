@@ -25,7 +25,11 @@ import {
   verifyLibreOfficeInstallation,
 } from "../libreoffice/libreoffice-utils";
 import { getResourceManager } from "../libreoffice/resource-manager";
-import { getConversionFileUrl, getConversionStorage } from "./conversion-storage";
+import {
+  getPublicConversionFileUrl,
+  getPublicConversionStorage,
+  uploadPrivateConversionOutput,
+} from "./conversion-storage";
 
 export { resetConversionStorage } from "./conversion-storage";
 
@@ -64,6 +68,8 @@ export interface ConversionRequest {
    * host resolved itself (its own storage or download route).
    */
   sourceFetch?: "public";
+  /** Host-authorized derivatives must never enter public conversion storage paths. */
+  privateOutput?: boolean;
 }
 
 /** Result of a conversion operation */
@@ -929,19 +935,22 @@ export class DocumentConverter {
 
     // 8. Upload converted file to conversion storage and return an accessible URL.
     //
-    // We use getConversionStorage() (NOT the global `storage` singleton) so that
-    // converted PDFs never land in the main user-attachment bucket (STORAGE_URL).
-    // When PREVIEWFILE_STORAGE_URL / BUDA_DRIVE_URL resolves to local://, the
-    // returned presignedUrl is a same-origin /api/convert/pdf-file/<key> path —
-    // no CORS issues, no expiry, browser can always fetch it.
+    // Public derivatives may use the host's shared output store. Private
+    // derivatives retain the separately checked private conversion storage.
     const convertedFileBuffer = await fs.readFile(actualOutputPath);
+    if (request.privateOutput) {
+      return uploadPrivateConversionOutput({
+        content: convertedFileBuffer,
+        format: request.outputFormat,
+      });
+    }
     const fileHash = createHash("sha256").update(convertedFileBuffer).digest("hex");
     const fileExtension = extractFileExtension(expectedOutputName);
 
     // Use a storage key pattern: conversions/{hash}.{extension}
     const storageKey = `conversions/${fileHash}${fileExtension ? `.${fileExtension}` : ""}`;
 
-    const conversionStore = getConversionStorage();
+    const conversionStore = getPublicConversionStorage();
     const { uri } = await conversionStore.uploadFileToKey(
       convertedFileBuffer,
       storageKey,
@@ -951,7 +960,7 @@ export class DocumentConverter {
     // For local storage this returns a same-origin path (no expiry, no CORS).
     // For S3/R2 storage this returns a presigned URL (Buda's /api/convert/pdf
     // proxy will wrap it before sending to the browser — see convert/route.ts).
-    const presignedUrl = await getConversionFileUrl(uri, 3600);
+    const presignedUrl = await getPublicConversionFileUrl(uri, 3600);
 
     return { uri, presignedUrl };
   }

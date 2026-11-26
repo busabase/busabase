@@ -36,6 +36,21 @@ const show = async (props: Partial<FileViewerProps> & { fileName: string }) => {
 };
 
 describe("FileViewer", () => {
+  it("keeps PDF continuous reading opt-in and forwards it only to PDF viewers", async () => {
+    expect((await show({ fileName: "report.pdf" })).props.pdfScrollMode).toBe("single");
+  });
+
+  it("opts PDFs into continuous reading explicitly", async () => {
+    expect(
+      (await show({ fileName: "report.pdf", pdfScrollMode: "continuous" })).props.pdfScrollMode,
+    ).toBe("continuous");
+  });
+
+  it("does not pass the PDF reading mode to other file kinds", async () => {
+    expect(
+      (await show({ fileName: "photo.png", pdfScrollMode: "continuous" })).props,
+    ).not.toHaveProperty("pdfScrollMode");
+  });
   it.each([
     ["report.pdf", "PdfViewer"],
     ["photo.png", "ImageViewer"],
@@ -73,6 +88,24 @@ describe("FileViewer", () => {
     const { props } = await show({ fileName: "sheet.xlsx", watermark: "ACME", noDownload: true });
     expect(props).toMatchObject({ fileUrl: "/files/x", watermark: "ACME", noDownload: true });
   });
+
+  it.each(["photo.png", "report.pdf"])("opts %s into container fitting", async (fileName) => {
+    const { props } = await show({ fileName, fitToContainer: true });
+    expect(props.fitToContainer).toBe(true);
+  });
+
+  it.each(["photo.png", "report.pdf"])("keeps %s fitting off by default", async (fileName) => {
+    expect((await show({ fileName })).props.fitToContainer).toBe(false);
+  });
+
+  it.each(["sheet.xlsx", "scan.tiff", "deck.pptx", "clip.mp4", "notes.txt"])(
+    "does not pass container fitting to %s",
+    async (fileName) => {
+      expect((await show({ fileName, fitToContainer: true })).props).not.toHaveProperty(
+        "fitToContainer",
+      );
+    },
+  );
 
   it("ties an Office conversion to the PreviewFile preview it belongs to", async () => {
     const { props } = await show({

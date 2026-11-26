@@ -20,6 +20,8 @@ export interface ConversionJobData {
   outputFormat: "pdf" | "html";
   /** See `ConversionRequest.sourceFetch`. */
   sourceFetch?: "public";
+  /** Keep the derivative outside public conversion-file routes. */
+  privateOutput?: boolean;
 }
 
 // Job result structure

@@ -86,6 +86,7 @@ export interface Messages {
   zoomInShortcut: () => string;
   zoomOutShortcut: () => string;
   fitWidth: () => string;
+  fitPage: () => string;
   fitHeight: () => string;
   fitToWidth: () => string;
   fitToHeight: () => string;
@@ -256,6 +257,7 @@ export const defaultMessages: Messages = {
   zoomInShortcut: () => "Zoom in (Ctrl/Cmd + +)",
   zoomOutShortcut: () => "Zoom out (Ctrl/Cmd + -)",
   fitWidth: () => "Fit Width",
+  fitPage: () => "Fit Page",
   fitHeight: () => "Fit Height",
   fitToWidth: () => "Fit to width",
   fitToHeight: () => "Fit to height",

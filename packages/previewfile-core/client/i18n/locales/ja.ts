@@ -84,6 +84,7 @@ export const ja: Messages = {
   zoomInShortcut: () => "拡大（Ctrl/Cmd + +）",
   zoomOutShortcut: () => "縮小（Ctrl/Cmd + -）",
   fitWidth: () => "幅に合わせる",
+  fitPage: () => "ページに合わせる",
   fitHeight: () => "高さに合わせる",
   fitToWidth: () => "幅に合わせる",
   fitToHeight: () => "高さに合わせる",

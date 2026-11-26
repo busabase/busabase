@@ -30,6 +30,9 @@ export interface EmbeddedFileViewerProps {
    * host shows its own download action, or withholds it.
    */
   noDownload?: boolean;
+  fitToContainer?: boolean;
+  /** Continuous scrolling for PDFs, opt-in to preserve existing host behavior. */
+  pdfScrollMode?: "single" | "continuous";
   /**
    * Convert MPEG and QuickTime/MOV videos to MP4 in the browser (default
    * `false`). The converter, ffmpeg.wasm, is a ~30 MB download from unpkg.com
@@ -76,6 +79,8 @@ export const EmbeddedFileViewer = memo(function EmbeddedFileViewer({
   locale,
   messages,
   noDownload = true,
+  fitToContainer = false,
+  pdfScrollMode = "single",
   transcodeVideo = false,
   model3dViewer,
 }: EmbeddedFileViewerProps) {
@@ -92,6 +97,8 @@ export const EmbeddedFileViewer = memo(function EmbeddedFileViewer({
                 mimeType={mimeType}
                 model3dViewer={model3dViewer}
                 noDownload={noDownload}
+                fitToContainer={fitToContainer}
+                pdfScrollMode={pdfScrollMode}
                 transcodeVideo={transcodeVideo}
                 url={url}
               />

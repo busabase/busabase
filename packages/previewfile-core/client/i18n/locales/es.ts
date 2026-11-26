@@ -73,6 +73,7 @@ export const es: Messages = {
   zoomInShortcut: () => "Acercar (Ctrl/Cmd + +)",
   zoomOutShortcut: () => "Alejar (Ctrl/Cmd + -)",
   fitWidth: () => "Ajustar al ancho",
+  fitPage: () => "Ajustar a la página",
   fitHeight: () => "Ajustar al alto",
   fitToWidth: () => "Ajustar al ancho",
   fitToHeight: () => "Ajustar al alto",

@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -185,6 +185,10 @@
       "types": "./src/domains/embed-links/detail-page.ts",
       "default": "./src/domains/embed-links/detail-page.ts"
     },
+    "./domains/embed-links/metadata": {
+      "types": "./src/domains/embed-links/metadata.ts",
+      "default": "./src/domains/embed-links/metadata.ts"
+    },
     "./domains/embed-links/capability": {
       "types": "./src/domains/embed-links/capability.ts",
       "default": "./src/domains/embed-links/capability.ts"
@@ -213,6 +217,18 @@
       "types": "./src/domains/embed-links/components/public-embed-detail-view.tsx",
       "default": "./src/domains/embed-links/components/public-embed-detail-view.tsx"
     },
+    "./domains/embed-links/public-node-view": {
+      "types": "./src/domains/embed-links/components/public-embed-node-view.tsx",
+      "default": "./src/domains/embed-links/components/public-embed-node-view.tsx"
+    },
+    "./domains/embed-links/status-route": {
+      "types": "./src/domains/embed-links/status-route.ts",
+      "default": "./src/domains/embed-links/status-route.ts"
+    },
+    "./domains/embed-links/asset-route": {
+      "types": "./src/domains/embed-links/asset-route.ts",
+      "default": "./src/domains/embed-links/asset-route.ts"
+    },
     "./domains/attachments/logic": {
       "types": "./src/domains/attachments/logic/attachments-logic.ts",
       "default": "./src/domains/attachments/logic/attachments-logic.ts"
@@ -224,6 +240,10 @@
     "./domains/templates/components/template-card-summary": {
       "types": "./src/domains/templates/components/template-card-summary.tsx",
       "default": "./src/domains/templates/components/template-card-summary.tsx"
+    },
+    "./domains/templates/components/template-card-image": {
+      "types": "./src/domains/templates/components/template-card-image.tsx",
+      "default": "./src/domains/templates/components/template-card-image.tsx"
     },
     "./domains/templates/utils/pagination": {
       "types": "./src/domains/templates/utils/pagination.ts",
@@ -240,6 +260,10 @@
     "./domains/templates/components/template-detail-content": {
       "types": "./src/domains/templates/components/template-detail-content.tsx",
       "default": "./src/domains/templates/components/template-detail-content.tsx"
+    },
+    "./domains/templates/components/template-detail-image": {
+      "types": "./src/domains/templates/components/template-detail-image.tsx",
+      "default": "./src/domains/templates/components/template-detail-image.tsx"
     },
     "./domains/file-node/handlers": {
       "types": "./src/domains/file-node/handlers.ts",
@@ -272,6 +296,22 @@
     "./domains/settings/desktop-shell": {
       "types": "./src/domains/settings/utils/desktop-shell.ts",
       "default": "./src/domains/settings/utils/desktop-shell.ts"
+    },
+    "./domains/settings/types/app-branding": {
+      "types": "./src/domains/settings/types/app-branding.ts",
+      "default": "./src/domains/settings/types/app-branding.ts"
+    },
+    "./domains/settings/logic/app-branding-store": {
+      "types": "./src/domains/settings/logic/app-branding-store.ts",
+      "default": "./src/domains/settings/logic/app-branding-store.ts"
+    },
+    "./domains/settings/hooks/use-app-branding": {
+      "types": "./src/domains/settings/hooks/use-app-branding.ts",
+      "default": "./src/domains/settings/hooks/use-app-branding.ts"
+    },
+    "./domains/settings/components/app-branding-settings-tab": {
+      "types": "./src/domains/settings/components/app-branding-settings-tab.tsx",
+      "default": "./src/domains/settings/components/app-branding-settings-tab.tsx"
     },
     "./dashboard": {
       "types": "./src/domains/dashboard/index.tsx",
@@ -385,6 +425,10 @@
       "types": "./src/domains/dashboard/helpers/node-agent-prompts.ts",
       "default": "./src/domains/dashboard/helpers/node-agent-prompts.ts"
     },
+    "./dashboard/agent-prompts-dialog": {
+      "types": "./src/domains/dashboard/components/agent-prompts-dialog.tsx",
+      "default": "./src/domains/dashboard/components/agent-prompts-dialog.tsx"
+    },
     "./dashboard/share-dialog-utils": {
       "types": "./src/domains/dashboard/utils/share-dialog-utils.ts",
       "default": "./src/domains/dashboard/utils/share-dialog-utils.ts"
@@ -436,6 +480,10 @@
     "./openapi/error-envelope": {
       "types": "./src/openapi/error-envelope.ts",
       "default": "./src/openapi/error-envelope.ts"
+    },
+    "./openapi/error-logging": {
+      "types": "./src/openapi/error-logging.ts",
+      "default": "./src/openapi/error-logging.ts"
     },
     "./openapi/handler": {
       "types": "./src/openapi/handler.ts",

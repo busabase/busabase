@@ -40,7 +40,7 @@ function describeSourceUrl(fileUrl: string): string {
 async function processConversionJob(
   job: Job<ConversionJobData, ConversionJobResult>,
 ): Promise<ConversionJobResult> {
-  const { fileUrl, fileName, mimeType, outputFormat, sourceFetch } = job.data;
+  const { fileUrl, fileName, mimeType, outputFormat, sourceFetch, privateOutput } = job.data;
   const startTime = Date.now();
 
   console.log(`[ConversionWorker] Processing job ${job.id} for file: ${fileName}`);
@@ -70,6 +70,7 @@ async function processConversionJob(
       mimeType,
       outputFormat,
       sourceFetch,
+      privateOutput,
     });
 
     // Update progress: conversion complete
