@@ -3,6 +3,8 @@ import {
   mapViewFilters,
   type ViewFilterConditionVO,
   type ViewFilterConjunction,
+  type ViewGroupByVO,
+  type ViewSummaryFunction,
 } from "busabase-contract/types";
 /**
  * `export`'s read half: a space subtree → the in-memory package tree, entirely via
@@ -656,6 +658,8 @@ const toPackageView = (view: {
     autoShowNewFields?: boolean;
     fieldWidths?: Record<string, number>;
     rowHeight?: GridRowHeight;
+    groupBy?: ViewGroupByVO[];
+    fieldSummaries?: Record<string, ViewSummaryFunction>;
   };
 }): PackageView => ({
   slug: view.slug,
@@ -679,6 +683,12 @@ const toPackageView = (view: {
     autoShowNewFields: view.config.autoShowNewFields,
     fieldWidths: view.config.fieldWidths,
     rowHeight: view.config.rowHeight,
+    // Slugs only: field ids are re-minted by every install.
+    groupBy: view.config.groupBy?.map((level) => ({
+      fieldSlug: level.fieldSlug,
+      direction: level.direction,
+    })),
+    fieldSummaries: view.config.fieldSummaries,
   },
 });
 

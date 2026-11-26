@@ -128,6 +128,8 @@ const serializeView = (view: PackageView): Record<string, unknown> =>
       autoShowNewFields: view.config.autoShowNewFields,
       fieldWidths: view.config.fieldWidths,
       rowHeight: view.config.rowHeight,
+      groupBy: view.config.groupBy?.length ? view.config.groupBy : undefined,
+      fieldSummaries: view.config.fieldSummaries,
     }),
   });
 

@@ -2,10 +2,20 @@
 
 import { Button } from "kui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "kui/dialog";
+import { Slider } from "kui/slider";
 import { Check } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import Cropper, { type Area } from "react-easy-crop";
+import Cropper, { type Area, type MediaSize, type Size } from "react-easy-crop";
 import { AvatarLogo } from "./avatar-logo";
+import {
+  type CropPoint,
+  clampCropPoint,
+  INITIAL_ZOOM,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  nextZoomFromWheel,
+  placeCropOnImage,
+} from "./crop-frame";
 
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 
@@ -26,6 +36,13 @@ interface AvatarUploadProps {
   confirmLabel?: string;
   /** Hint text shown below the crop area to guide users */
   cropHint?: string;
+  /**
+   * Cover keeps the existing avatar interaction. Logo enables gentle wheel
+   * zoom, a slider, and repositioning that can leave transparent padding.
+   */
+  cropMode?: "cover" | "logo";
+  /** Accessible name for the zoom slider */
+  zoomLabel?: string;
   /** Hint text shown next to the buttons, describing accepted files */
   fileHint?: string;
   /** Largest accepted original file, in bytes. Defaults to 10MB. */
@@ -79,7 +96,9 @@ export function AvatarUpload({
   cropLabel = "Crop Image",
   cancelLabel = "Cancel",
   confirmLabel = "Confirm",
-  cropHint = "Drag to reposition, scroll to zoom in or out",
+  cropHint,
+  cropMode = "cover",
+  zoomLabel = "Zoom",
   fileHint = "JPG, PNG or GIF. Max 10MB. Recommended size: 400x400px for best quality across all devices.",
   maxBytes = DEFAULT_MAX_BYTES,
   outputMimeType = "image/jpeg",
@@ -90,15 +109,25 @@ export function AvatarUpload({
   onError,
   onUploadSuccess,
 }: AvatarUploadProps) {
+  const allowsPadding = cropMode === "logo";
+  const resolvedCropHint =
+    cropHint ??
+    (allowsPadding
+      ? "Drag to reposition. Scroll or use the slider to zoom."
+      : "Drag to reposition, scroll to zoom in or out");
   const [isUploading, setIsUploading] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [isCropDialogOpen, setIsCropDialogOpen] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1.2);
+  const [crop, setCrop] = useState<CropPoint>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(INITIAL_ZOOM);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const originalFileRef = useRef<File | null>(null);
+  const zoomRef = useRef(INITIAL_ZOOM);
+  const mediaSizeRef = useRef<Size | null>(null);
+  const cropSizeRef = useRef<Size | null>(null);
+  zoomRef.current = zoom;
 
   const reportError = (message: string) => {
     if (onError) onError(message);
@@ -131,7 +160,10 @@ export function AvatarUpload({
     reader.onload = () => {
       setSelectedImage(reader.result as string);
       setCrop({ x: 0, y: 0 });
-      setZoom(1.2);
+      zoomRef.current = INITIAL_ZOOM;
+      setZoom(INITIAL_ZOOM);
+      mediaSizeRef.current = null;
+      cropSizeRef.current = null;
       setIsCropDialogOpen(true);
     };
     reader.readAsDataURL(file);
@@ -140,6 +172,35 @@ export function AvatarUpload({
   const onCropComplete = useCallback((_croppedArea: Area, croppedAreaPixels: Area) => {
     setCroppedAreaPixels(croppedAreaPixels);
   }, []);
+
+  // The cropper calls this with the raw drag. Clamp here, because its built-in
+  // restrictPosition drops the gesture once the image is zoomed out to the frame.
+  const handleCropChange = (next: CropPoint) => {
+    const media = mediaSizeRef.current;
+    const frame = cropSizeRef.current;
+    const resolved =
+      allowsPadding && media && frame ? clampCropPoint(next, media, frame, zoomRef.current) : next;
+    setCrop((current) =>
+      current.x === resolved.x && current.y === resolved.y ? current : resolved,
+    );
+  };
+
+  const handleZoomChange = (next: number) => {
+    const resolved = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+    zoomRef.current = resolved;
+    setZoom((current) => (current === resolved ? current : resolved));
+    const media = mediaSizeRef.current;
+    const frame = cropSizeRef.current;
+    if (allowsPadding && media && frame) {
+      setCrop((current) => clampCropPoint(current, media, frame, resolved));
+    }
+  };
+
+  const handleWheelZoom = (event: WheelEvent) => {
+    event.preventDefault();
+    handleZoomChange(nextZoomFromWheel(zoomRef.current, event.deltaY, event.deltaMode));
+    return false;
+  };
 
   const createCroppedImage = async (): Promise<Blob> => {
     if (!selectedImage || !croppedAreaPixels) {
@@ -156,22 +217,39 @@ export function AvatarUpload({
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Failed to get canvas context");
 
-    // Set canvas size to cropped area
-    canvas.width = croppedAreaPixels.width;
-    canvas.height = croppedAreaPixels.height;
+    const cropWidth = Math.max(1, Math.round(croppedAreaPixels.width));
+    const cropHeight = Math.max(1, Math.round(croppedAreaPixels.height));
+    canvas.width = cropWidth;
+    canvas.height = cropHeight;
 
-    // Draw cropped image
-    ctx.drawImage(
-      image,
-      croppedAreaPixels.x,
-      croppedAreaPixels.y,
-      croppedAreaPixels.width,
-      croppedAreaPixels.height,
-      0,
-      0,
-      croppedAreaPixels.width,
-      croppedAreaPixels.height,
-    );
+    // JPEG has no alpha. Padding from a zoomed-out, repositioned logo would
+    // otherwise be black; PNG keeps that padding transparent.
+    if (allowsPadding && outputMimeType === "image/jpeg") {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, cropWidth, cropHeight);
+    } else {
+      ctx.clearRect(0, 0, cropWidth, cropHeight);
+    }
+
+    const placement = placeCropOnImage(croppedAreaPixels, {
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+    });
+    if (placement) {
+      const scaleX = cropWidth / croppedAreaPixels.width;
+      const scaleY = cropHeight / croppedAreaPixels.height;
+      ctx.drawImage(
+        image,
+        placement.source.x,
+        placement.source.y,
+        placement.source.width,
+        placement.source.height,
+        placement.destination.x * scaleX,
+        placement.destination.y * scaleY,
+        placement.destination.width * scaleX,
+        placement.destination.height * scaleY,
+      );
+    }
 
     // Convert to blob
     return new Promise((resolve, reject) => {
@@ -288,16 +366,39 @@ export function AvatarUpload({
                 image={selectedImage}
                 crop={crop}
                 zoom={zoom}
+                minZoom={MIN_ZOOM}
+                maxZoom={MAX_ZOOM}
                 aspect={1}
                 cropShape="round"
                 showGrid={false}
-                onCropChange={setCrop}
-                onZoomChange={setZoom}
+                restrictPosition={!allowsPadding}
+                onWheelRequest={allowsPadding ? handleWheelZoom : undefined}
+                onCropChange={handleCropChange}
+                onZoomChange={handleZoomChange}
                 onCropComplete={onCropComplete}
+                setMediaSize={(size: MediaSize) => {
+                  mediaSizeRef.current = { width: size.width, height: size.height };
+                }}
+                setCropSize={(size: Size) => {
+                  cropSizeRef.current = size;
+                }}
               />
             )}
           </div>
-          <p className="text-xs text-center text-muted-foreground">{cropHint}</p>
+          {allowsPadding ? (
+            <Slider
+              aria-label={zoomLabel}
+              min={MIN_ZOOM}
+              max={MAX_ZOOM}
+              step={0.01}
+              value={[zoom]}
+              onValueChange={(value) => {
+                const next = value[0];
+                if (next !== undefined) handleZoomChange(next);
+              }}
+            />
+          ) : null}
+          <p className="text-xs text-center text-muted-foreground">{resolvedCropHint}</p>
           <DialogFooter>
             <Button variant="outline" onClick={handleCancelCrop}>
               {cancelLabel}

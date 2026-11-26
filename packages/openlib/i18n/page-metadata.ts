@@ -325,6 +325,17 @@ export interface PageMetadataConfig<T extends string> extends PageAlternatesConf
    * `{ absolute }`; every other title still flows through the template. See `brandedTitle`.
    */
   brandName?: string;
+  /**
+   * Optional identity parts the document title must carry for the REQUESTED locale.
+   * The first nonempty entry is the primary name. Later entries may be additional
+   * names or a localized full label beginning with that primary; its repeated
+   * primary prefix is removed before computing which identity parts are missing.
+   * The helper emits a complete `{ absolute }` title and appends only names it does
+   * not already contain, so a locale-aware root template cannot duplicate a brand.
+   * This affects no share-card fields and does not override `absoluteTitle: true`.
+   * Omitted or empty lists retain the existing `brandName` / layout-template behavior.
+   */
+  titleBrandNames?: (locale: string) => readonly string[];
 }
 
 export interface GeneratePageMetadataOptions {
@@ -512,6 +523,7 @@ export function createPageMetadataHelpers<T extends string>(
     openGraphLocales,
     buildImageTextUrl,
     brandName,
+    titleBrandNames,
     ...alternatesConfig
   } = config;
   const { getPageAlternates, getContentPageAlternates, getTranslatedPageAlternates } =
@@ -529,6 +541,37 @@ export function createPageMetadataHelpers<T extends string>(
   const namesBrand = (title: string) => brandPattern?.test(title) ?? false;
   const brandedTitle = (title: string) =>
     !brandName || namesBrand(title) ? title : `${title} | ${brandName}`;
+
+  const documentTitle = (
+    title: string,
+    locale: string,
+    absolute: boolean,
+  ): PageMetadata["title"] => {
+    if (absolute) return { absolute: title };
+    if (!titleBrandNames) return namesBrand(title) ? { absolute: title } : title;
+
+    const configured = titleBrandNames(locale)
+      .map((name) => name.trim())
+      .filter(Boolean);
+    if (!configured.length) return namesBrand(title) ? { absolute: title } : title;
+    const literalPrimary = configured[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const primaryEnd = /[A-Za-z0-9]$/.test(configured[0]) ? "(?=$|[^A-Za-z0-9])" : "";
+    const primaryPrefix = new RegExp(`^${literalPrimary}${primaryEnd}`, "i");
+    const seen = new Set<string>();
+    const missing = configured
+      .map((name, index) => (index ? name.replace(primaryPrefix, "").trim() : name))
+      .filter((name) => {
+        if (!name || seen.has(name.toLowerCase())) return false;
+        seen.add(name.toLowerCase());
+        // A Latin word must end at a boundary (Buda ≠ Budapest). CJK names can run
+        // straight into surrounding copy, including another brand: Busabase布沙知识仓.
+        const start = /^[A-Za-z0-9]/.test(name) ? "(^|[^A-Za-z0-9])" : "";
+        const end = /[A-Za-z0-9]$/.test(name) ? "($|[^A-Za-z0-9])" : "";
+        const literal = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return !new RegExp(`${start}${literal}${end}`, "i").test(title);
+      });
+    return { absolute: missing.length ? `${title} | ${missing.join(" ")}` : title };
+  };
 
   const getOpenGraphAlternateLocales = (
     locale: string,
@@ -571,7 +614,7 @@ export function createPageMetadataHelpers<T extends string>(
     return {
       // og:title / twitter:title always stay the bare string — the template is a
       // document-title concern and must not leak into share cards.
-      title: absoluteTitle || namesBrand(title) ? { absolute: title } : title,
+      title: documentTitle(title, lang, absoluteTitle),
       description,
       ...(keywords?.length ? { keywords: [...keywords] } : {}),
       alternates,

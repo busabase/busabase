@@ -13,6 +13,10 @@
       "types": "./ui/model-provider-icons.tsx",
       "default": "./ui/model-provider-icons.tsx"
     },
+    "./ui/segmented-control": {
+      "types": "./ui/segmented-control.tsx",
+      "default": "./ui/segmented-control.tsx"
+    },
     "./cors": {
       "types": "./cors/index.ts",
       "default": "./cors/index.ts"
@@ -69,6 +73,10 @@
       "types": "./seo/llms-routes.ts",
       "default": "./seo/llms-routes.ts"
     },
+    "./seo/remark-llms-images": {
+      "types": "./seo/remark-llms-images.ts",
+      "default": "./seo/remark-llms-images.ts"
+    },
     "./cache": {
       "types": "./cache/index.ts",
       "default": "./cache/index.ts"
@@ -112,6 +120,10 @@
     "./ui/avatar-upload": {
       "types": "./ui/avatar-upload.tsx",
       "default": "./ui/avatar-upload.tsx"
+    },
+    "./ui/cropped-upload-file": {
+      "types": "./ui/cropped-upload-file.ts",
+      "default": "./ui/cropped-upload-file.ts"
     },
     "./ui/dashboard": {
       "types": "./ui/dashboard/index.ts",
@@ -171,10 +183,12 @@
     "fumadocs-ui": "16.14.5",
     "kui": "workspace:*",
     "lmdb": "^3.5.1",
+    "mdast-util-from-markdown": "2.0.3",
     "mime-types": "^2.1.35",
     "nanoid": "^5.1.5",
     "negotiator": "^0.6.3",
     "nprogress": "^0.2.0",
+    "parse5": "7.3.0",
     "postgres": "^3.4.6",
     "react-easy-crop": "^5.5.6",
     "redis": "^5.10.0",
