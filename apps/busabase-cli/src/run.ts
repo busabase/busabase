@@ -2187,7 +2187,14 @@ export function buildProgram(state: CliState = {}): Command {
     .version(pkgVersion(), "-v, --version", "print busabase-cli version")
     .exitOverride()
     .showHelpAfterError("(run `busabase-cli --help` for the full command list)")
-    .addHelpText("beforeAll", () => banner(resolveConfig(program.opts()).baseUrl));
+    .addHelpText("beforeAll", () => banner(resolveConfig(program.opts()).baseUrl))
+    .addHelpText(
+      "after",
+      () => `
+Connecting an AI agent for the first time? Have it read the official setup guide — it signs in
+through a browser link and installs the Busabase skills, no API key to paste:
+  ${new URL("/SETUP_SKILL.md", resolveConfig(program.opts()).baseUrl).toString()}`,
+    );
   addGlobalFlags(program);
 
   addGlobalFlags(program.command("health"))
