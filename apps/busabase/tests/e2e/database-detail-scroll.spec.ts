@@ -52,18 +52,23 @@ test("Table and Gallery can jump between numbered record pages", async ({
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   const pageResponses: Array<{ page: number; pageSize: number; count: number; total: number }> = [];
+  const responseReadErrors: string[] = [];
   page.on("response", async (response) => {
     if (!response.url().includes("/records/listPage") || !response.ok()) return;
-    const body = (await response.json()) as {
-      json?: { page: number; pageSize: number; records: unknown[]; total: number };
-    };
-    if (body.json?.records) {
-      pageResponses.push({
-        page: body.json.page,
-        pageSize: body.json.pageSize,
-        count: body.json.records.length,
-        total: body.json.total,
-      });
+    try {
+      const body = (await response.json()) as {
+        json?: { page: number; pageSize: number; records: unknown[]; total: number };
+      };
+      if (body.json?.records) {
+        pageResponses.push({
+          page: body.json.page,
+          pageSize: body.json.pageSize,
+          count: body.json.records.length,
+          total: body.json.total,
+        });
+      }
+    } catch (error) {
+      responseReadErrors.push(error instanceof Error ? error.message : String(error));
     }
   });
   const observations: Array<Record<string, unknown>> = [];
@@ -284,7 +289,13 @@ test("Table and Gallery can jump between numbered record pages", async ({
   expect(pageErrors).toEqual([]);
   await testInfo.attach("page-size-observations", {
     body: JSON.stringify(
-      { total: LONG_LIST_RECORD_COUNT, pageResponses, observations, pageErrors },
+      {
+        total: LONG_LIST_RECORD_COUNT,
+        pageResponses,
+        responseReadErrors,
+        observations,
+        pageErrors,
+      },
       null,
       2,
     ),
