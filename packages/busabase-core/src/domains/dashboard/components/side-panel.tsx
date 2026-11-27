@@ -8,7 +8,7 @@ import {
   ContextMenuTrigger,
 } from "kui/context-menu";
 import { cn } from "kui/utils";
-import { GripVertical, Maximize2, Minimize2, PanelRight, X } from "lucide-react";
+import { GripVertical, Maximize2, Minimize2, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
@@ -25,6 +25,7 @@ import {
 import { SidePanelAddTab } from "./side-panel-add-tab";
 import { SidePanelAgentPicker, SidePanelEmptyState } from "./side-panel-empty-state";
 import type { PinnableNode } from "./side-panel-sources";
+import { SidePanelVisibilityButton } from "./side-panel-visibility-button";
 
 const MIN_MAIN_CONTENT_WIDTH = 360;
 const EMPTY_TABS: SidePanelTab[] = [];
@@ -45,7 +46,6 @@ const EMPTY_TABS: SidePanelTab[] = [];
  * hides once the in-panel "Collapse" control takes over the same role.
  */
 export function SidePanelToggle() {
-  const messages = useCoreI18n();
   const isOpen = useSidePanelStore((state) => state.isOpen);
   const setOpen = useSidePanelStore((state) => state.setOpen);
 
@@ -53,18 +53,7 @@ export function SidePanelToggle() {
     return null;
   }
 
-  return (
-    <button
-      aria-label={messages.sidePanel.open}
-      aria-pressed={isOpen}
-      className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-      onClick={() => setOpen(true)}
-      title={messages.sidePanel.open}
-      type="button"
-    >
-      <PanelRight className="size-4" />
-    </button>
-  );
+  return <SidePanelVisibilityButton onOpenChange={setOpen} open={isOpen} />;
 }
 
 /**
@@ -431,16 +420,11 @@ function ScopedSidePanel({
           >
             {isMaximized ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
           </button>
-          <button
-            aria-label={messages.sidePanel.collapse}
-            aria-pressed={isOpen}
-            className="inline-flex items-center justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={() => setOpen(false)}
-            title={messages.sidePanel.collapse}
-            type="button"
-          >
-            <PanelRight className="size-4" />
-          </button>
+          <SidePanelVisibilityButton
+            className="size-auto p-1.5 hover:bg-accent"
+            onOpenChange={setOpen}
+            open={isOpen}
+          />
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">

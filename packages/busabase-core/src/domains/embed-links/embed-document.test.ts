@@ -1,93 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { renderEmbedDocument } from "./embed-document";
-import type { EmbedNodeDetailVO } from "./types";
+import { renderExpiredEmbedDocument, renderUnavailableEmbedDocument } from "./embed-document";
 
-describe("embed document rendering", () => {
-  it("escapes node and folder content without adding product chrome", () => {
-    const title = 'Client <script>alert("title")</script>';
-    const detail = {
-      type: "folder",
-      folder: {
-        node: { name: title },
-        children: [{ id: "node_1", name: "<img src=x onerror=alert(1)>", type: "doc" }],
-      },
-    } as unknown as EmbedNodeDetailVO;
+describe("embed status documents", () => {
+  it("answers in the visitor's language without product chrome", () => {
+    const html = renderUnavailableEmbedDocument("zh-CN,zh;q=0.9,en;q=0.8");
 
-    const html = renderEmbedDocument(detail, title);
-
-    expect(html).toContain("&lt;script&gt;");
-    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(html).toContain("内容不可用");
+    expect(html).toContain('<meta name="robots" content="noindex, nofollow">');
     expect(html).not.toContain("<script");
     expect(html).not.toContain("<header");
     expect(html).not.toContain('rel="icon"');
   });
 
-  it("renders Markdown while escaping raw HTML and dangerous protocols", () => {
-    const detail = {
-      type: "doc",
-      doc: {
-        node: { name: "Review" },
-        body: "# Result\n\n<script>alert(1)</script>\n\n[unsafe](javascript:alert(1))",
-      },
-    } as unknown as EmbedNodeDetailVO;
-
-    const html = renderEmbedDocument(detail, "Review");
-
-    expect(html).toContain("<h1>Result</h1>");
-    expect(html).toContain("&lt;script&gt;");
-    expect(html).not.toContain("<script");
-    expect(html).not.toContain('href="javascript:');
-  });
-
-  it("does not emit unsafe file links", () => {
-    const detail = {
-      type: "file",
-      file: {
-        node: { name: "Unsafe file" },
-        asset: {
-          fileName: "payload.txt",
-          mimeType: "text/plain",
-          size: 12,
-          contentHash: null,
-          url: "javascript:alert(1)",
-        },
-      },
-    } as unknown as EmbedNodeDetailVO;
-
-    const html = renderEmbedDocument(detail, "Unsafe file");
-
-    expect(html).not.toContain('href="javascript:');
-    expect(html).toContain("<span>Open file</span>");
-  });
-
-  it("renders an interactive PreviewFile surface for capability-scoped Drive embeds", () => {
-    const detail = {
-      type: "drive",
-      drive: {
-        node: { id: "nod_drive", name: "Shared files" },
-        entryFile: "README.md",
-        files: [{ path: "README.md" }, { path: '</script><img src=x onerror="alert(1)">' }],
-      },
-      entryFile: {
-        path: "README.md",
-        encoding: "utf8",
-        content: "# Shared files",
-      },
-    } as unknown as EmbedNodeDetailVO;
-
-    const html = renderEmbedDocument(detail, "Shared files", {
-      embedCapability: "emb_abcdefghijklmnop.abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
-      rpcBasePath: "/api/rpc/core",
-    });
-
-    expect(html).toContain('data-file-path="README.md"');
-    expect(html).toContain("/api/rpc/core");
-    expect(html).toContain("/fileTrees/preparePreview");
-    expect(html).toContain("x-busabase-embed-capability");
-    expect(html).toContain("Previewed by PreviewFile");
-    expect(html).toContain('sandbox", "allow-same-origin allow-scripts allow-popups allow-forms"');
-    expect(html).toContain("Use built-in preview");
-    expect(html).toContain("&lt;/script&gt;&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
-    expect(html).not.toContain('</script><img src=x onerror="alert(1)">');
+  it("falls back to English and keeps expired distinct from unavailable", () => {
+    expect(renderExpiredEmbedDocument("xx-YY")).toContain("Link expired");
+    expect(renderUnavailableEmbedDocument(null)).toContain("Content unavailable");
   });
 });

@@ -183,11 +183,15 @@ describe("anonymous allowlist (unit)", () => {
 describe("embed allowlist (unit)", () => {
   it("allows exactly the embed read surface", () => {
     expect(anonymousAllowlistSnapshot().embed).toEqual([
+      // Text File previews in the embedded Node Detail view; usage-backed ACL.
+      "assets.readTextLines",
       "bases.get",
       "bases.list",
       "bases.listViews",
       "changeRequests.get",
       "fileTrees.get",
+      // Paging a large Drive/Skill by folder; lists only that node's mounts.
+      "fileTrees.listEntries",
       "fileTrees.preparePreview",
       "fileTrees.previewConfig",
       "fileTrees.readFile",

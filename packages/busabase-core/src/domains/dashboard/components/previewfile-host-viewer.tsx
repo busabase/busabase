@@ -32,9 +32,11 @@ export const createPreviewFileHostViewer = ({
       canPreview(file, { officeConversion, model3d: true })
     );
   },
-  render: ({ name, mimeType, url, size }) => (
+  render: ({ name, mimeType, url, size }, options) => (
     <LazyEmbeddedFileViewer
       converter={converter}
+      fitToContainer={options?.fitToContainer}
+      pdfScrollMode={options?.pdfScrollMode}
       fileName={name}
       fileSize={size}
       locale={locale}

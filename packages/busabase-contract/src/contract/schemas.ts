@@ -67,6 +67,7 @@ export interface NodeOutput {
   position: number;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string | null;
   baseId: string | null;
   children: NodeOutput[];
   /**
@@ -125,6 +126,7 @@ const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
     position: z.number(),
     createdAt: z.string(),
     updatedAt: z.string(),
+    archivedAt: z.string().nullable().optional(),
     baseId: z.string().nullable(),
     children: z.array(nodeSchema),
     hasChildren: z.boolean().optional(),
@@ -151,7 +153,8 @@ const nodePrincipalSchema = z.object({
 // Public link-sharing VO for a node. This is the orthogonal axis to node
 // principals: it decides whether an ANONYMOUS visitor may reach the node over
 // its own canonical URL, and what they may do there. SECURITY: this VO must
-// NEVER carry the stored password hash — only the derived `hasPassword` flag.
+// NEVER carry the stored password hash or its ciphertext — only the derived
+// `hasPassword` flag, plus the plaintext `password` for a node manager.
 //
 // Deliberately carries no `url`. Sharing is a property of the *node*; the
 // origin a reader should use is a property of the *request*, which this layer
@@ -160,20 +163,43 @@ const nodePrincipalSchema = z.object({
 // `host`) would confidently emit `http://localhost:15419/...` to someone
 // sitting on busabase.com. A link that looks right and isn't is worse than no
 // link, so the caller builds it: `nodeWebUrl()` / `Busabase.nodeUrl()`.
+// Length bounds for a share password, shared by the `nodes.share.set` input,
+// the logic layer (which is also called without going through the contract)
+// and the share dialog's inline validation, so the three cannot disagree.
+// Four is the floor because an empty or one-character password would lock the
+// link behind something the unlock page could not even submit, or guess in one
+// try; 64 caps what anyone can be expected to type or paste into that page.
+export const SHARE_PASSWORD_MIN_LENGTH = 4;
+export const SHARE_PASSWORD_MAX_LENGTH = 64;
+
 const nodeShareSchema = z.object({
   nodeId: z.string(),
   scope: z.enum(["none", "public"]),
   capability: z.enum(["read", "submit"]),
   // Derived from `passwordHash != null` — the hash itself is never serialized.
   hasPassword: z.boolean(),
+  // The share password in plaintext, so whoever manages the node can send the
+  // link and its password together later (the hash alone could never be shown
+  // again). Returned ONLY to a caller holding `manage` on the node — the same
+  // level that may set it. `null` when there is no password, when the caller
+  // is below `manage`, and when a password exists but cannot be shown: it was
+  // set before passwords were stored reversibly, or the server's encryption
+  // key no longer opens it. `hasPassword` stays the answer to "is the link
+  // locked?" in every one of those cases.
+  password: z.string().nullable(),
   expiresAt: z.string().nullable(),
   updatedAt: z.string(),
 });
 
+export type NodeShareVO = z.infer<typeof nodeShareSchema>;
+
 // One row of the SPACE-LEVEL "what is publicly shared right now" listing
-// (`nodes.share.list`). Same security rule as `nodeShareSchema` above —
-// `hasPassword` only, never the stored hash — but a different question, which
-// is why it is a different VO rather than `nodeShareSchema` with extra fields:
+// (`nodes.share.list`). Stricter than `nodeShareSchema` above: `hasPassword`
+// only — never the stored hash, and never the plaintext `password` either. A
+// listing of every grant in the space is the wrong place to hand out the keys
+// to all of them at once; a manager who needs one reads it from that node's
+// own `nodes.share.get`. It also answers a different question, which is why it
+// is a different VO rather than `nodeShareSchema` with extra fields:
 //
 //   * `nodeShareSchema` answers "what are THIS node's settings", read by a
 //     dialog that already has the node in hand, so it needs no node identity

@@ -583,3 +583,86 @@ describe("remote Vault environment snapshots", () => {
     expect(remoteInputs).toEqual([]);
   });
 });
+
+describe("finite agent preview snapshots", () => {
+  it("separates installed from ready and clears a dead preview URL", async () => {
+    expect(await mod.startRunSession(INPUT)).toMatchObject({
+      status: "installing",
+      engine: "local",
+      previewUrl: null,
+      logs: [],
+    });
+    emit?.({ type: "installed" });
+    await vi.waitFor(async () =>
+      expect((await mod.getRunSessionState(INPUT.nodeId)).status).toBe("starting"),
+    );
+    emit?.({ type: "log", line: "listening\n" });
+    emit?.({ type: "ready", previewUrl: "/api/airapp-preview/node-1/" });
+    await vi.waitFor(async () =>
+      expect(await mod.getRunSessionState(INPUT.nodeId)).toMatchObject({
+        status: "running",
+        previewUrl: "/api/airapp-preview/node-1/",
+        logs: ["listening\n"],
+      }),
+    );
+    emit?.({ type: "exit", code: 2 });
+    await vi.waitFor(async () =>
+      expect(await mod.getRunSessionState(INPUT.nodeId)).toMatchObject({
+        status: "failed",
+        previewUrl: null,
+        exitCode: 2,
+        error: "Preview process exited with code 2.",
+      }),
+    );
+  });
+
+  it("starts one process for concurrent starts and preserves it when the caller returns", async () => {
+    const states = await Promise.all(Array.from({ length: 8 }, () => mod.startRunSession(INPUT)));
+    expect(states.every((state) => state.engine === "local")).toBe(true);
+    expect(runs).toBe(1);
+    expect(aborted).toBe(false);
+    expect(mod.listRunSessions()).toHaveLength(1);
+    await expect(mod.startRunSession({ ...INPUT, engine: "remote" })).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    expect(runs).toBe(1);
+    expect(await mod.stopRunSession(INPUT.nodeId)).toEqual({ stopped: true });
+    expect(await mod.getRunSessionState(INPUT.nodeId)).toEqual({
+      status: "stopped",
+      engine: null,
+      previewUrl: null,
+      logs: [],
+      error: null,
+      exitCode: null,
+    });
+  });
+
+  it("reads only the owner's output and never starts a process when asking for state", async () => {
+    await mod.startRunSession(INPUT);
+    emit?.({ type: "error", message: "private install error" });
+    await vi.waitFor(async () =>
+      expect((await mod.getRunSessionState(INPUT.nodeId)).error).toBe("private install error"),
+    );
+    currentOwner = "user-2";
+    expect(await mod.getRunSessionState(INPUT.nodeId)).toMatchObject({
+      status: "stopped",
+      error: null,
+      logs: [],
+    });
+    expect(await mod.stopRunSession(INPUT.nodeId)).toEqual({ stopped: false });
+    expect(runs).toBe(1);
+    currentOwner = "user-1";
+    expect((await mod.getRunSessionState(INPUT.nodeId)).error).toBe("private install error");
+  });
+
+  it("retains bounded log output, including the latest lines", async () => {
+    await mod.startRunSession(INPUT);
+    for (let index = 0; index < 2100; index += 1) emit?.({ type: "log", line: `line ${index}\n` });
+    await vi.waitFor(async () =>
+      expect((await mod.getRunSessionState(INPUT.nodeId)).logs.at(-1)).toBe("line 2099\n"),
+    );
+    const state = await mod.getRunSessionState(INPUT.nodeId);
+    expect(state.logs.length).toBeLessThanOrEqual(2000);
+    expect(state.logs).not.toContain("line 0\n");
+  });
+});

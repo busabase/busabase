@@ -24,11 +24,14 @@ export type LiveInvalidationTarget =
   | "nodes"
   | "records"
   | "recordDetail"
+  | "recordHistory"
   | "recordsCount"
   | "recordsPage";
 
 export interface LiveInvalidationBatch {
   baseIds: ReadonlySet<string>;
+  /** Undefined means the event did not identify affected records. */
+  historyRecordIds?: ReadonlySet<string>;
   targets: ReadonlySet<LiveInvalidationTarget>;
 }
 
@@ -65,12 +68,14 @@ export const classifyLiveInvalidation = (event: BusabaseLiveEvent): LiveInvalida
       targets.add("archivedBases");
       targets.add("records");
       targets.add("recordDetail");
+      targets.add("recordHistory");
       targets.add("recordsPage");
       targets.add("recordsCount");
     }
     return { baseIds, targets };
   }
 
+  if (event.kind.startsWith("change_request.")) targets.add("recordHistory");
   targets.add("changeRequests");
   targets.add("changeRequestsPaged");
   targets.add("inboxSnapshot");
@@ -120,7 +125,11 @@ export const classifyLiveInvalidation = (event: BusabaseLiveEvent): LiveInvalida
     }
   }
 
-  return { baseIds, targets };
+  return {
+    baseIds,
+    targets,
+    ...(event.recordIds.length ? { historyRecordIds: new Set(event.recordIds) } : {}),
+  };
 };
 
 export interface LiveInvalidationBatcher {
@@ -136,6 +145,8 @@ export const createLiveInvalidationBatcher = (
 ): LiveInvalidationBatcher => {
   const pendingTargets = new Set<LiveInvalidationTarget>();
   const pendingBaseIds = new Set<string>();
+  const historyRecordIds = new Set<string>();
+  let unknownHistoryScope = false;
   const pendingChangeRequests = new Map<
     string,
     { hasPendingReview: boolean; hasPersistedEvent: boolean }
@@ -151,7 +162,9 @@ export const createLiveInvalidationBatcher = (
     const needsPendingReviewFallback = [...pendingChangeRequests.values()].some(
       ({ hasPendingReview, hasPersistedEvent }) => hasPendingReview && !hasPersistedEvent,
     );
-    if (needsPendingReviewFallback && !pendingTargets.has("changeRequests")) {
+    if (needsPendingReviewFallback) {
+      pendingTargets.add("recordHistory");
+      unknownHistoryScope = true;
       pendingTargets.add("changeRequests");
       pendingTargets.add("changeRequestsPaged");
       pendingTargets.add("inboxSnapshot");
@@ -162,9 +175,12 @@ export const createLiveInvalidationBatcher = (
     const batch = {
       targets: new Set(pendingTargets),
       baseIds: new Set(pendingBaseIds),
+      ...(!unknownHistoryScope ? { historyRecordIds: new Set(historyRecordIds) } : {}),
     };
     pendingTargets.clear();
     pendingBaseIds.clear();
+    historyRecordIds.clear();
+    unknownHistoryScope = false;
     flush(batch, options);
   };
 
@@ -175,6 +191,8 @@ export const createLiveInvalidationBatcher = (
       pendingTargets.clear();
       pendingBaseIds.clear();
       pendingChangeRequests.clear();
+      historyRecordIds.clear();
+      unknownHistoryScope = false;
     },
     flush(options) {
       flushPending(options);
@@ -193,6 +211,10 @@ export const createLiveInvalidationBatcher = (
           state.hasPersistedEvent = true;
         }
         pendingChangeRequests.set(changeRequestId, state);
+      }
+      if (batch.targets.has("recordHistory")) {
+        if (!batch.historyRecordIds?.size) unknownHistoryScope = true;
+        else for (const recordId of batch.historyRecordIds) historyRecordIds.add(recordId);
       }
       for (const target of batch.targets) pendingTargets.add(target);
       for (const baseId of batch.baseIds) pendingBaseIds.add(baseId);

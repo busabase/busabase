@@ -16,7 +16,8 @@ import { SidebarTrigger } from "kui/sidebar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
 import { Info, MoreHorizontal } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { Fragment, type ReactNode, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import { useSearch } from "wouter";
 import { useCoreI18n } from "../../../i18n";
 import type { BusabaseBreadcrumbItem } from "../helpers/view-types";
 import { useNodeLocator } from "../hooks/use-copy-locator";
@@ -201,6 +202,21 @@ export function TopbarNodeInfoButton() {
   const messages = useCoreI18n();
   const info = useTopbarNodeInfoStore((state) => state.info);
   const [open, setOpen] = useState(false);
+  const search = useSearch();
+  const [siteEnvironment, setSiteEnvironment] = useState(false);
+  const openedEnvironmentFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (info?.nodeType !== "airapp" || !new URLSearchParams(search).has("siteEnvironment")) return;
+    if (openedEnvironmentFor.current === info.nodeId) return;
+    openedEnvironmentFor.current = info.nodeId;
+    setSiteEnvironment(true);
+    setOpen(true);
+    // The new tab has consumed its entry point. Closing Settings must not reopen it.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("siteEnvironment");
+    window.history.replaceState(window.history.state, "", url);
+  }, [info?.nodeId, info?.nodeType, search]);
 
   if (!info) {
     return null;
@@ -216,7 +232,10 @@ export function TopbarNodeInfoButton() {
             <button
               aria-label={messages.nodeDetail.details}
               className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:hidden"
-              onClick={() => setOpen(true)}
+              onClick={() => {
+                setSiteEnvironment(false);
+                setOpen(true);
+              }}
               type="button"
             >
               <Info aria-hidden="true" className="size-3.5" />
@@ -235,7 +254,8 @@ export function TopbarNodeInfoButton() {
         nodeType={info.nodeType}
       />
       <NodeSettingsDialog
-        initialTab="info"
+        initialSiteEnvironment={siteEnvironment}
+        initialTab={siteEnvironment ? "environment" : "info"}
         nodeId={info.nodeId}
         nodeName={info.nodeName}
         nodeSlug={info.nodeSlug}
@@ -252,9 +272,9 @@ export function TopbarNodeInfoButton() {
  * Copy this node's locator (target line + connection check) for an agent —
  * Notion's "copy link" icon, but producing something an agent can act on.
  * Revealed with the Info marker's row on hover/focus so the resting topbar is
- * unchanged; always shown where there is no hover (touch). Below `sm` the
- * compact header omits this marker so the node's name keeps the room; the
- * existing node settings and agent-prompt actions remain available.
+ * unchanged; always shown where there is no hover (touch). Below `sm` both
+ * this and the Info marker move into the node's "•••" menu
+ * (`NodeActionsMenu`), so the node's name keeps the room.
  */
 function TopbarNodeLocatorButton({
   nodeId,

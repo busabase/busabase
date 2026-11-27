@@ -3,8 +3,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BaseFieldVO } from "busabase-contract/types";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
-import { Search, X } from "lucide-react";
-import { useContext, useEffect, useState } from "react";
+import { Search, UserRoundX, X } from "lucide-react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { getAppUserId } from "../../base/field-types";
 import { formatFullTime, formatRelativeTime } from "../helpers/format";
@@ -162,11 +162,12 @@ export function AppUserFieldValue({
   if (!data) {
     return (
       <span
-        className={`${chipClassName} border-dashed text-muted-foreground ${className}`}
+        className={`inline-flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded-md bg-muted/60 px-2 text-muted-foreground text-xs ${className}`}
         data-app-user-id={id}
         data-app-user-state="deleted"
-        title={`${messages.appUserField.deleted} · ${id}`}
+        title={messages.appUserField.deleted}
       >
+        <UserRoundX aria-hidden className="size-3.5 shrink-0 opacity-70" />
         <span className="truncate">{messages.appUserField.deleted}</span>
       </span>
     );
@@ -300,6 +301,7 @@ const SEARCH_DEBOUNCE_MS = 250;
  */
 export function AppUserFieldEditor({
   ariaDescribedBy,
+  focusOnMount = false,
   field,
   fieldName,
   inputId,
@@ -307,6 +309,7 @@ export function AppUserFieldEditor({
   value,
 }: {
   ariaDescribedBy?: string;
+  focusOnMount?: boolean;
   field: Pick<BaseFieldVO, "baseId">;
   fieldName: string;
   inputId: string;
@@ -317,7 +320,14 @@ export function AppUserFieldEditor({
   const copy = messages.appUserField;
   const host = useContext(AppUserFieldHostContext);
   const queryClient = useQueryClient();
+  const focusInput = useCallback(
+    (input: HTMLInputElement | null) => {
+      if (focusOnMount) input?.focus();
+    },
+    [focusOnMount],
+  );
   const id = getAppUserId(value);
+  const editorRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
 
@@ -334,6 +344,16 @@ export function AppUserFieldEditor({
     staleTime: 30_000,
   });
 
+  useEffect(() => {
+    if (!focusOnMount || !host || search.isPending) return;
+    if (!search.isError && search.data?.canPick) return;
+    // The grid suppresses the popover's default focus so the search can take
+    // it. Keep-or-clear and failure states have no search input to do that.
+    const editor = editorRef.current;
+    const clear = id ? editor?.querySelector<HTMLButtonElement>("[data-app-user-clear]") : null;
+    (clear ?? editor)?.focus();
+  }, [focusOnMount, host, id, search.data?.canPick, search.isError, search.isPending]);
+
   if (!host) {
     return (
       <input
@@ -341,6 +361,7 @@ export function AppUserFieldEditor({
         aria-label={fieldName}
         className="h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 font-mono text-sm outline-none transition-colors focus:border-primary"
         id={inputId}
+        ref={focusInput}
         onChange={(event) => onChange(event.target.value)}
         placeholder={copy.idPlaceholder}
         title={copy.cloudOnly}
@@ -349,17 +370,26 @@ export function AppUserFieldEditor({
     );
   }
 
+  // The last query's options must not remain selectable during debounce or a
+  // refresh: a fast Enter in the grid would assign that query's first person.
+  const searching = query.trim() !== debounced || search.isFetching;
   const choose = (user: AppUserFieldUser) => {
+    if (searching || search.isError || !search.data?.canPick) return;
     // The picker already knows who this is — show it at once, no extra lookup.
     queryClient.setQueryData(appUserQueryKey(host, field.baseId, user.id), user);
     onChange(user.id);
     setQuery("");
   };
   const canPick = search.data?.canPick ?? false;
-  const users = search.data?.users ?? [];
+  const users = searching ? [] : (search.data?.users ?? []);
 
   return (
-    <div className="grid min-w-0 gap-2" data-app-user-editor>
+    <div
+      className="grid min-w-0 gap-2"
+      data-app-user-editor
+      ref={editorRef}
+      tabIndex={focusOnMount ? -1 : undefined}
+    >
       <div className="flex min-h-9 min-w-0 items-center gap-2">
         <div className="min-w-0 flex-1">
           <AppUserFieldValue field={field} value={id} />
@@ -396,6 +426,7 @@ export function AppUserFieldEditor({
               aria-label={`${fieldName}: ${copy.search}`}
               className="h-9 w-full rounded-md border border-border/70 bg-card py-1.5 pr-2.5 pl-8 text-sm outline-none transition-colors focus:border-primary"
               id={inputId}
+              ref={focusInput}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={copy.search}
               type="search"
@@ -403,10 +434,15 @@ export function AppUserFieldEditor({
             />
           </label>
           <div
+            aria-busy={searching}
             className="max-h-56 overflow-y-auto rounded-md border border-border/60"
             role="listbox"
           >
-            {users.length === 0 ? (
+            {searching ? (
+              <div className="px-2.5 py-2 text-muted-foreground text-xs" role="status">
+                {messages.common.loading}
+              </div>
+            ) : users.length === 0 ? (
               <div className="px-2.5 py-2 text-muted-foreground text-xs">
                 {debounced ? copy.noMatches : copy.noUsers}
               </div>

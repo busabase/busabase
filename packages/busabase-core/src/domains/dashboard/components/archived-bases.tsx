@@ -3,7 +3,7 @@
 import type { BaseVO, NodeVO } from "busabase-contract/types";
 import { Archive, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { fmt, useCoreI18n } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { ConfirmActionDialog, EmptyState } from "./primitives";
 
 /** A row in the Trash: an archived base or an archived folder/doc/skill node. */
@@ -11,6 +11,7 @@ function TrashRow({
   title,
   description,
   meta,
+  archivedAt,
   restoring,
   error,
   onRestore,
@@ -19,24 +20,39 @@ function TrashRow({
   title: string;
   description?: string;
   meta: string;
+  archivedAt?: string | null;
   restoring: boolean;
   error?: string;
   onRestore: () => void;
   onPurge?: () => void;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
+  const date = archivedAt ? new Date(archivedAt) : null;
 
   return (
-    <div className="flex items-center justify-between rounded-lg border border-border/50 bg-muted/20 px-4 py-3">
+    // Buttons drop under the name on a phone; beside it they squeezed the name
+    // into one or two characters per line.
+    <div className="flex flex-col gap-3 rounded-lg border border-border/50 bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         <div className="font-medium text-sm">{title}</div>
         {description ? (
           <div className="mt-0.5 truncate text-muted-foreground text-xs">{description}</div>
         ) : null}
         <div className="mt-0.5 font-mono text-muted-foreground text-xs">{meta}</div>
+        {date && !Number.isNaN(date.getTime()) ? (
+          <div className="mt-0.5 text-muted-foreground text-xs">
+            {messages.trash.deletedAt}:{" "}
+            <time dateTime={archivedAt ?? undefined}>
+              {new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(
+                date,
+              )}
+            </time>
+          </div>
+        ) : null}
         {error ? <div className="mt-1 text-rejected-strong text-xs">{error}</div> : null}
       </div>
-      <div className="ml-4 flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2 sm:ml-4">
         {onPurge ? (
           <button
             className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-card px-3 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-rejected/17 hover:text-rejected-strong disabled:opacity-50"
@@ -143,82 +159,78 @@ export function ArchivedBasesView({
       </div>
 
       <section className="px-6 py-4">
-        <h2 className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-          {messages.trash.bases}
-        </h2>
-        {archivedBases.length === 0 ? (
+        {archivedBases.length === 0 && (!onRestoreNode || archivedNodes.length === 0) ? (
           <EmptyState
-            title={messages.trash.noArchivedBasesTitle}
-            body={messages.trash.noArchivedBasesBody}
+            title={messages.trash.noArchivedItemsTitle}
+            body={messages.trash.noArchivedItemsBody}
           />
         ) : (
           <div className="space-y-2">
-            {archivedBases.map((base) => (
-              <TrashRow
-                description={base.description || undefined}
-                error={errors[base.id]}
-                key={base.id}
-                meta={base.slug}
-                onPurge={
-                  onPurgeBase
-                    ? () =>
-                        setConfirmPurge({
-                          id: base.id,
-                          name: base.name,
-                          run: () => onPurgeBase(base),
-                        })
-                    : undefined
-                }
-                onRestore={() =>
-                  runRestore(base.id, () => onRestoreBase(base), messages.trash.failedRestoreBase)
-                }
-                restoring={restoringId === base.id}
-                title={base.name}
-              />
-            ))}
+            {[
+              ...archivedBases.map((base) => ({ kind: "base" as const, item: base })),
+              ...(onRestoreNode
+                ? archivedNodes.map((node) => ({ kind: "node" as const, item: node }))
+                : []),
+            ]
+              .sort((a, b) => {
+                const timestamp = (value?: string | null) => {
+                  const result = value ? Date.parse(value) : NaN;
+                  return Number.isFinite(result) ? result : 0;
+                };
+                return timestamp(b.item.archivedAt) - timestamp(a.item.archivedAt);
+              })
+              .map((entry) => {
+                const item = entry.item;
+                const isBase = entry.kind === "base";
+                return (
+                  <TrashRow
+                    key={`${entry.kind}:${item.id}`}
+                    title={item.name}
+                    description={item.description || undefined}
+                    meta={isBase ? entry.item.slug : `${entry.item.type} · ${entry.item.slug}`}
+                    archivedAt={item.archivedAt}
+                    error={errors[item.id]}
+                    restoring={restoringId === item.id}
+                    onRestore={() =>
+                      entry.kind === "base"
+                        ? runRestore(
+                            item.id,
+                            () => onRestoreBase(entry.item),
+                            messages.trash.failedRestoreBase,
+                          )
+                        : runRestore(
+                            item.id,
+                            async () => {
+                              if (onRestoreNode) await onRestoreNode(entry.item);
+                            },
+                            messages.trash.failedRestoreItem,
+                          )
+                    }
+                    onPurge={
+                      entry.kind === "base"
+                        ? onPurgeBase
+                          ? () =>
+                              setConfirmPurge({
+                                id: item.id,
+                                name: item.name,
+                                run: () => onPurgeBase(entry.item),
+                              })
+                          : undefined
+                        : onPurgeNode
+                          ? () =>
+                              setConfirmPurge({
+                                id: item.id,
+                                name: item.name,
+                                run: () => onPurgeNode(entry.item),
+                              })
+                          : undefined
+                    }
+                  />
+                );
+              })}
           </div>
         )}
       </section>
-
-      {onRestoreNode ? (
-        <section className="px-6 pb-6">
-          <h2 className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-            {messages.trash.foldersDocsSkills}
-          </h2>
-          {archivedNodes.length === 0 ? (
-            <EmptyState
-              title={messages.trash.noArchivedItemsTitle}
-              body={messages.trash.noArchivedItemsBody}
-            />
-          ) : (
-            <div className="space-y-2">
-              {archivedNodes.map((node) => (
-                <TrashRow
-                  description={node.description || undefined}
-                  error={errors[node.id]}
-                  key={node.id}
-                  meta={`${node.type} · ${node.slug}`}
-                  onPurge={
-                    onPurgeNode
-                      ? () =>
-                          setConfirmPurge({
-                            id: node.id,
-                            name: node.name,
-                            run: () => onPurgeNode(node),
-                          })
-                      : undefined
-                  }
-                  onRestore={() =>
-                    runRestore(node.id, () => onRestoreNode(node), messages.trash.failedRestoreItem)
-                  }
-                  restoring={restoringId === node.id}
-                  title={node.name}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-      ) : null}
 
       <ConfirmActionDialog
         body={

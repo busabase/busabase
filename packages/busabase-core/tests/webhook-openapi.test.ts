@@ -319,7 +319,12 @@ describe("Webhook automation domain — OpenAPI (/api/v1) route round-trip", () 
     expect(hit).toBeDefined();
     expect(hit?.signature).toBeTruthy();
 
-    const deliveries = await ok("GET", `/webhooks/${rule.id}/deliveries?limit=10`);
-    expect(deliveries.some((d: any) => d.status === "success")).toBe(true);
+    // Receiving the request precedes the sender's response handling and delivery-row insert.
+    expect(
+      await waitFor(async () => {
+        const deliveries = await ok("GET", `/webhooks/${rule.id}/deliveries?limit=10`);
+        return deliveries.some((d: any) => d.status === "success");
+      }, 2000),
+    ).toBe(true);
   });
 });

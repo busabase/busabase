@@ -180,6 +180,12 @@ describe("business-table completeness with real PGLite", () => {
       expect(targetRows.get(table)?.[0].spaceId).toBe(target);
     }
     expect(targetRows.get("nodeShares")?.[0].passwordHash).toBe(passwordHash);
+    expect(targetRows.get("nodeShares")?.[0].passwordCiphertext).toEqual(
+      sourceRows.get("nodeShares")?.[0].passwordCiphertext,
+    );
+    expect(targetRows.get("nodeShares")?.[0].passwordCiphertext).toMatchObject({
+      encoding: "encrypted",
+    });
     expect(targetRows.get("agentSessionEvents")?.[0]).not.toHaveProperty("spaceId");
     expect(targetRows.get("commentMentions")?.[0]).not.toHaveProperty("spaceId");
     expect(targetRows.get("routerConnections")?.[0]).not.toHaveProperty("spaceId");

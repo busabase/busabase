@@ -3,13 +3,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import { useEffect } from "react";
+import { useEffect, useImperativeHandle, useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
-import type { DocOutlineItem } from "../../doc/components";
+import type { DocEditorProps } from "../../doc/components";
 import { useTopbarNodeActionsStore } from "../store/topbar-node-actions-store";
 
 const navigate = vi.fn();
+const editorSnapshotReads = vi.hoisted(() => vi.fn());
+const deferEditorChange = vi.hoisted(() => ({ value: false }));
 vi.mock("wouter", () => ({
   useLocation: () => ["/doc/handbook", navigate],
   useSearch: () => "",
@@ -18,17 +20,14 @@ vi.mock("../../doc/components", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../doc/components")>();
   return {
     ...actual,
-    DocEditor: ({
-      content,
-      editable,
-      onChange,
-      onOutlineChange,
-    }: {
-      content: string;
-      editable: boolean;
-      onChange?: (next: string) => void;
-      onOutlineChange?: (items: DocOutlineItem[]) => void;
-    }) => {
+    DocEditor: ({ content, editable, editorRef, onChange, onOutlineChange }: DocEditorProps) => {
+      const liveContent = useRef(content);
+      useImperativeHandle(editorRef, () => ({
+        getMarkdown: () => {
+          editorSnapshotReads();
+          return liveContent.current;
+        },
+      }));
       useEffect(() => {
         onOutlineChange?.(
           editable
@@ -44,9 +43,12 @@ vi.mock("../../doc/components", async (importOriginal) => {
       return (
         <textarea
           aria-label="Document body"
-          onChange={(event) => onChange?.(event.target.value)}
+          defaultValue={content}
+          onChange={(event) => {
+            liveContent.current = event.target.value;
+            if (!deferEditorChange.value) onChange(event.target.value);
+          }}
           readOnly={!editable}
-          value={content}
         />
       );
     },
@@ -138,9 +140,46 @@ afterEach(() => {
   useTopbarNodeActionsStore.getState().setActions(null);
   updateContentMutation.mockReset();
   navigate.mockReset();
+  editorSnapshotReads.mockReset();
+  deferEditorChange.value = false;
 });
 
 describe("DocDetailView editing actions", () => {
+  it.each([true, false])(
+    "saves live editor content before onChange notifies React (autoMerge:%s)",
+    async (autoMerge) => {
+      deferEditorChange.value = true;
+      updateContentMutation.mockResolvedValue({ id: "cr_snapshot" });
+      renderDoc();
+      const topbar = screen.getByTestId("topbar");
+      const body = screen.getByTestId("doc-body");
+      await enterEditModeAndChangeBody(topbar, body);
+      fireEvent.change(within(body).getByRole("textbox", { name: "Document body" }), {
+        target: { value: "Last keystroke before saving" },
+      });
+      // Live serialization is a save-time read, never an extra per-keystroke cost.
+      expect(editorSnapshotReads).not.toHaveBeenCalled();
+      if (autoMerge) {
+        fireEvent.click(within(topbar).getByRole("button", { name: "Save Now" }));
+      } else {
+        fireEvent.pointerDown(within(topbar).getByRole("button", { name: "More submit options" }), {
+          button: 0,
+        });
+        await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy());
+        fireEvent.click(screen.getByRole("menuitem", { name: "Save as Change Request" }));
+      }
+      await waitFor(() => expect(updateContentMutation).toHaveBeenCalledTimes(1));
+      expect(updateContentMutation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: { kind: "doc", body: "Last keystroke before saving" },
+          autoMerge,
+        }),
+        expect.anything(),
+      );
+      expect(editorSnapshotReads).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("replaces read actions with cancel and save controls in the topbar", async () => {
     renderDoc();
     const topbar = screen.getByTestId("topbar");

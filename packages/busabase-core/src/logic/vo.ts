@@ -20,14 +20,18 @@ import type {
   UserRefVO,
   ViewConfigVO,
   ViewFilterConditionVO,
+  ViewGroupByVO,
   ViewSortVO,
+  ViewSummaryFunction,
   ViewType,
   ViewVO,
 } from "busabase-contract/types";
 import {
   isGridRowHeight,
+  isViewSummaryFunction,
   VIEW_FIELD_MAX_WIDTH,
   VIEW_FIELD_MIN_WIDTH,
+  VIEW_GROUP_MAX_LEVELS,
 } from "busabase-contract/types";
 import { iStringFromText } from "openlib/i18n/i-string";
 import type {
@@ -156,6 +160,7 @@ export const toBaseVO = (base: BasePO, fields: BaseFieldPO[]): BaseVO => ({
   description: base.description,
   reviewPolicy: base.reviewPolicy,
   createdAt: base.createdAt.toISOString(),
+  archivedAt: toIso(base.archivedAt),
   fields: fields.sort((a, b) => a.position - b.position).map(toFieldVO),
 });
 
@@ -182,6 +187,42 @@ const normalizeFieldWidths = (value: unknown): Record<string, number> | undefine
   return Object.keys(widths).length > 0 ? widths : undefined;
 };
 
+/**
+ * Stored grouping, minus anything malformed. Whether the named field still
+ * exists and is still groupable is the reader's call (the Base can change after
+ * the view was saved), so only the shape is checked here.
+ */
+const normalizeGroupBy = (value: unknown): ViewGroupByVO[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const levels = value.flatMap((entry): ViewGroupByVO[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const { fieldSlug, fieldId, direction } = entry as Record<string, unknown>;
+    if (typeof fieldSlug !== "string" || !fieldSlug) return [];
+    return [
+      {
+        fieldSlug,
+        ...(typeof fieldId === "string" && fieldId ? { fieldId } : {}),
+        direction: direction === "desc" ? "desc" : "asc",
+      },
+    ];
+  });
+  return levels.length > 0 ? levels.slice(0, VIEW_GROUP_MAX_LEVELS) : undefined;
+};
+
+/** Stored footer summaries, minus unknown functions. Field-type fit is checked by readers. */
+const normalizeFieldSummaries = (
+  value: unknown,
+): Record<string, ViewSummaryFunction> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const summaries = Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, ViewSummaryFunction] =>
+        entry[0].length > 0 && isViewSummaryFunction(entry[1]),
+    ),
+  );
+  return Object.keys(summaries).length > 0 ? summaries : undefined;
+};
+
 export const normalizeViewConfig = (config: ViewPO["config"] | ViewConfigVO): ViewConfigVO => ({
   filters: (config.filters ?? []) as ViewFilterConditionVO[],
   filterConjunction: (config as ViewConfigVO).filterConjunction,
@@ -194,6 +235,8 @@ export const normalizeViewConfig = (config: ViewPO["config"] | ViewConfigVO): Vi
   rowHeight: isGridRowHeight((config as ViewConfigVO).rowHeight)
     ? (config as ViewConfigVO).rowHeight
     : undefined,
+  groupBy: normalizeGroupBy((config as ViewConfigVO).groupBy),
+  fieldSummaries: normalizeFieldSummaries((config as ViewConfigVO).fieldSummaries),
   // Per-view-type presentation config — passed through untouched for the types
   // that don't use a given field (a table ignores coverFieldSlug, etc.).
   // `undefined` means Auto (first attachment field), while `null` explicitly
@@ -262,6 +305,7 @@ export const toNodeVO = (
   position: node.position,
   createdAt: node.createdAt.toISOString(),
   updatedAt: node.updatedAt.toISOString(),
+  archivedAt: toIso(node.archivedAt),
   baseId,
   children,
   hasChildren,

@@ -1,4 +1,5 @@
 import type { CoreI18nMessages } from "./messages";
+import { siteEnvironmentMessages } from "./site-environment";
 
 // Simplified Chinese translations for the shared dashboard catalog. Must mirror
 // the shape of `coreMessagesEn`; the `CoreI18nMessages` type enforces it.
@@ -483,10 +484,16 @@ export const dashboardZhCN: CoreI18nMessages = {
     requireSignInLabel: "需登录后才能提交",
     requireSignInHint: "任何拿到链接的人都能打开表单，但只有登录后的访客才能提交。",
     passwordLabel: "密码",
-    passwordHint: "留空表示不设密码",
-    passwordPlaceholder: "设置密码",
-    passwordSet: "已设置密码——输入新密码可修改，或清除它",
-    passwordClear: "移除密码",
+    passwordProtectionLabel: "密码保护",
+    passwordProtectionHint: "访问者需要输入密码才能打开此链接。",
+    passwordChange: "修改",
+    passwordSave: "保存",
+    passwordCancel: "取消",
+    passwordLengthHint: "请使用 4–64 个字符。",
+    passwordLegacy: "已设置密码，但这个密码无法在这里显示。修改为新密码后，就能查看和复制。",
+    copyLinkAndPassword: "复制链接和密码",
+    linkAndPasswordCopied: "已复制链接和密码",
+    linkAndPasswordClipboard: "链接：{url}\n密码：{password}",
     expiryLabel: "过期时间",
     expiryHint: "到达所选时间后，链接将自动失效。",
     expiryNever: "永不过期",
@@ -739,6 +746,8 @@ export const dashboardZhCN: CoreI18nMessages = {
       newWindow: "新窗口预览",
       phone: "手机扫码预览",
       signIn: "扫码打开当前私有预览，手机需登录同一账号。这是预览内容，不是已发布的 Site。",
+      sharedLink:
+        "任何持有链接的人都可在最长 24 小时内预览此版本。请妥善保管链接；这不是已发布的 Site。",
       browserOnly:
         "当前预览运行在本浏览器中。请通过「发布 Site」生成 Site 预览，再用手机扫码打开。",
       loopback: "当前地址为本机地址，手机无法通过此地址访问电脑。请使用可访问的部署地址。",
@@ -748,7 +757,34 @@ export const dashboardZhCN: CoreI18nMessages = {
       openLink: "打开预览",
     },
     site: {
+      environment: siteEnvironmentMessages["zh-CN"],
       publishUpdate: "发布更新",
+      logs: {
+        contentHiddenTitle: "日志内容已隐藏",
+        contentHiddenDescription:
+          "无法确认部分日志生成时的敏感信息配置。为保护敏感信息，相关日志正文和请求路径已隐藏；仍可查看请求时间、方法和状态码。",
+
+        button: "日志",
+        versionButton: "查看 {version} 的日志",
+        title: "日志 · {version}",
+        description: "显示最近 24 小时内此版本部署期间的线上日志。跨越版本切换的请求可能重叠。",
+        collectionHint: "新部署会开始采集日志。旧版本可能没有日志；请发布更新，并稍后刷新查看。",
+        loading: "正在加载线上日志…",
+        loadFailed: "日志加载失败，请重试。",
+        unavailable: "当前部署暂不支持线上日志。",
+        empty: "最近 24 小时内此版本部署期间没有找到日志。",
+        refresh: "刷新日志",
+        close: "关闭日志",
+        checkedAt: "查询时间：{time}",
+        truncated: "仅显示最近可用的日志，部分事件或部署时段可能已省略。",
+        levels: {
+          debug: "调试",
+          info: "信息",
+          log: "日志",
+          warn: "警告",
+          error: "错误",
+        },
+      },
       releases: {
         busy: "正在应用发布操作，完成后会自动刷新。",
         manage: "发布管理",
@@ -777,6 +813,8 @@ export const dashboardZhCN: CoreI18nMessages = {
         publicQrHint: "扫码打开已发布的 Site，不包含尚未发布的草稿修改。",
       },
       publish: {
+        alreadyLive: "此版本已上线。修改应用后，生成新预览即可发布更新。",
+        readyToPublish: "预览已确认，可以发布此版本。",
         previewStale: "文件在此次预览后发生了变化。请创建或刷新网站预览，再上线。",
         noPreview: "请先创建网站预览，再上线。",
         previewUnavailable: "网站预览未能加载。请重新创建预览后再上线。",
@@ -786,10 +824,10 @@ export const dashboardZhCN: CoreI18nMessages = {
         preserveBrowser: "准备网站时，当前浏览器预览会继续运行。",
         checking: "正在检查网站发布条件…",
         checkFailed: "无法检查网站，请重试。",
-        planRequired: "{plan} 及以上套餐包含网站托管。",
-        paidPlanRequired: "这个空间需要付费套餐才能托管网站。",
+        planRequired: "{plan} 及以上套餐支持公开发布网站。",
+        paidPlanRequired: "这个空间需要付费套餐才能公开发布网站。",
         upgradeHint:
-          "可以先准备应用，再升级此空间以预览和发布。浏览器预览链接无法提供持续在线的网站。",
+          "现在即可预览，只有空间成员能查看。准备好后，升级此空间即可发布持续在线的公开网站。",
         prepareTitle: "准备网站版本",
         prepareHint: "请让 Agent 准备网站版本。发布前可能需要调整应用代码。",
         copyPrompt: "复制 Agent 提示词",
@@ -801,14 +839,13 @@ export const dashboardZhCN: CoreI18nMessages = {
         preparingPreview: "正在准备预览…",
         refreshPreview: "刷新网站预览",
         previewTitle: "私有网站预览",
-        publishConsent:
-          "上线会发布你检查过的版本。任何拥有地址的人都能使用网站，包括代码开放的数据和操作。",
+        publishConsent: "任何持有 Site 地址的人都能访问此版本及其开放的数据和操作。",
       },
       statusNotLive: "未发布",
       statusLive: "已上线",
       statusLiveWithChanges: "有未发布的修改",
       goLive: "发布 Site",
-      goLiveDone: "网站已上线。",
+      goLiveDone: "网站发布成功。",
       previewStale: "预览之后文件又改过了。请重新运行，再上线。",
       noPreview: "先运行一次，生成预览。",
       blockedTitle: "这个 App 还不能作为网站上线",
@@ -835,7 +872,7 @@ export const dashboardZhCN: CoreI18nMessages = {
         guideNameHint:
           "有的服务商叫「主机记录」。填根域名前面的部分，例如 shop.company.com 填 shop；有的服务商要填完整域名。",
         guideStepCheck:
-          "回到这里点「{check}」。DNS 生效可能要几分钟到几小时，生效后会自动配置 HTTPS。如果还需要 TXT 验证记录，添加域名后会显示在这里。",
+          "路由 CNAME 生效后，Cloudflare 会自动验证域名并准备 HTTPS。点「{check}」查看最新状态；DNS 变更生效需要一些时间。",
         guideRootDomain:
           "想用 company.com 这样的根域名？只有 DNS 服务商支持在根域名上加 CNAME（又叫 CNAME 展平、ALIAS 或 ANAME，Cloudflare 支持）时才行；否则请用 www 或 shop 这样的子域名。",
         guideLink: "查看配置说明",
@@ -850,8 +887,7 @@ export const dashboardZhCN: CoreI18nMessages = {
         add: "添加域名",
         adding: "正在添加…",
         pending: "等待完成配置",
-        pendingDnsHint:
-          "在 DNS 服务商处添加下方记录，再重新检查。DNS 变更可能需要一段时间才能生效。",
+        pendingDnsHint: "先在 DNS 服务商处添加路由 CNAME，再重新检查；DNS 变更生效需要一些时间。",
         pendingHttpsHint: "域名所有权已验证，正在准备 HTTPS。请稍后重新检查。",
         active: "已连接",
         activeHint: "DNS 和 HTTPS 已就绪。",
@@ -865,8 +901,11 @@ export const dashboardZhCN: CoreI18nMessages = {
           "check-failed": "暂时无法检查这个域名，请重新检查。",
         },
         offlineHint: "网站已下线，所有网站地址均显示找不到页面。",
+        advancedVerification: "高级验证",
+        advancedHint:
+          "用于迁移已有域名，或在切换流量前预先验证所有权和证书。普通子域名配置先添加上方的路由 CNAME 即可。",
         dnsInstructions:
-          "在 DNS 服务商处添加这些记录，并保留域名所需的其他记录。确认域名连接到此网站后，也支持开启 Cloudflare 代理。",
+          "在 DNS 服务商处添加这条 CNAME，然后重新检查。网站路由通过验证后支持 Cloudflare 代理。",
         dnsName: "名称",
         dnsValue: "值 / 目标",
         httpInstructions: "如需通过 HTTP 验证，请在此 URL 提供下方响应内容，再重新检查。",
@@ -1638,6 +1677,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     typeToSearchBody: "输入几个字符即可在此标签页中搜索记录和文件内容。",
   },
   trash: {
+    deletedAt: "删除时间",
     title: "回收站",
     body: "已归档项目会从侧边栏隐藏。恢复后会重新变为可用。",
     bases: "数据表",
@@ -1645,7 +1685,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     noArchivedBasesBody: "归档的数据表会显示在这里。",
     foldersDocsSkills: "文件夹、文档和技能",
     noArchivedItemsTitle: "暂无已归档项目",
-    noArchivedItemsBody: "删除的文件夹、文档和技能会显示在这里。",
+    noArchivedItemsBody: "已删除的项目将在这里显示。",
     deleteForever: "永久删除",
     deletePermanentlyTitle: "永久删除？",
     deletePermanentlyBody: "永久删除“{name}”？此操作无法撤销。",
@@ -1686,6 +1726,8 @@ export const dashboardZhCN: CoreI18nMessages = {
     changeIcon: "更换图标",
     iconUploadLabel: "上传图片",
     iconUploadFormatHint: "支持 PNG、JPG、GIF 或 WebP，最大 2MB",
+    restoreDefaultIcon: "恢复默认图标",
+    restoreDefaultIconHint: "去掉自定义图片或表情",
     cropDialogTitle: "编辑图标",
     confirmCrop: "应用",
     iconFileMustBeImage: "请选择图片文件",
@@ -2281,6 +2323,8 @@ export const dashboardZhCN: CoreI18nMessages = {
     deleteRequestBody: "这会为“{title}”打开删除变更请求。正式记录会保留到请求评审并合并后。",
     editRecord: "编辑记录",
     newRecordTitle: "新建 {base} 记录",
+    newRecordHelp:
+      "不知道怎么填？打开「Agent 提示词」→「创建一条练习记录」，先看一条标明虚构的示例，确认后再保存。填写真实记录时，请提供自己的资料和文件。",
     failedSaveChangeRequest: "保存变更请求失败",
     invalidFields: "请检查以下字段：{fields}。",
     submitRequest: "提交请求",
@@ -2690,6 +2734,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     untitledStep: "未命名步骤",
     completed: "已完成",
     previewFrame: "{name} 预览",
+    htmlSourcePlainText: "源码较大，已使用纯文本显示以保持预览流畅，内容完整保留。",
     save: "保存",
     saved: "已保存",
     unsaved: "有未保存更改",
@@ -2907,7 +2952,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     statusRunning: "运行中",
     statusWaiting: "等待中",
     statusWaitingApproval: "待审批",
-    statusCompleted: "已完成",
+    statusCompleted: "成功",
     statusFailed: "失败",
     triggerManual: "手动",
     triggerEvent: "事件触发",

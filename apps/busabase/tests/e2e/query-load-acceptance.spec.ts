@@ -234,7 +234,9 @@ test("a 360-operation proposal keeps comments, approval, merge and refreshed rec
   await expect(
     page.getByRole("grid").getByText("Customer import 359", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByText("360 records", { exact: true })).toBeVisible();
+  await expect(
+    page.getByTestId("base-record-actions").getByText("360 records", { exact: true }),
+  ).toBeVisible();
   await shot(page, info, "12-merged-base-grid");
   const persisted = await json<{
     status: string;

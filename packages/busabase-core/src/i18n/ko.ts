@@ -1,4 +1,5 @@
 import type { CoreI18nMessages } from "./messages";
+import { siteEnvironmentMessages } from "./site-environment";
 
 export const dashboardKo: CoreI18nMessages = {
   lookup: lookupKo,
@@ -492,10 +493,17 @@ export const dashboardKo: CoreI18nMessages = {
     requireSignInHint:
       "링크가 있는 사람은 누구나 폼을 열 수 있지만, 로그인한 방문자만 제출할 수 있습니다.",
     passwordLabel: "비밀번호",
-    passwordHint: "비워 두면 비밀번호를 사용하지 않습니다",
-    passwordPlaceholder: "비밀번호 설정",
-    passwordSet: "비밀번호가 설정되어 있습니다 — 변경하려면 새 비밀번호를 입력하거나 해제하세요",
-    passwordClear: "비밀번호 제거",
+    passwordProtectionLabel: "비밀번호 보호",
+    passwordProtectionHint: "방문자가 이 링크를 열려면 비밀번호를 입력해야 합니다.",
+    passwordChange: "변경",
+    passwordSave: "저장",
+    passwordCancel: "취소",
+    passwordLengthHint: "4~64자로 입력하세요.",
+    passwordLegacy:
+      "비밀번호가 설정되어 있지만 여기에는 표시할 수 없습니다. 새 비밀번호로 변경하면 확인하고 복사할 수 있습니다.",
+    copyLinkAndPassword: "링크와 비밀번호 복사",
+    linkAndPasswordCopied: "링크와 비밀번호를 복사했습니다",
+    linkAndPasswordClipboard: "링크: {url}\n비밀번호: {password}",
     expiryLabel: "만료",
     expiryHint: "선택한 시간이 되면 링크가 자동으로 작동을 멈춥니다.",
     expiryNever: "만료 안 함",
@@ -763,6 +771,8 @@ export const dashboardKo: CoreI18nMessages = {
       phone: "휴대폰에서 미리보기",
       signIn:
         "비공개 미리보기를 스캔해 여세요. 휴대폰에서도 같은 계정으로 로그인해야 합니다. 게시된 Site와 다릅니다.",
+      sharedLink:
+        "이 링크가 있는 사람은 최대 24시간 동안 이 버전을 미리 볼 수 있습니다. 링크를 안전하게 보관하세요. 게시된 Site와는 다릅니다.",
       browserOnly:
         "이 미리보기는 현재 브라우저에서 실행됩니다. 휴대폰에서 열려면 «Site 게시»에서 Site 미리보기를 만드세요.",
       loopback: "휴대폰에서 이 로컬 주소에 접근할 수 없습니다. 접근 가능한 배포 주소를 사용하세요.",
@@ -772,7 +782,37 @@ export const dashboardKo: CoreI18nMessages = {
       openLink: "미리보기 열기",
     },
     site: {
+      environment: siteEnvironmentMessages.ko,
       publishUpdate: "업데이트 게시",
+      logs: {
+        contentHiddenTitle: "로그 내용이 숨겨졌습니다",
+        contentHiddenDescription:
+          "일부 로그가 생성될 때 사용된 시크릿 설정을 확인할 수 없습니다. 민감한 정보를 보호하기 위해 해당 메시지와 요청 경로를 숨깁니다. 요청 시간, 메서드 및 상태 코드는 계속 표시됩니다.",
+
+        button: "로그",
+        versionButton: "{version} 로그 보기",
+        title: "로그 · {version}",
+        description:
+          "최근 24시간 중 이 버전이 배포되어 있던 기간의 프로덕션 로그입니다. 버전 변경 시점에 걸친 요청은 겹칠 수 있습니다.",
+        collectionHint:
+          "새 배포부터 로그가 수집됩니다. 이전 버전에는 로그가 없을 수 있습니다. 업데이트를 게시한 후 로그가 표시될 때까지 기다려 주세요.",
+        loading: "프로덕션 로그 불러오는 중…",
+        loadFailed: "로그를 불러오지 못했습니다. 다시 시도하세요.",
+        unavailable: "이 배포에서는 프로덕션 로그를 사용할 수 없습니다.",
+        empty: "최근 24시간 동안 이 버전의 배포 기간에 해당하는 로그가 없습니다.",
+        refresh: "로그 새로고침",
+        close: "로그 닫기",
+        checkedAt: "조회 시간: {time}",
+        truncated:
+          "사용 가능한 최신 로그를 표시합니다. 일부 이벤트나 배포 기간은 생략될 수 있습니다.",
+        levels: {
+          debug: "디버그",
+          info: "정보",
+          log: "로그",
+          warn: "경고",
+          error: "오류",
+        },
+      },
       releases: {
         busy: "게시 작업을 적용 중입니다. 목록이 자동으로 새로고침됩니다.",
         manage: "게시 관리",
@@ -804,6 +844,9 @@ export const dashboardKo: CoreI18nMessages = {
           "스캔하여 게시된 Site를 여세요. 게시하지 않은 초안 변경 사항은 포함되지 않습니다.",
       },
       publish: {
+        alreadyLive:
+          "이 버전은 이미 게시되었습니다. 앱을 수정하고 새 미리보기를 준비하면 업데이트를 게시할 수 있습니다.",
+        readyToPublish: "미리보기를 확인했습니다. 이 버전을 게시할 수 있습니다.",
         previewStale:
           "이 미리보기 이후 파일이 변경되었습니다. 사이트 미리보기를 만들거나 새로고침한 뒤 게시하세요.",
         noPreview: "게시하기 전에 사이트 미리보기를 만드세요.",
@@ -814,10 +857,10 @@ export const dashboardKo: CoreI18nMessages = {
         preserveBrowser: "사이트를 준비하는 동안 브라우저 미리보기는 계속 실행됩니다.",
         checking: "사이트 게시 준비 상태 확인 중…",
         checkFailed: "사이트를 확인하지 못했습니다. 다시 시도하세요.",
-        planRequired: "{plan} 이상 요금제에 사이트 호스팅이 포함됩니다.",
-        paidPlanRequired: "사이트 호스팅에는 이 스페이스의 유료 요금제가 필요합니다.",
+        planRequired: "{plan} 이상 요금제에서 웹사이트를 공개할 수 있습니다.",
+        paidPlanRequired: "웹사이트 공개에는 이 스페이스의 유료 요금제가 필요합니다.",
         upgradeHint:
-          "먼저 앱을 준비한 뒤 스페이스를 업그레이드하여 미리보고 게시하세요. 브라우저 미리보기 링크는 상시 운영 사이트가 아닙니다.",
+          "지금 비공개 미리보기를 확인할 수 있습니다. 항상 접속할 수 있는 공개 웹사이트를 게시할 준비가 되면 스페이스를 업그레이드하세요.",
         prepareTitle: "웹 버전 준비",
         prepareHint:
           "에이전트에게 웹 버전 준비를 요청하세요. 게시 전에 코드를 변경해야 할 수 있습니다.",
@@ -831,7 +874,7 @@ export const dashboardKo: CoreI18nMessages = {
         refreshPreview: "사이트 미리보기 새로고침",
         previewTitle: "비공개 사이트 미리보기",
         publishConsent:
-          "게시하면 검토한 버전이 공개됩니다. 주소를 아는 누구나 코드가 공개하는 데이터와 작업을 포함하여 사이트를 이용할 수 있습니다.",
+          "Site 주소를 아는 사람은 누구나 이 버전과 앱이 공개하는 데이터 및 기능에 접근할 수 있습니다.",
       },
       statusNotLive: "게시 안 됨",
       statusLive: "게시됨",
@@ -866,7 +909,7 @@ export const dashboardKo: CoreI18nMessages = {
         guideNameHint:
           "루트 도메인 앞부분을 입력하세요. 예를 들어 shop.company.com이면 shop입니다. 전체 도메인을 요구하는 제공업체도 있습니다.",
         guideStepCheck:
-          "여기로 돌아와 “{check}” 버튼을 클릭하세요. DNS 반영에는 몇 분에서 몇 시간이 걸릴 수 있으며, 반영되면 HTTPS가 자동으로 설정됩니다. TXT 인증 레코드가 추가로 필요하면 도메인을 추가한 뒤 여기에 표시됩니다.",
+          "라우팅 CNAME이 반영되면 Cloudflare가 호스트 이름을 자동 검증하고 HTTPS를 준비합니다. “{check}”로 최신 상태를 확인하세요. DNS 변경 반영에는 시간이 걸릴 수 있습니다.",
         guideRootDomain:
           "company.com 같은 루트 도메인을 쓰려면 DNS 제공업체가 루트에서 CNAME(CNAME 플래트닝, ALIAS 또는 ANAME)을 지원해야 합니다. Cloudflare는 지원합니다. 지원하지 않으면 www나 shop 같은 하위 도메인을 사용하세요.",
         guideLink: "설정 가이드 보기",
@@ -883,7 +926,7 @@ export const dashboardKo: CoreI18nMessages = {
         adding: "추가 중…",
         pending: "설정 대기 중",
         pendingDnsHint:
-          "DNS 제공업체에서 아래 레코드를 추가한 뒤 다시 확인하세요. DNS 변경이 적용되기까지 시간이 걸릴 수 있습니다.",
+          "DNS 제공업체에 라우팅 CNAME을 추가한 다음 다시 확인하세요. DNS 변경 반영에는 시간이 걸릴 수 있습니다.",
         pendingHttpsHint:
           "도메인 소유권이 확인되었습니다. HTTPS를 준비하고 있습니다. 잠시 후 다시 확인하세요.",
         active: "연결됨",
@@ -900,8 +943,11 @@ export const dashboardKo: CoreI18nMessages = {
         },
         offlineHint:
           "웹사이트가 비공개 상태입니다. 모든 웹사이트 주소에 페이지를 찾을 수 없다고 표시됩니다.",
+        advancedVerification: "고급 검증",
+        advancedHint:
+          "기존 도메인을 이전하거나 트래픽 전환 전에 소유권과 인증서를 확인할 때 사용하는 선택 단계입니다. 일반 하위 도메인은 먼저 위의 라우팅 CNAME을 추가하면 됩니다.",
         dnsInstructions:
-          "DNS 제공업체에서 이 레코드를 추가하세요. 도메인에 필요한 다른 레코드는 유지하세요. 도메인이 이 웹사이트로 연결되는지 확인되면 Cloudflare 프록시도 지원됩니다.",
+          "DNS 제공업체에 이 CNAME을 추가한 다음 다시 확인하세요. 웹사이트 경로가 검증되면 Cloudflare 프록시를 사용할 수 있습니다.",
         dnsName: "이름",
         dnsValue: "값 / 대상",
         httpInstructions:
@@ -1695,6 +1741,7 @@ export const dashboardKo: CoreI18nMessages = {
     typeToSearchBody: "이 탭에서 레코드와 파일 내용을 검색하려면 몇 글자를 입력하세요.",
   },
   trash: {
+    deletedAt: "삭제 시간",
     title: "휴지통",
     body: "보관된 항목은 사이드바에 표시되지 않습니다. 복원하면 다시 활성화됩니다.",
     bases: "베이스",
@@ -1702,7 +1749,7 @@ export const dashboardKo: CoreI18nMessages = {
     noArchivedBasesBody: "보관한 베이스가 여기에 표시됩니다.",
     foldersDocsSkills: "폴더, 문서 및 스킬",
     noArchivedItemsTitle: "보관된 항목 없음",
-    noArchivedItemsBody: "삭제한 폴더, 문서, 스킬이 여기에 표시됩니다.",
+    noArchivedItemsBody: "삭제한 항목이 여기에 표시됩니다.",
     deleteForever: "영구 삭제",
     deletePermanentlyTitle: "영구적으로 삭제하시겠습니까?",
     deletePermanentlyBody: '"{name}"을(를) 영구적으로 삭제하시겠습니까? 되돌릴 수 없습니다.',
@@ -1744,6 +1791,8 @@ export const dashboardKo: CoreI18nMessages = {
     changeIcon: "아이콘 변경",
     iconUploadLabel: "이미지 업로드",
     iconUploadFormatHint: "PNG, JPG, GIF 또는 WebP, 최대 2MB",
+    restoreDefaultIcon: "기본 아이콘으로 되돌리기",
+    restoreDefaultIconHint: "맞춤 이미지나 이모지를 제거합니다",
     cropDialogTitle: "아이콘 편집",
     confirmCrop: "적용",
     iconFileMustBeImage: "이미지 파일을 선택하세요",
@@ -2365,6 +2414,8 @@ export const dashboardKo: CoreI18nMessages = {
       '"{title}"에 대한 삭제 변경 요청을 엽니다. 요청이 리뷰되어 병합되기 전까지 정식 레코드는 계속 표시됩니다.',
     editRecord: "레코드 편집",
     newRecordTitle: "새 {base} 레코드",
+    newRecordHelp:
+      "입력 예시가 필요한가요? Agent 프롬프트 → 연습용 레코드 만들기에서 가상 데이터라고 표시된 예시를 먼저 확인하고 저장하세요. 실제 레코드에는 직접 제공한 정보와 파일을 사용하세요.",
     failedSaveChangeRequest: "변경 요청을 저장하지 못했습니다",
     invalidFields: "다음 필드를 확인하세요: {fields}.",
     submitRequest: "요청 제출",
@@ -2796,6 +2847,8 @@ export const dashboardKo: CoreI18nMessages = {
     untitledStep: "제목 없는 단계",
     completed: "완료됨",
     previewFrame: "{name} 미리보기",
+    htmlSourcePlainText:
+      "미리보기를 원활하게 유지하기 위해 긴 소스를 일반 텍스트로 표시합니다. 생략된 내용은 없습니다.",
     save: "저장",
     saved: "저장되었습니다",
     unsaved: "저장되지 않은 변경 사항",

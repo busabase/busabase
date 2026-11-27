@@ -1,11 +1,14 @@
-import type { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
-import { getDb } from "~/db";
-import { getAppBrandingSafe, updateAppBranding } from "~/domains/settings/logic/app-branding-store";
+import {
+  getAppBrandingSafe,
+  updateAppBranding,
+} from "busabase-core/domains/settings/logic/app-branding-store";
 import {
   AppBrandingVOSchema,
   UpdateAppBrandingDTOSchema,
-} from "~/domains/settings/types/app-branding";
+} from "busabase-core/domains/settings/types/app-branding";
+import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import { getDb } from "~/db";
 
 /**
  * Read the white-label branding. Called by the Settings → Branding tab and by

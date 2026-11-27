@@ -15,7 +15,7 @@ import { Input } from "kui/input";
 import { Label } from "kui/label";
 import { cn } from "kui/utils";
 import { Folder, FolderPlus, FolderTree, Paperclip, X } from "lucide-react";
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import {
   addDriveEntries,
@@ -112,6 +112,7 @@ export function DriveFieldEditor({
   const [moveTarget, setMoveTarget] = useState<MoveTarget | null>(null);
   const [removeFolderTarget, setRemoveFolderTarget] = useState<string | null>(null);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const previewOpener = useRef<HTMLElement | null>(null);
   const busy = upload.isUploading;
   const rootLabel = messages.nodeDetail.driveRoot;
 
@@ -256,29 +257,38 @@ export function DriveFieldEditor({
   const showTree = entries.length > 0 || emptyFolders.length > 0;
 
   return (
-    <div className="grid min-w-0 gap-2" data-drive-field-editor={field.slug}>
+    <div
+      className="grid min-w-0 gap-2"
+      data-drive-field-editor={field.slug}
+      onClickCapture={(event) => {
+        if (event.target instanceof Element) {
+          const trigger = event.target.closest<HTMLElement>('[role="treeitem"]');
+          if (trigger) previewOpener.current = trigger;
+        }
+      }}
+    >
       <div className="flex flex-wrap items-center gap-2">
         <label
-          className="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-md border border-border/70 border-dashed bg-card px-3 py-1.5 text-sm transition-colors hover:bg-accent"
+          className="relative inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-md border border-border/70 border-dashed bg-card px-3 py-1.5 text-sm transition-colors hover:bg-accent"
           htmlFor={inputId}
         >
           <Paperclip size={14} />
           {upload.label}
+          <input
+            accept={upload.accept}
+            aria-describedby={ariaDescribedBy}
+            aria-label={fieldName}
+            className="sr-only"
+            disabled={busy || !upload.canUpload}
+            id={inputId}
+            multiple={upload.multiple}
+            onChange={(event) => {
+              void handleFiles(event.currentTarget.files);
+              event.currentTarget.value = "";
+            }}
+            type="file"
+          />
         </label>
-        <input
-          accept={upload.accept}
-          aria-describedby={ariaDescribedBy}
-          aria-label={fieldName}
-          className="sr-only"
-          disabled={busy || !upload.canUpload}
-          id={inputId}
-          multiple={upload.multiple}
-          onChange={(event) => {
-            void handleFiles(event.currentTarget.files);
-            event.currentTarget.value = "";
-          }}
-          type="file"
-        />
         <button
           className="inline-flex w-fit items-center gap-1.5 rounded-md border border-border/70 bg-card px-3 py-1.5 text-sm transition-colors hover:bg-accent disabled:opacity-50"
           disabled={busy || creatingFolder}
@@ -427,6 +437,7 @@ export function DriveFieldEditor({
       />
 
       <DriveFilePreviewDialog
+        opener={previewOpener}
         entry={previewPath ? (entryByPath.get(previewPath) ?? null) : null}
         onClose={() => setPreviewPath(null)}
       />

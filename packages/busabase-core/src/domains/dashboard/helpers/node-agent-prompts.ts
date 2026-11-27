@@ -686,6 +686,55 @@ const BASE_SCENARIOS: PromptDef[] = [
     },
   },
   {
+    key: "base-practice-record",
+    label: {
+      en: "Create a practice record",
+      "zh-CN": "创建一条练习记录",
+      "zh-TW": "建立一筆練習記錄",
+      ja: "練習用レコードを作る",
+      ko: "연습용 레코드 만들기",
+      es: "Crear un registro de práctica",
+      pt: "Criar um registro de prática",
+      vi: "Tạo bản ghi thực hành",
+      fr: "Créer un enregistrement d’exercice",
+      de: "Übungsdatensatz erstellen",
+    },
+    outcome: {
+      en: "One clearly fictional example, explained field by field, for you to approve before it is saved.",
+      "zh-CN": "一条标明虚构的示例，逐字段解释，你确认后才保存。",
+      "zh-TW": "一筆標明虛構的範例，逐欄位解釋，你確認後才儲存。",
+      ja: "架空と明示された例を項目ごとに説明し、確認してから保存します。",
+      ko: "가상 데이터라고 표시한 예시를 필드별로 설명하고 확인받은 뒤 저장합니다.",
+      es: "Un ejemplo marcado como ficticio, explicado campo por campo, que aprobarás antes de guardar.",
+      pt: "Um exemplo identificado como fictício, explicado campo a campo, para aprovar antes de salvar.",
+      vi: "Một ví dụ ghi rõ là hư cấu, giải thích từng trường và chờ bạn duyệt trước khi lưu.",
+      fr: "Un exemple indiqué comme fictif, expliqué champ par champ, à approuver avant enregistrement.",
+      de: "Ein ausdrücklich fiktives Beispiel mit Erklärung je Feld, das Sie vor dem Speichern bestätigen.",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nI want one fictional practice record to learn how this table works. Read its fields, field help, and any template skill first. Propose one example and explain each field. Put “Fictional demo” in its primary name. Use only valid field values; leave attachments and relations empty unless I supply actual files or choose existing records. Do not invent real product facts, image URLs, or certificates. Show me the example first and wait for my confirmation before saving it. Do not change existing records or publish anything.`,
+      "zh-CN": (t) =>
+        `${t}\n\n我要一条虚构的练习记录，学习这张表怎么填。请先读取字段、填写说明和适用的模板手册，再给出一条示例，逐字段解释。主名称注明「虚构演示」。只使用字段允许的值；附件和关联留空，除非我提供真实文件或选定已有记录。不要编造真实商品资料、图片链接或证书。先展示示例，等我确认后再保存，不改已有记录，也不发布任何内容。`,
+      "zh-TW": (t) =>
+        `${t}\n\n我要一筆虛構的練習記錄，學習這張表怎麼填。請先讀取欄位、填寫說明和適用的範本手冊，再給出一筆範例，逐欄位解釋。主要名稱註明「虛構示範」。只使用欄位允許的值；附件和關聯留空，除非我提供真實檔案或選定既有記錄。不要編造真實商品資料、圖片連結或證書。先展示範例，等我確認後再儲存，不改既有記錄，也不發佈任何內容。`,
+      ja: (t) =>
+        `${t}\n\nこの表の入力方法を学ぶため、架空の練習用レコードを1件希望します。まずフィールド、入力ヘルプ、該当テンプレートの手順を読み、例を1件提案して項目ごとに説明してください。主な名前に「架空デモ」と明記してください。有効な値だけを使い、私がファイルや既存レコードを指定しない限り添付と関連は空欄にしてください。実際の商品情報、画像URL、証明書を捏造しないでください。先に例を見せ、保存は私の確認を待ってください。既存データの変更や公開はしないでください。`,
+      ko: (t) =>
+        `${t}\n\n이 표의 입력 방법을 배우기 위한 가상의 연습용 레코드 한 개를 원합니다. 먼저 필드, 입력 도움말, 해당 템플릿 지침을 읽고 예시를 제안하며 필드별로 설명하세요. 기본 이름에 “가상 데모”라고 표시하세요. 유효한 값만 사용하고, 제가 파일이나 기존 레코드를 지정하지 않으면 첨부와 관계 필드는 비워 두세요. 실제 상품 정보, 이미지 URL, 인증서를 꾸며내지 마세요. 예시를 먼저 보여 주고 저장 전에 제 확인을 기다리세요. 기존 레코드를 변경하거나 공개하지 마세요.`,
+      es: (t) =>
+        `${t}\n\nQuiero un registro ficticio de práctica para aprender a rellenar esta tabla. Lee primero los campos, su ayuda y las instrucciones de la plantilla. Propón un ejemplo y explica cada campo. Marca el nombre principal como “Demo ficticia”. Usa valores válidos; deja vacíos adjuntos y relaciones salvo que aporte archivos o elija registros existentes. No inventes datos reales de productos, URL de imágenes ni certificados. Muéstrame el ejemplo y espera mi confirmación antes de guardarlo. No modifiques registros existentes ni publiques nada.`,
+      pt: (t) =>
+        `${t}\n\nQuero um registro fictício de prática para aprender a preencher esta tabela. Leia primeiro os campos, suas orientações e as instruções do modelo. Proponha um exemplo e explique cada campo. Marque o nome principal como “Demo fictícia”. Use valores válidos; deixe anexos e relações vazios, a menos que eu forneça arquivos ou escolha registros existentes. Não invente dados reais de produtos, URLs de imagens ou certificados. Mostre o exemplo e espere minha confirmação antes de salvar. Não altere registros existentes nem publique nada.`,
+      vi: (t) =>
+        `${t}\n\nTôi muốn một bản ghi thực hành hư cấu để học cách điền bảng này. Trước tiên hãy đọc các trường, hướng dẫn điền và kỹ năng của mẫu. Đề xuất một ví dụ và giải thích từng trường. Ghi “Demo hư cấu” trong tên chính. Chỉ dùng giá trị hợp lệ; để trống tệp đính kèm và liên kết trừ khi tôi cung cấp tệp hoặc chọn bản ghi có sẵn. Không bịa thông tin sản phẩm thật, URL ảnh hay chứng chỉ. Cho tôi xem ví dụ và đợi xác nhận trước khi lưu. Không sửa bản ghi cũ hoặc xuất bản nội dung.`,
+      fr: (t) =>
+        `${t}\n\nJe souhaite un enregistrement fictif d’exercice pour apprendre à remplir cette table. Lisez d’abord les champs, leur aide et les consignes du modèle. Proposez un exemple et expliquez chaque champ. Ajoutez « Démo fictive » au nom principal. Utilisez des valeurs valides ; laissez pièces jointes et relations vides sauf si je fournis des fichiers ou sélectionne des enregistrements existants. N’inventez pas de faits sur des produits réels, d’URL d’images ou de certificats. Montrez l’exemple et attendez ma confirmation avant de l’enregistrer. Ne modifiez pas les données existantes et ne publiez rien.`,
+      de: (t) =>
+        `${t}\n\nIch möchte einen fiktiven Übungsdatensatz, um diese Tabelle ausfüllen zu lernen. Lesen Sie zuerst die Felder, die Feldhilfen und die Vorlagenanleitung. Schlagen Sie ein Beispiel vor und erklären Sie jedes Feld. Kennzeichnen Sie den Hauptnamen mit „Fiktive Demo“. Verwenden Sie gültige Werte; lassen Sie Anhänge und Beziehungen leer, sofern ich keine Dateien oder vorhandenen Datensätze auswähle. Erfinden Sie keine echten Produktangaben, Bild-URLs oder Zertifikate. Zeigen Sie zuerst das Beispiel und warten Sie vor dem Speichern auf meine Bestätigung. Ändern Sie keine vorhandenen Daten und veröffentlichen Sie nichts.`,
+    },
+  },
+  {
     key: "base-design-schema",
     label: {
       en: "Design the schema for me",

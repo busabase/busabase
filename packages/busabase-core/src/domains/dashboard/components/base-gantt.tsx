@@ -1,13 +1,14 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BaseFieldVO, BaseVO, GanttScale, RecordVO, ViewVO } from "busabase-contract/types";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useRef, useState } from "react";
-import { useSearch } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
-import { presentCoreError } from "../../../i18n/localize-error";
+import { presentCoreError, VIEW_TOO_LARGE_MESSAGE } from "../../../i18n/localize-error";
+import { recordFindErrorMessage, recordFindMessages } from "../../../i18n/record-find";
 import {
   calendarDayToLocalDate,
   fromDateTimeInputValue,
@@ -19,8 +20,15 @@ import {
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { retryRecordRead } from "../helpers/query-state";
+import type { RecordCollectionStatus } from "../helpers/record-collection-status";
 import { useSourceViewSlug } from "../helpers/source-view-context";
 import { withSourceView } from "../helpers/source-view-url";
+import {
+  readTimelineState,
+  type TimelineState,
+  writeTimelineState,
+} from "../helpers/timeline-state-url";
+import type { RecordFindControl } from "../hooks/use-record-find";
 import { useDashboardOrpc } from "../orpc-context";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { DragReviewNotice } from "./base-kanban";
@@ -29,6 +37,10 @@ import { useWorkspacePermissionLevel } from "./split-submit-button";
 const DAY_MS = 86_400_000;
 // Pixels per day per scale — month packs tighter, week spreads out.
 const DAY_PX: Record<GanttScale, number> = { month: 5, week: 22 };
+// A one-day record is only 5px wide in month mode and 22px in week mode.
+// Keep its real start aligned to the axis, while reserving enough visual room
+// for its label and resize affordances.
+const MIN_BAR_RENDER_WIDTH = 72;
 const TITLE_COL_PX = 200;
 // Rows per request. The timeline reads the view a page at a time, so a Base
 // of any size opens on its first rows; an ordinary project — up to
@@ -115,7 +127,13 @@ const shiftPeriod = (start: Date, scale: GanttScale, steps: number) =>
     : addDays(start, PERIOD_LENGTH.week * 7 * steps);
 
 type DragMode = "move" | "resize-start" | "resize-end";
-type DragState = { recordId: string; mode: DragMode; originX: number; deltaDays: number };
+type DragState = {
+  recordId: string;
+  mode: DragMode;
+  originX: number;
+  deltaDays: number;
+  scope: string;
+};
 
 type Row = { record: RecordVO; start: Date; end: Date };
 
@@ -124,21 +142,28 @@ export function BusaBaseGantt({
   base,
   client,
   fields,
+  onCollectionStatusChange,
   onPatchRecord,
+  queryScope,
+  recordFind,
 }: {
   activeView: ViewVO | null;
   base: BaseVO | null;
   client: BusabaseDashboardApiClient;
   fields: BaseFieldVO[];
+  onCollectionStatusChange?: (status: RecordCollectionStatus) => void;
   /** Reschedule: patch start/end on a record and auto-merge, no navigation. */
   onPatchRecord?: (
     record: RecordVO,
     patch: Record<string, unknown>,
   ) => Promise<{ materialized: true } | { materialized: false; changeRequestId: string }>;
+  queryScope?: string;
+  recordFind?: RecordFindControl;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const currentSearch = useSearch();
+  const [location, navigate] = useLocation();
   const sourceViewSlug = useSourceViewSlug();
   const isAnon = useIsAnonymousVisitor();
   const permissionLevel = useWorkspacePermissionLevel();
@@ -147,11 +172,31 @@ export function BusaBaseGantt({
   const finishDragRef = useRef<((finished: DragState) => void) | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
   const [reviewRequestId, setReviewRequestId] = useState<string | null>(null);
-  // Seeds from the view's saved scale; the toolbar toggle overrides it locally.
-  const [scale, setScale] = useState<GanttScale>(activeView?.config.ganttScale ?? "month");
-  const [periodStart, setPeriodStart] = useState(() =>
-    periodStartOf(new Date(), activeView?.config.ganttScale ?? "month"),
-  );
+  const baseId = base?.id ?? "";
+  const stateScope = `${baseId}:${activeView?.id ?? "all"}`;
+  const savedState = readTimelineState(currentSearch, stateScope);
+  const savedScale = activeView?.config.ganttScale ?? "month";
+  const stateKey = JSON.stringify([stateScope, savedState, savedScale]);
+  const initialState: TimelineState = savedState ?? {
+    scale: savedScale,
+    start: toYMD(periodStartOf(new Date(), savedScale)),
+  };
+  const [browsing, setBrowsing] = useState(() => ({ key: stateKey, value: initialState }));
+  if (browsing.key !== stateKey) setBrowsing({ key: stateKey, value: initialState });
+  const currentState = browsing.key === stateKey ? browsing.value : initialState;
+  const scale = currentState.scale;
+  const [periodYear, periodMonth, periodDay] = currentState.start.split("-").map(Number) as [
+    number,
+    number,
+    number,
+  ];
+  const periodStart = new Date(periodYear, periodMonth - 1, periodDay);
+  const updateBrowsing = (next: TimelineState) => {
+    setBrowsing({ key: stateKey, value: next });
+    navigate(`${location}?${writeTimelineState(currentSearch, next, stateScope)}`, {
+      replace: true,
+    });
+  };
   const dayPx = DAY_PX[scale];
   const { start: startField, end: endField } = resolveGanttFields(
     base,
@@ -159,20 +204,47 @@ export function BusaBaseGantt({
     activeView?.config.startFieldSlug,
     activeView?.config.endFieldSlug,
   );
-  const baseId = base?.id ?? "";
   const orpc = useDashboardOrpc();
-  // The view's own filters and sorts decide the rows, server-side, exactly as
-  // its table would list them; records without both dates are skipped below.
-  // Counting one row past GANTT_WHOLE_VIEW_ROWS is enough to choose the mode.
+  const findMessages = recordFindMessages[locale];
+  const hasDateFields = Boolean(startField && endField);
+  const viewScope = JSON.stringify([
+    baseId,
+    activeView?.id,
+    activeView?.config.filters,
+    activeView?.config.sorts,
+    startField,
+    endField,
+  ]);
+  const scope = queryScope ?? JSON.stringify([viewScope, currentState, recordFind?.input]);
+  // Display mode follows the unfiltered saved view, never the keyword's match
+  // count. A large view narrowed to one match must keep its period and bounds.
+  const modeQuery = useQuery({
+    enabled: Boolean(baseId) && hasDateFields,
+    retry: recordFind?.hasQuery ? false : retryRecordRead,
+    queryFn: () =>
+      client.listRecordsPage({
+        baseId,
+        page: 1,
+        pageSize: 1,
+        totalLimit: GANTT_WHOLE_VIEW_ROWS + 1,
+        ...(activeView?.id ? { viewId: activeView.id } : {}),
+      }),
+    queryKey: [...(orpc?.records.listPage.key() ?? ["busabase"]), "gantt-mode", viewScope],
+  });
+  const modeResolved = Boolean(modeQuery.data);
+  const periodMode = Boolean(
+    modeQuery.data && (modeQuery.data.totalCapped || modeQuery.data.total > GANTT_WHOLE_VIEW_ROWS),
+  );
   const rowsQuery = useInfiniteQuery({
-    enabled: Boolean(baseId),
-    retry: retryRecordRead,
+    enabled: modeResolved && !periodMode && hasDateFields,
+    retry: recordFind?.hasQuery ? false : retryRecordRead,
     getNextPageParam: (last: { page: number; totalPages: number }) =>
       last.page < last.totalPages ? last.page + 1 : undefined,
     initialPageParam: 1,
     queryFn: ({ pageParam }) =>
       client.listRecordsPage({
         baseId,
+        find: recordFind?.input,
         page: pageParam as number,
         pageSize: GANTT_PAGE_SIZE,
         totalLimit: GANTT_WHOLE_VIEW_ROWS + 1,
@@ -182,12 +254,10 @@ export function BusaBaseGantt({
     queryKey: [
       ...(orpc?.records.listPage.key() ?? ["busabase"]),
       "gantt-rows",
-      baseId,
-      activeView?.id ?? "",
+      viewScope,
+      recordFind?.input,
     ],
   });
-  const probe = rowsQuery.data?.pages[0];
-  const periodMode = Boolean(probe && (probe.totalCapped || probe.total > GANTT_WHOLE_VIEW_ROWS));
 
   // A period [periodStart, periodEnd) of local days. A row overlaps it when it
   // starts before the period ends and ends on or after its first day — in each
@@ -203,13 +273,14 @@ export function BusaBaseGantt({
       ?.gte;
   const periodQuery = useInfiniteQuery({
     enabled: periodMode && Boolean(startField && endField && startsBefore && endsFrom),
-    retry: retryRecordRead,
+    retry: recordFind?.hasQuery ? false : retryRecordRead,
     getNextPageParam: (last: { page: number; totalPages: number }) =>
       last.page < last.totalPages ? last.page + 1 : undefined,
     initialPageParam: 1,
     queryFn: ({ pageParam }) =>
       client.listRecordsPage({
         baseId,
+        find: recordFind?.input,
         page: pageParam as number,
         pageSize: GANTT_PAGE_SIZE,
         // Only whether there is a next page: a period of a huge view is itself huge.
@@ -228,12 +299,10 @@ export function BusaBaseGantt({
     queryKey: [
       ...(orpc?.records.listPage.key() ?? ["busabase"]),
       "gantt-period",
-      baseId,
-      activeView?.id ?? "",
-      startField?.slug ?? "",
-      endField?.slug ?? "",
+      viewScope,
       startsBefore ?? "",
       endsFrom ?? "",
+      recordFind?.input,
     ],
   });
   const activeQuery = periodMode ? periodQuery : rowsQuery;
@@ -243,6 +312,9 @@ export function BusaBaseGantt({
       // A long schedule uses a global date sort. Start with one page instead
       // of immediately running five potentially expensive ordered reads.
       !periodMode &&
+      !recordFind?.isPending &&
+      !modeQuery.isError &&
+      !activeQuery.isError &&
       loadedPages > 0 &&
       loadedPages < GANTT_AUTO_PAGES &&
       activeQuery.hasNextPage &&
@@ -252,16 +324,79 @@ export function BusaBaseGantt({
     }
   }, [
     periodMode,
+    recordFind?.isPending,
+    modeQuery.isError,
+    activeQuery.isError,
     loadedPages,
     activeQuery.hasNextPage,
     activeQuery.isFetchingNextPage,
     activeQuery.fetchNextPage,
   ]);
-  const records = (activeQuery.data?.pages ?? []).flatMap((page) => page.records);
+  const records = recordFind?.isPending
+    ? []
+    : (activeQuery.data?.pages ?? []).flatMap((page) => page.records);
   const lastPage = activeQuery.data?.pages.at(-1);
   // A count that stopped early says "at least what is shown".
   const total = lastPage?.totalCapped ? `${records.length}+` : `${lastPage?.total ?? 0}`;
   const baseSlug = base?.slug ?? records[0]?.base.slug ?? "";
+  const readError = modeQuery.error ?? (modeResolved ? activeQuery.error : null);
+  const isFetching = Boolean(
+    hasDateFields &&
+      (recordFind?.isPending ||
+        modeQuery.isFetching ||
+        (!readError &&
+          (!modeResolved ||
+            activeQuery.isFetching ||
+            (!periodMode && loadedPages < GANTT_AUTO_PAGES && activeQuery.hasNextPage)))),
+  );
+  // Rows still arriving for the current scope. A background refresh of rows
+  // already on screen is not loading: it must neither drop a gesture the
+  // reader is holding nor flash a status line over the chart.
+  const isLoading = Boolean(
+    hasDateFields &&
+      (recordFind?.isPending ||
+        (!readError &&
+          (!modeResolved ||
+            activeQuery.isLoading ||
+            activeQuery.isFetchingNextPage ||
+            (!periodMode && loadedPages < GANTT_AUTO_PAGES && activeQuery.hasNextPage)))),
+  );
+  const collectionTotal =
+    !hasDateFields || readError || !modeResolved
+      ? undefined
+      : lastPage?.totalCapped
+        ? records.length
+        : lastPage?.total;
+  const collectionTotalCapped = lastPage?.totalCapped;
+  useEffect(() => {
+    onCollectionStatusChange?.({
+      scope,
+      total: collectionTotal,
+      totalCapped: collectionTotalCapped,
+      isFetching,
+      isError: Boolean(readError),
+    });
+  }, [
+    scope,
+    collectionTotal,
+    collectionTotalCapped,
+    isFetching,
+    readError,
+    onCollectionStatusChange,
+  ]);
+  const interactionScope = JSON.stringify([
+    scope,
+    viewScope,
+    scale,
+    currentState.start,
+    recordFind?.input,
+    recordFind?.isPending,
+    periodMode,
+  ]);
+  useEffect(() => {
+    if (liveDragRef.current?.scope !== interactionScope) liveDragRef.current = null;
+    setDrag((current) => (current?.scope === interactionScope ? current : null));
+  }, [interactionScope]);
 
   // Window listeners drive the active drag; committed on mouse-up.
   useEffect(() => {
@@ -299,28 +434,48 @@ export function BusaBaseGantt({
       <div className="px-2 py-6 text-muted-foreground text-sm">{messages.base.ganttNoDates}</div>
     );
   }
-  if (rowsQuery.isPending) {
-    return <div className="px-2 py-6 text-muted-foreground text-sm">{messages.common.loading}</div>;
+  if (!modeResolved) {
+    return modeQuery.error ? (
+      <div className="flex flex-wrap items-center gap-2 px-2 py-6 text-sm">
+        <span className="text-destructive" role="alert">
+          {presentCoreError(messages, locale, modeQuery.error, messages.shell.operationFailed)}
+        </span>
+        <button
+          className="underline underline-offset-2"
+          onClick={() => void modeQuery.refetch()}
+          type="button"
+        >
+          {messages.base.paginationRetry}
+        </button>
+      </div>
+    ) : (
+      <div className="px-2 py-6 text-muted-foreground text-sm">{messages.common.loading}</div>
+    );
   }
 
   // How much of the view is on screen, and the way to the rest.
   const loadFooter =
-    activeQuery.isError || activeQuery.hasNextPage ? (
+    !recordFind?.isPending && (readError || activeQuery.hasNextPage) ? (
       <div className="sticky left-0 flex flex-wrap items-center gap-3 px-2 py-3 text-muted-foreground text-xs">
-        <span className="tabular-nums">
-          {activeQuery.isError
-            ? presentCoreError(messages, locale, activeQuery.error, messages.shell.operationFailed)
+        <span className="tabular-nums" role={readError ? "alert" : undefined}>
+          {readError
+            ? (recordFindErrorMessage(locale, readError) ??
+              presentCoreError(messages, locale, readError, messages.shell.operationFailed))
             : fmt(messages.base.paginationRange, { from: 1, to: records.length, total })}
         </span>
         <button
           className="inline-flex h-8 items-center rounded-md border border-border/70 px-3 font-medium text-xs transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
-          disabled={activeQuery.isFetchingNextPage}
+          disabled={modeQuery.isFetching || activeQuery.isFetching || recordFind?.isPending}
           onClick={() =>
-            void (activeQuery.isError ? activeQuery.refetch() : activeQuery.fetchNextPage())
+            void (modeQuery.error
+              ? modeQuery.refetch()
+              : activeQuery.isError && !activeQuery.isFetchNextPageError
+                ? activeQuery.refetch()
+                : activeQuery.fetchNextPage())
           }
           type="button"
         >
-          {activeQuery.isError
+          {readError
             ? messages.base.paginationRetry
             : activeQuery.isFetchingNextPage
               ? messages.common.loading
@@ -336,15 +491,6 @@ export function BusaBaseGantt({
     if (start && end && end.getTime() >= start.getTime()) {
       rows.push({ record, start, end });
     }
-  }
-
-  if (rows.length === 0 && !periodMode) {
-    return (
-      <>
-        <div className="px-2 py-6 text-muted-foreground text-sm">{messages.base.ganttNoDates}</div>
-        {loadFooter}
-      </>
-    );
   }
 
   // Axis range: the period itself, or whole months around the data. A bar
@@ -383,7 +529,12 @@ export function BusaBaseGantt({
 
   // A `read` grant on the Base may look at the timeline but not reschedule it.
   const canDrag =
-    Boolean(onPatchRecord) && !isAnon && hasApiKeyLevel(permissionLevel, "changeRequest");
+    Boolean(onPatchRecord) &&
+    !isAnon &&
+    !recordFind?.isPending &&
+    !isLoading &&
+    !readError &&
+    hasApiKeyLevel(permissionLevel, "changeRequest");
 
   // Apply the in-flight drag delta to a row for live preview.
   const previewDates = (row: Row, gesture = drag): { start: Date; end: Date } => {
@@ -409,6 +560,7 @@ export function BusaBaseGantt({
       gesture.recordId !== row.record.id ||
       gesture.deltaDays === 0 ||
       !onPatchRecord ||
+      gesture.scope !== interactionScope ||
       !canDrag
     ) {
       return;
@@ -468,7 +620,13 @@ export function BusaBaseGantt({
         : resizeEdge === "end" || (!resizeEdge && offsetX >= rect.width - edge)
           ? "resize-end"
           : "move";
-    const next = { recordId: row.record.id, mode, originX: event.clientX, deltaDays: 0 };
+    const next = {
+      recordId: row.record.id,
+      mode,
+      originX: event.clientX,
+      deltaDays: 0,
+      scope: interactionScope,
+    };
     liveDragRef.current = next;
     setDrag(next);
   };
@@ -487,8 +645,10 @@ export function BusaBaseGantt({
               }`}
               key={option}
               onClick={() => {
-                setScale(option);
-                setPeriodStart((start) => periodStartOf(start, option));
+                updateBrowsing({
+                  scale: option,
+                  start: toYMD(periodStartOf(periodStart, option)),
+                });
               }}
               type="button"
             >
@@ -501,7 +661,9 @@ export function BusaBaseGantt({
             <button
               aria-label={messages.base.ganttEarlier}
               className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              onClick={() => setPeriodStart((start) => shiftPeriod(start, scale, -1))}
+              onClick={() =>
+                updateBrowsing({ scale, start: toYMD(shiftPeriod(periodStart, scale, -1)) })
+              }
               type="button"
             >
               <ChevronLeft size={15} />
@@ -509,7 +671,9 @@ export function BusaBaseGantt({
             <button
               aria-label={messages.base.ganttLater}
               className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              onClick={() => setPeriodStart((start) => shiftPeriod(start, scale, 1))}
+              onClick={() =>
+                updateBrowsing({ scale, start: toYMD(shiftPeriod(periodStart, scale, 1)) })
+              }
               type="button"
             >
               <ChevronRight size={15} />
@@ -520,7 +684,9 @@ export function BusaBaseGantt({
             </span>
             <button
               className="ml-1 rounded-md border border-border/70 bg-card px-2 py-1 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
-              onClick={() => setPeriodStart(periodStartOf(new Date(), scale))}
+              onClick={() =>
+                updateBrowsing({ scale, start: toYMD(periodStartOf(new Date(), scale)) })
+              }
               type="button"
             >
               {messages.base.calendarToday}
@@ -531,6 +697,50 @@ export function BusaBaseGantt({
           </div>
         ) : null}
       </div>
+      {recordFind ? (
+        <p
+          className="sticky left-0 mb-3 text-muted-foreground text-xs"
+          data-testid="gantt-find-scope"
+        >
+          {periodMode ? findMessages.timelinePeriodScope : findMessages.timelineWholeScope}
+        </p>
+      ) : null}
+      {isLoading ? (
+        <div
+          aria-live="polite"
+          className="sticky left-0 mb-3 text-muted-foreground text-sm"
+          role="status"
+        >
+          {recordFind?.hasQuery || recordFind?.isPending
+            ? findMessages.searching
+            : messages.common.loading}
+        </div>
+      ) : null}
+      {!isLoading && !readError && recordFind?.hasQuery && collectionTotal === 0 ? (
+        <div
+          className="sticky left-0 mb-3 flex flex-wrap items-center gap-2 text-muted-foreground text-sm"
+          data-testid="base-record-find-empty"
+          role="status"
+        >
+          {periodMode ? findMessages.timelinePeriodEmpty : findMessages.empty}
+          <button
+            className="underline underline-offset-2 hover:text-foreground"
+            onClick={recordFind.clear}
+            type="button"
+          >
+            {findMessages.clear}
+          </button>
+        </div>
+      ) : null}
+      {!isLoading && !readError && records.length > rows.length && recordFind?.hasQuery ? (
+        <p
+          className="sticky left-0 mb-3 text-muted-foreground text-sm"
+          data-testid="gantt-find-invalid-dates"
+          role="status"
+        >
+          {fmt(findMessages.timelineInvalidDates, { count: records.length - rows.length })}
+        </p>
+      ) : null}
       <DragReviewNotice
         currentSearch={currentSearch}
         error={dropError}
@@ -558,7 +768,8 @@ export function BusaBaseGantt({
         {rows.map((row) => {
           const { start, end } = previewDates(row);
           const left = daysBetween(rangeStart, start) * dayPx;
-          const width = Math.max((daysBetween(start, end) + 1) * dayPx, dayPx);
+          const durationWidth = Math.max((daysBetween(start, end) + 1) * dayPx, dayPx);
+          const width = Math.max(durationWidth, MIN_BAR_RENDER_WIDTH);
           // Draw the visible intersection itself, rather than placing an
           // enormous bar outside the track. Its label and resize edges remain
           // reachable even when the real dates are outside this period. Drag
@@ -622,12 +833,26 @@ export function BusaBaseGantt({
           );
         })}
       </div>
-      {periodMode && rows.length === 0 && activeQuery.isSuccess ? (
+      {!isLoading &&
+      !readError &&
+      rows.length === 0 &&
+      !recordFind?.hasQuery &&
+      !recordFind?.isPending ? (
         <div className="sticky left-0 px-2 py-6 text-muted-foreground text-sm">
-          {messages.base.ganttEmptyPeriod}
+          {periodMode ? messages.base.ganttEmptyPeriod : messages.base.ganttNoDates}
         </div>
       ) : null}
       {loadFooter}
+      {!recordFind?.isPending && !activeQuery.hasNextPage && lastPage?.pagesCapped ? (
+        <p className="sticky left-0 px-2 py-3 text-muted-foreground text-sm" role="status">
+          {presentCoreError(
+            messages,
+            locale,
+            new Error(VIEW_TOO_LARGE_MESSAGE),
+            messages.shell.operationFailed,
+          )}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -1,0 +1,1 @@
+export const DEFAULT_SIDE_PANEL_WIDTH = 420;

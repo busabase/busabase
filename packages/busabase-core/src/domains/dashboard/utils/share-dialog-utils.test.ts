@@ -2,6 +2,8 @@ import type { EmbedLinkVO } from "busabase-contract/contract/embed-link-schemas"
 import { describe, expect, it } from "vitest";
 import {
   expiryIsoForPreset,
+  generateSharePassword,
+  isSharePasswordLengthValid,
   nearestSharedAncestor,
   partitionEmbedLinks,
   publicPreviewUrl,
@@ -66,5 +68,45 @@ describe("nearestSharedAncestor", () => {
   it("returns null when no ancestor carries its own share", () => {
     expect(nearestSharedAncestor(["root", "projects"], [row("elsewhere")])).toBeNull();
     expect(nearestSharedAncestor([], [row("root")])).toBeNull();
+  });
+});
+
+describe("generateSharePassword", () => {
+  /** A fake CSPRNG that hands out the given uint32 draws in order. */
+  const draws = (...values: number[]) => {
+    const queue = [...values];
+    return (array: Uint32Array) => {
+      array[0] = queue.shift() ?? 0;
+      return array;
+    };
+  };
+
+  it("produces six digits from the platform CSPRNG", () => {
+    for (let index = 0; index < 50; index += 1) {
+      const password = generateSharePassword();
+      expect(password).toMatch(/^\d{6}$/);
+      expect(isSharePasswordLengthValid(password)).toBe(true);
+    }
+  });
+
+  it("keeps leading zeros", () => {
+    expect(generateSharePassword(draws(42))).toBe("000042");
+  });
+
+  it("redraws instead of folding the biased top of the uint32 range in with modulo", () => {
+    // 4_294_000_000 is the first value of the incomplete last block of a
+    // million; `% 1e6` would turn it into 000000 and over-weight low codes.
+    expect(generateSharePassword(draws(4_294_000_000, 4_294_967_295, 123_456))).toBe("123456");
+    expect(generateSharePassword(draws(4_293_999_999))).toBe("999999");
+  });
+});
+
+describe("isSharePasswordLengthValid", () => {
+  it("accepts 4 to 64 characters, the bounds nodes.share.set enforces", () => {
+    expect(isSharePasswordLengthValid("")).toBe(false);
+    expect(isSharePasswordLengthValid("123")).toBe(false);
+    expect(isSharePasswordLengthValid("1234")).toBe(true);
+    expect(isSharePasswordLengthValid("x".repeat(64))).toBe(true);
+    expect(isSharePasswordLengthValid("x".repeat(65))).toBe(false);
   });
 });

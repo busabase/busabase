@@ -75,6 +75,42 @@ describe("Field management — delete / update / convert", () => {
     testBaseId = base.id;
   });
 
+  it("adds an app-user field to an existing populated Base through the oRPC createField endpoint", async () => {
+    const base = await client.bases.create({
+      autoMerge: true,
+      slug: "app-user-field-creation",
+      name: "Customer assignments",
+      fields: [{ slug: "title", name: "Title", type: "text" }],
+    });
+    await client.bases.createChangeRequest({
+      baseId: base.id,
+      autoMerge: true,
+      fields: { title: "Existing customer record" },
+    });
+    await client.views.changeRequest({
+      operation: "create",
+      baseId: base.id,
+      slug: "app-user-table",
+      name: "Table",
+      type: "table",
+      config: { filters: [], sorts: [] },
+      autoMerge: true,
+    });
+    const view = (await client.bases.listViews({ baseId: base.id })).find(
+      (view) => view.slug === "app-user-table",
+    );
+    if (!view) throw new Error("Expected materialized table view");
+    const updated = await client.bases.createField({
+      baseId: base.id,
+      slug: "customer",
+      name: "Customer",
+      type: "appUser",
+      requestId: "app-user-field-ui-create",
+      originViewId: view.id,
+    });
+    expect(updated.fields.find((field) => field.slug === "customer")?.type).toBe("appUser");
+  });
+
   afterAll(async () => {
     delete process.env.PG_DATABASE_URL;
     delete process.env.STORAGE_URL;

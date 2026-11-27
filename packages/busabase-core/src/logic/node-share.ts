@@ -3,6 +3,10 @@ import "server-only";
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { ORPCError } from "@orpc/server";
+import {
+  SHARE_PASSWORD_MAX_LENGTH,
+  SHARE_PASSWORD_MIN_LENGTH,
+} from "busabase-contract/contract/schemas";
 import type { NodeIcon } from "busabase-contract/types";
 import { and, desc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm";
 import {
@@ -12,12 +16,19 @@ import {
   resolveActorId,
 } from "../context";
 import { getDb } from "../db";
-import { type BusabaseNodeType, busabaseNodeShares, busabaseNodes } from "../db/schema";
+import {
+  type BusabaseNodeType,
+  busabaseNodeShares,
+  busabaseNodes,
+  type NodeSharePO,
+} from "../db/schema";
+import { decodeVaultValue, encodeVaultValue } from "../domains/vault/logic/vault-crypto";
 import { id, now } from "./kernel";
 import {
   assertNodePermission,
   buildNodeVisibilityCondition,
   getEffectiveNodeLevel,
+  hasNodePermission,
 } from "./node-acl";
 
 /**
@@ -66,16 +77,51 @@ export const isShareLive = (share: { scope: NodeShareScope; expiresAt: Date | nu
 };
 
 /**
- * Read a node's share row (space-scoped), or null when it was never shared.
- *
- * Requires `read` on the node. Without this gate any space member — including
- * one who cannot see the node at all — could probe an arbitrary node id and
- * learn whether it is published, whether it is password-protected, and when it
- * expires. `manage` (what `setNodeShare` demands) subsumes `read`, so the
- * internal calls below are unaffected.
+ * Reject a share password the unlock page could never accept (empty) or that
+ * is trivially guessable or untypeable. The `nodes.share.set` contract applies
+ * the same bounds, but this logic is also reached without it (MCP tools, other
+ * hosts, tests), and a password that slips past here becomes a link that is
+ * locked for good.
  */
-export async function getNodeShare(nodeId: string) {
-  await assertNodePermission(nodeId, "read");
+const assertSharePasswordShape = (password: string): void => {
+  if (password.length < SHARE_PASSWORD_MIN_LENGTH || password.length > SHARE_PASSWORD_MAX_LENGTH) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `A share password must be ${SHARE_PASSWORD_MIN_LENGTH}–${SHARE_PASSWORD_MAX_LENGTH} characters long.`,
+    });
+  }
+};
+
+/**
+ * Recover the stored plaintext share password, or null when it cannot be shown.
+ *
+ * Never throws. A payload that no longer decrypts (the server's Vault key was
+ * rotated, or the workspace was restored onto a server with a different key)
+ * is a "can't show it" answer, not a failure of the whole share read — the
+ * link itself is still guarded by the hash and keeps working.
+ *
+ * The recovered value is checked against the hash before it is returned,
+ * because the two columns can drift apart without either being corrupt: a
+ * server that predates the ciphertext column (an old pod mid-deploy, an older
+ * desktop build on the same database) changes `password_hash` and leaves the
+ * previous ciphertext behind. Showing that stale password would hand the owner
+ * one that no longer opens the link — worse than showing none. The cost is one
+ * scrypt per read, paid only by a manager reading a password-protected share.
+ */
+const revealSharePassword = async (
+  row: Pick<NodeSharePO, "passwordHash" | "passwordCiphertext">,
+): Promise<string | null> => {
+  if (!row.passwordHash || !row.passwordCiphertext) return null;
+  let password: string;
+  try {
+    password = decodeVaultValue(row.passwordCiphertext);
+  } catch {
+    return null;
+  }
+  return (await verifySharePassword(password, row.passwordHash)) ? password : null;
+};
+
+/** A node's own share row (PO), space-scoped and unchecked — callers gate access. */
+const readNodeShareRow = async (nodeId: string): Promise<NodeSharePO | null> => {
   const db = await getDb();
   const [row] = await db
     .select()
@@ -88,6 +134,57 @@ export async function getNodeShare(nodeId: string) {
     )
     .limit(1);
   return row ?? null;
+};
+
+/**
+ * A node's public-share settings as the caller may see them. Deliberately not
+ * the row: the hash and the ciphertext never leave this module, so no caller
+ * (the router's VO mapping included) can serialize them by accident.
+ */
+export interface NodeShareSettings {
+  nodeId: string;
+  scope: NodeShareScope;
+  capability: NodeShareCapability;
+  hasPassword: boolean;
+  /**
+   * Plaintext, only for a caller holding `manage` on the node. Null otherwise,
+   * and also when a password is set but cannot be shown — see
+   * `revealSharePassword`.
+   */
+  password: string | null;
+  expiresAt: Date | null;
+  updatedAt: Date;
+}
+
+/**
+ * Read a node's share settings (space-scoped), or null when it was never shared.
+ *
+ * Requires `read` on the node. Without this gate any space member — including
+ * one who cannot see the node at all — could probe an arbitrary node id and
+ * learn whether it is published, whether it is password-protected, and when it
+ * expires.
+ *
+ * The plaintext password is a second, higher bar: only a caller with `manage`
+ * on the node — the level `setNodeShare` demands to set it — gets it back. A
+ * reader who may see that the link is locked must not be able to open it on
+ * behalf of others, so below `manage` it is `null` while `hasPassword` still
+ * tells the truth. Resolved with the non-throwing check: a reader is not an
+ * error here, only someone with less to see.
+ */
+export async function getNodeShare(nodeId: string): Promise<NodeShareSettings | null> {
+  await assertNodePermission(nodeId, "read");
+  const row = await readNodeShareRow(nodeId);
+  if (!row) return null;
+  const canSeePassword = row.passwordHash != null && (await hasNodePermission(nodeId, "manage"));
+  return {
+    nodeId: row.nodeId,
+    scope: row.scope,
+    capability: row.capability,
+    hasPassword: row.passwordHash != null,
+    password: canSeePassword ? await revealSharePassword(row) : null,
+    expiresAt: row.expiresAt,
+    updatedAt: row.updatedAt,
+  };
 }
 
 /**
@@ -140,7 +237,9 @@ export async function listOwnLiveShareNodeIds(): Promise<Set<string>> {
 /**
  * One row of the space-level public-share listing. The share facts plus just
  * enough of the node to render a governance row and open it — nothing that
- * would need a second query per row, and above all NOT `passwordHash`.
+ * would need a second query per row, and above all neither `passwordHash` nor
+ * `passwordCiphertext` (the listing never even selects the latter: one node's
+ * password is read from that node's own `getNodeShare`, by its manager).
  */
 export interface OwnLiveShareSummary {
   nodeId: string;
@@ -612,26 +711,20 @@ const resolveGatingShare = async (nodeId: string) => {
 };
 
 /**
- * Check a plaintext share password against the share gating a public node.
+ * Resolve the `{id-or-slug}` an unlock request names to the live public node it
+ * means, or null. Exactly the resolution `unlockPublicShare` performs (id
+ * first, then an unambiguous slug), exported so a host can key per-node state
+ * — the unlock route's failed-attempt throttle — on the node itself rather than
+ * on whichever spelling of it the request used; otherwise alternating a node's
+ * id and slug would double an attacker's guess budget.
  *
- * Returns the node id and a non-reversible password version on success. The
- * host stores both in a signed cookie and revalidates that version on later
- * requests, so changing the password invalidates old browser unlocks. Returns
- * null for a wrong password, an unknown node, and a node that isn't publicly
- * shared at all, so a failed attempt can't enumerate which of those it was.
- *
- * A node with no password on its gating share unlocks trivially: callers may
- * treat "unlock succeeded" as the single condition to proceed, without
- * branching on whether a password was required.
- *
- * NOT rate-limited here. Throttling belongs at the host's HTTP edge, where the
- * client IP lives; this function has no notion of a caller identity to key on.
+ * Two indexed lookups at most, no password work, nothing about the node beyond
+ * its id: a null answer reveals no more than a failed unlock already does.
  */
-export async function unlockPublicShare(
+export async function resolvePublicShareNodeId(
   nodeIdOrSlug: string,
-  password: string,
   nodeType?: string,
-): Promise<{ nodeId: string; passwordVersion: string | null } | null> {
+): Promise<string | null> {
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const activePublicConditions = [
@@ -665,13 +758,45 @@ export async function unlockPublicShare(
         )
         .limit(2);
   const node = byId ?? (slugMatches.length === 1 ? slugMatches[0] : null);
-  if (!node) return null;
+  return node?.id ?? null;
+}
 
-  const share = await resolveGatingShare(node.id);
+/**
+ * Check a plaintext share password against the share gating a public node.
+ *
+ * Returns the node id and a non-reversible password version on success. The
+ * host stores both in a signed cookie and revalidates that version on later
+ * requests, so changing the password invalidates old browser unlocks. Returns
+ * null for a wrong password, an unknown node, and a node that isn't publicly
+ * shared at all, so a failed attempt can't enumerate which of those it was.
+ *
+ * A node with no password on its gating share unlocks trivially: callers may
+ * treat "unlock succeeded" as the single condition to proceed, without
+ * branching on whether a password was required.
+ *
+ * Only ever checks the scrypt hash. The encrypted copy of the password
+ * (`password_ciphertext`) exists for a manager to read it back and takes no
+ * part here, so a ciphertext that fails to decrypt can never lock a visitor
+ * out, and one that decrypts can never let a visitor in.
+ *
+ * NOT rate-limited here: this function has no notion of a caller identity to
+ * key on. The host throttles failed attempts at its HTTP edge, where the
+ * client IP lives — Busabase Cloud's unlock route does, keyed on the node id
+ * from `resolvePublicShareNodeId`.
+ */
+export async function unlockPublicShare(
+  nodeIdOrSlug: string,
+  password: string,
+  nodeType?: string,
+): Promise<{ nodeId: string; passwordVersion: string | null } | null> {
+  const nodeId = await resolvePublicShareNodeId(nodeIdOrSlug, nodeType);
+  if (!nodeId) return null;
+
+  const share = await resolveGatingShare(nodeId);
   if (!share) return null;
-  if (!share.passwordHash) return { nodeId: node.id, passwordVersion: null };
+  if (!share.passwordHash) return { nodeId, passwordVersion: null };
   return (await verifySharePassword(password, share.passwordHash))
-    ? { nodeId: node.id, passwordVersion: passwordVersionOf(share.passwordHash) }
+    ? { nodeId, passwordVersion: passwordVersionOf(share.passwordHash) }
     : null;
 }
 
@@ -770,17 +895,24 @@ export async function setNodeShare(
   input: {
     scope: NodeShareScope;
     capability?: NodeShareCapability;
-    /** Plaintext; hashed here. `null` clears it. Only allowed while scope="public". */
+    /**
+     * Plaintext, 4–64 characters; stored as a hash (the verifier) plus a
+     * Vault-encrypted copy (so a manager can read it back). `null` clears
+     * both, `undefined` keeps both. Only allowed while scope="public".
+     */
     password?: string | null;
     expiresAt?: Date | null;
   },
-) {
+): Promise<NodeShareSettings | null> {
   await assertNodePermission(nodeId, "manage");
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const actorId = resolveActorId("local-user");
   const timestamp = now();
 
+  if (typeof input.password === "string") {
+    assertSharePasswordShape(input.password);
+  }
   if (input.password && input.scope !== "public") {
     // A password only means anything on the public tier (Feishu offers it only
     // for the internet scope) — accepting one otherwise would imply protection
@@ -790,13 +922,22 @@ export async function setNodeShare(
     });
   }
 
-  const existing = await getNodeShare(nodeId);
-  const passwordHash =
+  const existing = await readNodeShareRow(nodeId);
+  // The hash and its encrypted twin always move together: a new password
+  // rewrites both, `null` clears both, and an omitted password leaves both as
+  // they are (including a legacy row's hash-only state).
+  const password =
     input.password === undefined
-      ? (existing?.passwordHash ?? null)
+      ? {
+          passwordHash: existing?.passwordHash ?? null,
+          passwordCiphertext: existing?.passwordCiphertext ?? null,
+        }
       : input.password === null
-        ? null
-        : await hashSharePassword(input.password);
+        ? { passwordHash: null, passwordCiphertext: null }
+        : {
+            passwordHash: await hashSharePassword(input.password),
+            passwordCiphertext: encodeVaultValue(input.password),
+          };
 
   if (existing) {
     await db
@@ -804,7 +945,7 @@ export async function setNodeShare(
       .set({
         scope: input.scope,
         capability: input.capability ?? existing.capability,
-        passwordHash,
+        ...password,
         expiresAt: input.expiresAt === undefined ? existing.expiresAt : input.expiresAt,
         updatedBy: actorId,
         updatedAt: timestamp,
@@ -817,7 +958,7 @@ export async function setNodeShare(
       nodeId,
       scope: input.scope,
       capability: input.capability ?? "read",
-      passwordHash,
+      ...password,
       expiresAt: input.expiresAt ?? null,
       createdBy: actorId,
       updatedBy: actorId,
@@ -835,6 +976,6 @@ export async function setNodeShare(
  * are kept so re-enabling later produces the very same link (the URL never
  * contained a secret, so there is nothing to rotate).
  */
-export async function disableNodeShare(nodeId: string) {
+export async function disableNodeShare(nodeId: string): Promise<NodeShareSettings | null> {
   return setNodeShare(nodeId, { scope: "none" });
 }

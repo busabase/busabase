@@ -18,7 +18,6 @@ import {
   EmbedNodeTypeSchema,
   EmbedTargetTypeSchema,
 } from "busabase-contract/contract/embed-link-schemas";
-import type { FileTreeReadFileVO } from "busabase-contract/types";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, type SQL } from "drizzle-orm";
 import {
   type BusabaseEmbedRecordScope,
@@ -35,14 +34,9 @@ import { assertChangeRequestPermission, getChangeRequest } from "../../logic/cr-
 import { rootNodeIdForSpace } from "../../logic/kernel";
 import { buildBaseVisibilityExists, getEffectiveNodeLevel } from "../../logic/node-acl";
 import { getAirApp, readAirAppFile } from "../airapp/handlers";
-import { getBase, getRecord, listRecordsPaged } from "../base/handlers";
-import { getDoc } from "../doc/handlers";
-import { getDrive, readDriveFile } from "../drive/handlers";
-import { getFileNodeDetail } from "../file-node/handlers";
-import { getFolder } from "../folder/handlers";
-import { getSkill, readSkillFile } from "../skill/handlers";
+import { getRecord } from "../base/handlers";
 import { EMBED_PUBLIC_ID_PATTERN, EMBED_SECRET_PATTERN } from "./capability";
-import type { AirAppEmbedRuntimeVO, EmbedNodeDetailVO, ResolvedPolymorphicEmbedVO } from "./types";
+import type { AirAppEmbedRuntimeVO, ResolvedPolymorphicEmbedVO } from "./types";
 
 export { EMBED_PUBLIC_ID_PATTERN, EMBED_SECRET_PATTERN } from "./capability";
 
@@ -613,88 +607,23 @@ export const revokeEmbedLink = async (id: string): Promise<{ revoked: true }> =>
   return { revoked: true };
 };
 
-const readEntryFile = async (
-  nodeId: string,
-  entryFile: string,
-  reader: (nodeId: string, path: string) => Promise<FileTreeReadFileVO>,
-): Promise<FileTreeReadFileVO | null> => {
-  if (!entryFile) return null;
-  try {
-    return await reader(nodeId, entryFile);
-  } catch {
-    return null;
-  }
-};
-
-export const loadEmbedNodeDetail = async (
-  nodeId: string,
-  nodeType: string,
-): Promise<EmbedNodeDetailVO | null> => {
+/**
+ * Whether a node the link authorizes can actually be rendered. The link makes
+ * its target readable on its own (`getEffectiveNodeLevel` answers `read` for
+ * the embed target), so all that is left is "does the content still exist" —
+ * a Base node whose Base row is gone has nothing for the detail view to show.
+ * Content itself is read by the page's Node Detail components, per request,
+ * under the same capability.
+ */
+const hasRenderableEmbedNode = async (nodeId: string, nodeType: string): Promise<boolean> => {
+  if (nodeType !== "base") return true;
   const db = await getDb();
-  if (nodeType === "base") {
-    const [baseRow] = await db
-      .select({ id: busabaseBases.id })
-      .from(busabaseBases)
-      .where(and(eq(busabaseBases.nodeId, nodeId), isNull(busabaseBases.deletedAt)))
-      .limit(1);
-    if (!baseRow) return null;
-    const [base, page] = await Promise.all([
-      getBase(baseRow.id),
-      listRecordsPaged({ baseId: baseRow.id, limit: 50 }),
-    ]);
-    return base
-      ? {
-          type: "base",
-          base,
-          records: page.records.map((record) => ({
-            ...record,
-            createdByUser: record.createdByUser ?? null,
-            // Resolved by `hydrateRecords`; for an Embed Link visitor the host
-            // leaves `resolveUsers` unset, so this is normally `{}` and the
-            // client falls back to ids (see `public-access.ts`).
-            fieldUsers: record.fieldUsers ?? {},
-            headCommit: {
-              ...record.headCommit,
-              authorUser: record.headCommit.authorUser ?? null,
-            },
-          })),
-          recordsTruncated: page.nextCursor !== null,
-        }
-      : null;
-  }
-  if (nodeType === "doc") return { type: "doc", doc: await getDoc(nodeId) };
-  if (nodeType === "file") return { type: "file", file: await getFileNodeDetail(nodeId) };
-  if (nodeType === "drive") {
-    const drive = await getDrive(nodeId);
-    return {
-      type: "drive",
-      drive: { ...drive, skippedGitignorePaths: drive.skippedGitignorePaths ?? [] },
-      entryFile: await readEntryFile(nodeId, drive.entryFile, readDriveFile),
-    };
-  }
-  if (nodeType === "skill") {
-    const skill = await getSkill(nodeId);
-    return {
-      type: "skill",
-      skill: { ...skill, skippedGitignorePaths: skill.skippedGitignorePaths ?? [] },
-      entryFile: await readEntryFile(nodeId, skill.entryFile, readSkillFile),
-    };
-  }
-  if (nodeType === "folder") {
-    const folder = await getFolder(nodeId);
-    return {
-      type: "folder",
-      folder: { ...folder, children: folder.children.filter((child) => child.type !== "airapp") },
-    };
-  }
-  if (nodeType === "airapp") {
-    const airapp = await getAirApp(nodeId);
-    return {
-      type: "airapp",
-      airapp: { ...airapp, skippedGitignorePaths: airapp.skippedGitignorePaths ?? [] },
-    };
-  }
-  return null;
+  const [baseRow] = await db
+    .select({ id: busabaseBases.id })
+    .from(busabaseBases)
+    .where(and(eq(busabaseBases.nodeId, nodeId), isNull(busabaseBases.deletedAt)))
+    .limit(1);
+  return Boolean(baseRow);
 };
 
 interface ResolvedEmbedLinkRecord {
@@ -838,6 +767,72 @@ const resolveActiveEmbedLink = async (id: string, secret: string, at: Date) => {
   return actorState.active ? { row, actorState } : null;
 };
 
+/**
+ * Authority for an already-open content page. Unlike
+ * frame-policy metadata, this proves the creator is still authorized and the
+ * target is still present, including after the deadline has passed.
+ * Ordinary nodes need only their identity. Dedicated previews resolve exactly
+ * their existing record/ChangeRequest read; only a status leaves this helper.
+ */
+export const resolveEmbedStatus = async (
+  id: string,
+  secret: string,
+  at = new Date(),
+): Promise<{ state: "active" | "expired"; expiresAt: string } | null> => {
+  const row = await readEmbedLinkRecord(id, secret);
+  if (!row || row.revokedAt !== null) return null;
+  const actor = await resolveEmbedActorState({
+    actorId: row.createdBy,
+    spaceId: row.spaceId,
+    apiKeyId: row.createdByApiKeyId,
+  });
+  if (!actor.active) return null;
+  const db = await getDb();
+  let present: boolean;
+  try {
+    present = await runWithEmbedContext(
+      {
+        db,
+        actorId: row.createdBy,
+        spaceId: row.spaceId,
+        restrictedVisibility: actor.restrictedVisibility,
+        ...(row.type === "node" ? { embedTargetNodeId: row.typeId } : {}),
+      },
+      async () => {
+        if (row.type === "record-detail") return Boolean(await getRecord(row.typeId));
+        if (row.type === "change-request") return Boolean(await getChangeRequest(row.typeId));
+        const [node] = await db
+          .select({ type: busabaseNodes.type })
+          .from(busabaseNodes)
+          .where(
+            and(
+              eq(busabaseNodes.id, row.typeId),
+              eq(busabaseNodes.spaceId, row.spaceId),
+              isNull(busabaseNodes.archivedAt),
+              isNull(busabaseNodes.deletedAt),
+            ),
+          )
+          .limit(1);
+        return Boolean(
+          node &&
+            node.type !== "airapp" &&
+            EmbedNodeTypeSchema.safeParse(node.type).success &&
+            (await hasRenderableEmbedNode(row.typeId, node.type)),
+        );
+      },
+    );
+  } catch (error) {
+    if (error instanceof ORPCError && (error.code === "NOT_FOUND" || error.code === "FORBIDDEN"))
+      return null;
+    throw error;
+  }
+  if (!present) return null;
+  return {
+    state: isExpiredEmbedLinkRecord(row, at) ? "expired" : "active",
+    expiresAt: row.expiresAt.toISOString(),
+  };
+};
+
 export const resolveEmbedRequestContext = async (
   id: string,
   secret: string,
@@ -878,7 +873,7 @@ export const resolveEmbedLink = async (
   const db = await getDb();
 
   const [targetNode] = await db
-    .select({ name: busabaseNodes.name, type: busabaseNodes.type })
+    .select({ name: busabaseNodes.name, slug: busabaseNodes.slug, type: busabaseNodes.type })
     .from(busabaseNodes)
     .where(
       and(
@@ -916,9 +911,19 @@ export const resolveEmbedLink = async (
           const record = await getRecord(row.typeId);
           return record ? { ...base, type: row.type, record } : null;
         }
-        if (!targetNode || !EmbedNodeTypeSchema.safeParse(targetNode.type).success) return null;
-        const detail = await loadEmbedNodeDetail(row.typeId, targetNode.type);
-        return detail ? { ...base, type: row.type, detail } : null;
+        const nodeType = targetNode ? EmbedNodeTypeSchema.safeParse(targetNode.type) : null;
+        if (!targetNode || !nodeType?.success) return null;
+        if (!(await hasRenderableEmbedNode(row.typeId, nodeType.data))) return null;
+        return {
+          ...base,
+          type: row.type,
+          node: {
+            id: row.typeId,
+            type: nodeType.data,
+            slug: targetNode.slug || row.typeId,
+            name: targetNode.name,
+          },
+        };
       },
     );
   } catch (error) {

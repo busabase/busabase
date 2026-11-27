@@ -7,7 +7,7 @@ import {
   os,
 } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
-import type { SharedNodeVO } from "busabase-contract/contract/schemas";
+import type { NodeShareVO, SharedNodeVO } from "busabase-contract/contract/schemas";
 import { runWithAttachmentObjectLifecycle } from "open-domains/attachments/logic";
 import {
   getContextEmbedRecordScope,
@@ -70,6 +70,7 @@ import {
   disableNodeShare,
   getNodeShare,
   listOwnLiveShares,
+  type NodeShareSettings,
   type OwnLiveShareSummary,
   setNodeShare,
 } from "./logic/node-share";
@@ -114,29 +115,24 @@ import {
 const busabase = implement(busabaseContract);
 
 /**
- * PO → VO for a node's public-share row. SECURITY: strips `passwordHash` down to
- * a boolean `hasPassword` flag — the stored hash must never cross the wire — and
- * serializes the dates. Returns `null` when the node was never shared.
+ * Logic result → VO for a node's public-share settings. SECURITY: the logic
+ * layer never hands this the row — `passwordHash` and `passwordCiphertext`
+ * stay inside `logic/node-share.ts`, already reduced to `hasPassword` and to a
+ * `password` that is null unless the caller manages the node — so the fields
+ * are picked one by one here and nothing else can ride along. Serializes the
+ * dates. Returns `null` when the node was never shared.
  */
-const toNodeShareVO = (
-  row: Awaited<ReturnType<typeof getNodeShare>>,
-): {
-  nodeId: string;
-  scope: "none" | "public";
-  capability: "read" | "submit";
-  hasPassword: boolean;
-  expiresAt: string | null;
-  updatedAt: string;
-} | null =>
-  row === null
+const toNodeShareVO = (settings: NodeShareSettings | null): NodeShareVO | null =>
+  settings === null
     ? null
     : {
-        nodeId: row.nodeId,
-        scope: row.scope,
-        capability: row.capability,
-        hasPassword: row.passwordHash != null,
-        expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
-        updatedAt: row.updatedAt.toISOString(),
+        nodeId: settings.nodeId,
+        scope: settings.scope,
+        capability: settings.capability,
+        hasPassword: settings.hasPassword,
+        password: settings.password,
+        expiresAt: settings.expiresAt ? settings.expiresAt.toISOString() : null,
+        updatedAt: settings.updatedAt.toISOString(),
       };
 
 /**

@@ -91,6 +91,18 @@ describe("fetchRecordsByIds", () => {
 });
 
 describe("getLinkedRecordIds", () => {
+  it("decodes legacy stringified arrays for both fetching and rendering", () => {
+    const legacy = [JSON.stringify([JSON.stringify(["rec_a", "rec_b"])])];
+    expect(getRelationRecordIds(legacy)).toEqual(["rec_a", "rec_b"]);
+    expect(getRelationRecordIds(["rec_a", "rec_a", null, 4])).toEqual(["rec_a"]);
+    expect(getRelationRecordIds('["broken')).toEqual([]);
+    const source = {
+      base: { fields: [{ slug: "related", type: "relation", options: {} }] },
+      headCommit: { payload: { related: legacy } },
+      computedFields: {},
+    } as unknown as RecordVO;
+    expect(getLinkedRecordIds([source], new Set())).toEqual(["rec_a", "rec_b"]);
+  });
   it("adds ids a Lookup-of-a-relation renders, one level deep, skipping hidden targets", () => {
     const relationTarget = (targetBaseId: string) => ({
       slug: "owner",

@@ -536,7 +536,11 @@ export const mergeBaseConvertField = async (
   }
   await db
     .update(busabaseBaseFields)
-    .set({ type: fieldData.newType, options: newOptions })
+    .set({
+      type: fieldData.newType,
+      options: newOptions,
+      ...(fieldData.name !== undefined ? { name: iStringToText(fieldData.name) } : {}),
+    })
     .where(eq(busabaseBaseFields.id, fieldData.fieldId));
 
   // Rewrite the authoritative record data for one chunk. Records are hydrated from

@@ -7,8 +7,8 @@ import { Label } from "kui/label";
 import { Skeleton } from "kui/skeleton";
 import { Switch } from "kui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
-import { Eye, KeyRound, Loader2, Plus, Save, Trash2, Variable } from "lucide-react";
-import { type ReactNode, useEffect, useRef } from "react";
+import { Eye, EyeOff, KeyRound, Loader2, Plus, Save, Trash2, Variable } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 const VAULT_ROW_SKELETON_IDS = ["vault-row-skel-1", "vault-row-skel-2", "vault-row-skel-3"];
 
@@ -63,6 +63,8 @@ export interface VaultSettingsPanelLabels {
   clear: () => string;
   save: () => string;
   saving: () => string;
+  reveal?: () => string;
+  hide?: () => string;
 }
 
 export interface VaultScopeTab {
@@ -96,6 +98,13 @@ export interface VaultSettingsPanelProps {
   onActiveItemTabChange: (tab: "secrets" | "variables") => void;
 
   showSecrets: boolean;
+  maskVariables?: boolean;
+  storedSecretControls?: {
+    configuredLabel: string;
+    replaceLabel: string;
+    cancelLabel: string;
+    placeholder: string;
+  };
 
   onUpdateRow: (
     id: string,
@@ -109,6 +118,11 @@ export interface VaultSettingsPanelProps {
   isClearing?: boolean;
   saveDisabled?: boolean;
   clearDisabled?: boolean;
+  readOnly?: boolean;
+  isRowReadOnly?: (id: string) => boolean;
+  /** Host-owned metadata and reversible actions; never resolved Vault values. */
+  renderRowExtra?: (row: VaultRow) => ReactNode;
+  renderRowAction?: (row: VaultRow) => ReactNode;
 
   onReveal?: (itemId: string) => void;
   revealPending?: boolean;
@@ -143,6 +157,8 @@ export function VaultSettingsPanel({
   activeItemTab,
   onActiveItemTabChange,
   showSecrets,
+  maskVariables = false,
+  storedSecretControls,
   onUpdateRow,
   onRemoveRow,
   onAddRow,
@@ -152,15 +168,28 @@ export function VaultSettingsPanel({
   isClearing = false,
   saveDisabled = false,
   clearDisabled = false,
+  readOnly = false,
+  isRowReadOnly = () => false,
   onReveal,
   revealPending = false,
   showFooter = true,
   topSlot,
   bottomSlot,
   message,
+  renderRowExtra,
+  renderRowAction,
 }: VaultSettingsPanelProps) {
   const isBoxed = variant === "boxed";
   const previousRowIdsRef = useRef<string[]>([]);
+  const [visibleVariables, setVisibleVariables] = useState<Set<string>>(new Set());
+  const [replacingSecrets, setReplacingSecrets] = useState<Set<string>>(new Set());
+  const replacementFocusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!replacementFocusRef.current || !replacingSecrets.has(replacementFocusRef.current)) return;
+    document.getElementById(`vault-value-${replacementFocusRef.current}`)?.focus();
+    replacementFocusRef.current = null;
+  }, [replacingSecrets]);
 
   // Focus the name of a row the user just added, whichever Add button the host
   // renders. Adding keeps every existing row and appends one; loading, clearing
@@ -216,119 +245,197 @@ export function VaultSettingsPanel({
             {kind === "secret" ? labels.noSecrets() : labels.noVariables()}
           </p>
         ) : null}
-        {visibleRows.map((row) => (
-          <div
-            key={row.id}
-            className={
-              isBoxed
-                ? "rounded-md border bg-card p-3"
-                : "group px-3 py-3 transition-colors hover:bg-muted/20"
-            }
-          >
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_2.5rem]">
-              <div className="space-y-1.5">
-                <Label htmlFor={`vault-key-${row.id}`}>{labels.nameLabel()}</Label>
-                <Input
-                  id={`vault-key-${row.id}`}
-                  placeholder={kind === "secret" ? "API_KEY" : "DEFAULT_MODEL"}
-                  value={row.key}
-                  onChange={(event) => onUpdateRow(row.id, { key: event.target.value })}
-                  className={inputClassName}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={`vault-value-${row.id}`}>{labels.valueLabel()}</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id={`vault-value-${row.id}`}
-                    placeholder={labels.valuePlaceholder()}
-                    type={kind === "secret" && !showSecrets ? "password" : "text"}
-                    value={row.value}
-                    onChange={(event) => onUpdateRow(row.id, { value: event.target.value })}
-                    className={inputClassName}
-                  />
-                  {onReveal && kind === "secret" && row.id.startsWith("vault_") ? (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      type="button"
-                      onClick={() => onReveal(row.id)}
-                      disabled={revealPending}
-                    >
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                type="button"
-                onClick={() => onRemoveRow(row.id)}
-                className={
-                  isBoxed
-                    ? "self-end"
-                    : "self-end text-muted-foreground opacity-100 transition-opacity hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
-                }
-              >
-                <Trash2 className="h-4 w-4 text-destructive" />
-              </Button>
-            </div>
+        {visibleRows.map((row) => {
+          const storedSecret =
+            kind === "secret" && row.id.startsWith("vault_") && storedSecretControls;
+          const replacing = replacingSecrets.has(row.id);
+          return (
             <div
+              key={row.id}
               className={
                 isBoxed
-                  ? "mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]"
-                  : "mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]"
+                  ? "rounded-md border bg-card p-3"
+                  : "group px-3 py-3 transition-colors hover:bg-muted/20"
               }
             >
-              <div className="space-y-1.5">
-                <Label htmlFor={`vault-description-${row.id}`}>{labels.descriptionLabel()}</Label>
-                <Input
-                  id={`vault-description-${row.id}`}
-                  placeholder={labels.descriptionPlaceholder()}
-                  value={row.description}
-                  onChange={(event) => onUpdateRow(row.id, { description: event.target.value })}
-                  className={descriptionInputClassName}
-                />
-              </div>
-              {isBoxed ? (
-                <div className="flex items-end gap-2 pb-2">
-                  {accessFlags.map((flag) => (
-                    <div key={flag.key} className="flex items-center gap-2">
-                      <Switch
-                        id={`vault-${flag.key}-${row.id}`}
-                        checked={Boolean(row.access[flag.key])}
-                        onCheckedChange={(checked) =>
-                          onUpdateRow(row.id, { access: { ...row.access, [flag.key]: checked } })
-                        }
-                      />
-                      <Label
-                        htmlFor={`vault-${flag.key}-${row.id}`}
-                        className="cursor-pointer whitespace-nowrap text-xs font-normal text-muted-foreground"
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_2.5rem]">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`vault-key-${row.id}`}>{labels.nameLabel()}</Label>
+                  <Input
+                    id={`vault-key-${row.id}`}
+                    placeholder={kind === "secret" ? "API_KEY" : "DEFAULT_MODEL"}
+                    value={row.key}
+                    onChange={(event) => onUpdateRow(row.id, { key: event.target.value })}
+                    className={inputClassName}
+                    disabled={readOnly || isRowReadOnly(row.id)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`vault-value-${row.id}`}>{labels.valueLabel()}</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id={`vault-value-${row.id}`}
+                      placeholder={
+                        storedSecret
+                          ? replacing
+                            ? storedSecret.placeholder
+                            : storedSecret.configuredLabel
+                          : labels.valuePlaceholder()
+                      }
+                      type={
+                        (kind === "secret" && !showSecrets) ||
+                        (kind === "variable" && maskVariables && !visibleVariables.has(row.id))
+                          ? "password"
+                          : "text"
+                      }
+                      value={row.value}
+                      readOnly={Boolean(storedSecret) && !replacing}
+                      onChange={(event) => onUpdateRow(row.id, { value: event.target.value })}
+                      className={inputClassName}
+                      disabled={readOnly || isRowReadOnly(row.id)}
+                    />
+                    {storedSecret ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        disabled={readOnly || isRowReadOnly(row.id)}
+                        aria-label={`${replacing ? storedSecret.cancelLabel : storedSecret.replaceLabel}: ${row.key}`}
+                        onClick={() => {
+                          if (replacing) onUpdateRow(row.id, { value: "" });
+                          else replacementFocusRef.current = row.id;
+                          setReplacingSecrets((current) => {
+                            const next = new Set(current);
+                            if (replacing) next.delete(row.id);
+                            else next.add(row.id);
+                            return next;
+                          });
+                        }}
                       >
-                        {flag.label}
-                      </Label>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 text-xs text-muted-foreground lg:justify-end lg:pt-6">
-                  {accessFlags.map((flag) => (
-                    <div key={flag.key} className="flex items-center gap-2 whitespace-nowrap">
-                      <Switch
-                        checked={Boolean(row.access[flag.key])}
-                        onCheckedChange={(checked) =>
-                          onUpdateRow(row.id, { access: { ...row.access, [flag.key]: checked } })
+                        {replacing ? storedSecret.cancelLabel : storedSecret.replaceLabel}
+                      </Button>
+                    ) : null}
+                    {kind === "variable" && maskVariables ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        type="button"
+                        aria-label={`${visibleVariables.has(row.id) ? (labels.hide?.() ?? labels.valueLabel()) : (labels.reveal?.() ?? labels.valueLabel())}: ${row.key}`}
+                        aria-pressed={visibleVariables.has(row.id)}
+                        onClick={() =>
+                          setVisibleVariables((current) => {
+                            const next = new Set(current);
+                            if (next.has(row.id)) next.delete(row.id);
+                            else next.add(row.id);
+                            return next;
+                          })
                         }
-                      />
-                      <span>{flag.label}</span>
-                    </div>
-                  ))}
+                      >
+                        {visibleVariables.has(row.id) ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </Button>
+                    ) : null}
+                    {!storedSecret &&
+                    onReveal &&
+                    kind === "secret" &&
+                    row.id.startsWith("vault_") ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        type="button"
+                        onClick={() => onReveal(row.id)}
+                        disabled={revealPending || readOnly}
+                        aria-label={`${labels.valueLabel()}: ${row.key}`}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
-              )}
+                {renderRowAction?.(row) ?? (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    type="button"
+                    onClick={() => onRemoveRow(row.id)}
+                    disabled={readOnly || isRowReadOnly(row.id)}
+                    aria-label={`${labels.clear()}: ${row.key || labels.nameLabel()}`}
+                    className={
+                      isBoxed
+                        ? "self-end"
+                        : "self-end text-muted-foreground opacity-100 transition-opacity hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                    }
+                  >
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                )}
+              </div>
+              {renderRowExtra?.(row)}
+              <div
+                className={
+                  accessFlags.length === 0
+                    ? "mt-3"
+                    : isBoxed
+                      ? "mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+                      : "mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]"
+                }
+              >
+                <div className="space-y-1.5">
+                  <Label htmlFor={`vault-description-${row.id}`}>{labels.descriptionLabel()}</Label>
+                  <Input
+                    id={`vault-description-${row.id}`}
+                    placeholder={labels.descriptionPlaceholder()}
+                    value={row.description}
+                    onChange={(event) => onUpdateRow(row.id, { description: event.target.value })}
+                    className={descriptionInputClassName}
+                    disabled={readOnly || isRowReadOnly(row.id)}
+                  />
+                </div>
+                {accessFlags.length === 0 ? null : isBoxed ? (
+                  <div className="flex items-end gap-2 pb-2">
+                    {accessFlags.map((flag) => (
+                      <div key={flag.key} className="flex items-center gap-2">
+                        <Switch
+                          id={`vault-${flag.key}-${row.id}`}
+                          checked={Boolean(row.access[flag.key])}
+                          disabled={readOnly || isRowReadOnly(row.id)}
+                          onCheckedChange={(checked) =>
+                            onUpdateRow(row.id, { access: { ...row.access, [flag.key]: checked } })
+                          }
+                        />
+                        <Label
+                          htmlFor={`vault-${flag.key}-${row.id}`}
+                          className="cursor-pointer whitespace-nowrap text-xs font-normal text-muted-foreground"
+                        >
+                          {flag.label}
+                        </Label>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1 text-xs text-muted-foreground lg:justify-end lg:pt-6">
+                    {accessFlags.map((flag) => (
+                      <div key={flag.key} className="flex items-center gap-2 whitespace-nowrap">
+                        <Switch
+                          aria-label={`${row.key || labels.nameLabel()}: ${flag.label}`}
+                          checked={Boolean(row.access[flag.key])}
+                          disabled={readOnly || isRowReadOnly(row.id)}
+                          onCheckedChange={(checked) =>
+                            onUpdateRow(row.id, { access: { ...row.access, [flag.key]: checked } })
+                          }
+                        />
+                        <span>{flag.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   };
@@ -399,15 +506,19 @@ export function VaultSettingsPanel({
 
         {showFooter ? (
           <div className="flex flex-col gap-2 border-t border-border/40 pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <Button variant="ghost" onClick={onAddRow}>
+            <Button variant="ghost" onClick={onAddRow} disabled={readOnly}>
               <Plus className="h-4 w-4" />
               {activeItemTab === "secrets" ? labels.addSecret() : labels.addVariable()}
             </Button>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={onClear} disabled={isClearing || clearDisabled}>
+              <Button
+                variant="outline"
+                onClick={onClear}
+                disabled={readOnly || isClearing || clearDisabled}
+              >
                 {labels.clear()}
               </Button>
-              <Button onClick={onSave} disabled={isSaving || saveDisabled}>
+              <Button onClick={onSave} disabled={readOnly || isSaving || saveDisabled}>
                 {isSaving ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (

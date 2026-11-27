@@ -591,6 +591,31 @@ describe("AgentPromptsView outcome-first preview", () => {
     );
   });
 
+  it("describes a non-node footer without implying node merge rules", async () => {
+    const vaultPrompt: NodePrompt = {
+      ...framedPrompt,
+      body: "Target: Vault\n\nGuide me through the Vault UI.\n\nKeep other items unchanged.",
+      target: "Target: Vault",
+      footer: "Keep other items unchanged.",
+      intent: "change",
+    };
+    render(
+      <CoreI18nProvider locale="en">
+        <AgentPromptsView
+          askAgent={null}
+          capabilities={[]}
+          footerSummary="Scope and permissions"
+          onHandedOff={() => {}}
+          scenarios={[vaultPrompt]}
+        />
+      </CoreI18nProvider>,
+    );
+    expect(screen.getByTestId("agent-prompts-included").querySelector("summary")?.textContent).toBe(
+      "Included: Scope and permissions",
+    );
+    expect(await copy()).toBe(vaultPrompt.body);
+  });
+
   it("unfolds everything when the clipboard refuses, so it can be copied by hand", async () => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -610,6 +635,38 @@ describe("AgentPromptsView outcome-first preview", () => {
 });
 
 describe("AgentPromptsView locator card", () => {
+  it("shows a compact sentence but copies the full instance and workspace locator", async () => {
+    const target = "Busabase Vault / Team A (spaceId: org_team_a) / https://cloud.example.test";
+    const displayTarget = "Busabase Vault · Team A (space ID: org_team_a)";
+    render(
+      <CoreI18nProvider locale="en">
+        <AgentPromptsView
+          agentIntegration={{
+            edition: "cloud",
+            promptOrigin: "https://cloud.example.test",
+            targetSpaceId: "org_team_a",
+          }}
+          askAgent={null}
+          capabilities={[]}
+          locator={{ target, displayTarget, exampleKind: "other" }}
+          onHandedOff={() => {}}
+          scenarios={[{ ...framedPrompt, target, body: `${target}\n\nExplain Vault.` }]}
+        />
+      </CoreI18nProvider>,
+    );
+    const card = screen.getByTestId("agent-prompts-locator-card");
+    const label = card.querySelector("p");
+    expect(label?.textContent).toBe(displayTarget);
+    expect(label?.title).toBe(target);
+    expect(label?.className).not.toContain("line-clamp");
+    expect(card.textContent).not.toContain("https://cloud.example.test");
+    fireEvent.click(screen.getByRole("button", { name: "Copy locator" }));
+    await vi.waitFor(() => expect(written).toHaveLength(1));
+    expect(written[0]).toContain(target);
+    expect(written[0]).toContain("space=org_team_a");
+    expect(written[0]).toContain("https://cloud.example.test/SETUP_SKILL.md");
+  });
+
   it("copies the target line plus the connection check", async () => {
     renderView({ edition: "cloud", targetSpaceId: "spc_acme" }, [framedPrompt]);
 

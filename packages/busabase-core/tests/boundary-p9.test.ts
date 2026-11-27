@@ -47,6 +47,7 @@ describe("Boundary P9 — node soft-delete + restore", () => {
     );
     const archived = await raw.nodes.list({ status: "archived" });
     expect(archived.some((n) => n.id === doc.node.id)).toBe(true);
+    expect(archived.find((n) => n.id === doc.node.id)?.archivedAt).toMatch(/^\d{4}-/);
 
     await restoreNode(raw, doc.node.id);
     expect((await raw.nodes.list({ types: ["doc"] })).some((d) => d.id === doc.node.id)).toBe(true);

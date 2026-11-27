@@ -108,8 +108,9 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
  * the rest of the space-scoped-only surface consult NO node ACL, so reaching
  * any of them with a link would be a whole-Space read, not a scoped one.
  *
- * What is in: exactly what the embedded read-only Dashboard renders — the node
- * detail behind the link, and the Base/record slices its Change Request and
+ * What is in: exactly what the embedded read-only Dashboard renders — the
+ * workbench's own Node Detail views for the node behind the link (Doc, File,
+ * Drive/Skill, Folder, Base), and the Base/record slices its Change Request and
  * record previews hydrate from.
  *
  * What is deliberately out, and stays out:
@@ -153,8 +154,17 @@ const EMBED_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   "changeRequests.get",
   "fileTrees.get",
   "fileTrees.readFile",
+  // A Drive/Skill with more files than its detail inlines pages the rest in by
+  // folder. Resolves the node through the same ACL `fileTrees.get` does and
+  // lists only that node's own mounts — never a space-wide asset listing.
+  "fileTrees.listEntries",
   "fileTrees.previewConfig",
   "fileTrees.preparePreview",
+  // Text File previews (Markdown, code, CSV) read the asset's extracted lines.
+  // `assertAssetPermission` is usage-backed: the asset has to be mounted on a
+  // node this link can read, and an unmounted upload is refused for every
+  // link-authorized visitor.
+  "assets.readTextLines",
 ]);
 
 /** True when an Embed Link holder may call this procedure. */

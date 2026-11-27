@@ -14,6 +14,10 @@ import {
   type LiveInvalidationTarget,
   NODE_METADATA_INVALIDATION_WINDOW_MS,
 } from "../helpers/live-invalidation";
+import {
+  invalidateRecordHistory,
+  RECORD_HISTORY_FALLBACK_KEY,
+} from "../helpers/record-history-query";
 import { createSingleFlightQueryInvalidator } from "../helpers/single-flight-query-invalidation";
 
 type BusabaseLiveEvent = z.infer<typeof liveEventSchema>;
@@ -219,6 +223,8 @@ export function useBusabaseLiveSync({
           return stableListKeys.nodes;
         case "records":
           return stableListKeys.records;
+        case "recordHistory":
+          return orpc.records.listChangeRequests.key();
         case "recordDetail":
           return stableListKeys.recordDetail;
         case "recordsCount":
@@ -238,6 +244,15 @@ export function useBusabaseLiveSync({
       options?: LiveInvalidationFlushOptions,
     ) => {
       for (const target of batch.targets) {
+        if (target === "recordHistory") {
+          void invalidateRecordHistory(
+            queryClient,
+            orpc,
+            batch.historyRecordIds ? [...batch.historyRecordIds] : undefined,
+            options?.refetchType,
+          );
+          continue;
+        }
         if (target === "inboxSnapshot") {
           // The single-flight path always fetches. During a stale-only settle,
           // mark the snapshot invalid so its next mount converges without
@@ -269,6 +284,8 @@ export function useBusabaseLiveSync({
       queryClient,
       workspaceQueryKeys: [
         ...Object.values(stableListKeys),
+        orpc.records.listChangeRequests.key(),
+        RECORD_HISTORY_FALLBACK_KEY,
         orpc.bases.listViews.key(),
         orpc.bases.listDeletedFields.key(),
       ],

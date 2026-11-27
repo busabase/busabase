@@ -14,7 +14,12 @@
  */
 
 import type {
+  AirAppSiteDirectValueInput,
   AirAppSiteDomainsVO,
+  AirAppSiteEnvironmentBinding,
+  AirAppSiteEnvironmentDeploymentLock,
+  AirAppSiteEnvironmentVO,
+  AirAppSiteLogsVO,
   AirAppSiteReleasesVO,
 } from "busabase-contract/domains/airapp/contract";
 import type { SiteBundle } from "./site-bundle";
@@ -30,6 +35,13 @@ export interface AirAppSiteRecord {
   liveDeployedAt: Date | null;
   /** How the preview proxy reaches the preview. `null` until one exists. */
   previewUpstream: { target: string; headers: Record<string, string> } | null;
+  /** Expiring capability URL for cross-device viewing; separate from the authenticated iframe. */
+  previewShareUrl?: string | null;
+  /** Opaque metadata revisions; Vault values never cross this host boundary. */
+  environmentRevision?: string | null;
+  previewEnvironmentRevision?: string | null;
+  liveEnvironmentRevision?: string | null;
+  environmentDeploymentLock?: AirAppSiteEnvironmentDeploymentLock | null;
 }
 
 export interface AirAppSiteDeployInput {
@@ -52,8 +64,24 @@ export interface AirAppSiteHost {
   goLive(input: AirAppSiteDeployInput): Promise<AirAppSiteRecord>;
   /** Also switches the live script's key: off stops its data access, on restores it. */
   setPublic(nodeId: string, isPublic: boolean): Promise<AirAppSiteRecord>;
+  /** Optional Space Vault capability. Metadata and references only, never plaintext. */
+  readEnvironment?(nodeId: string): Promise<AirAppSiteEnvironmentVO>;
+  saveEnvironment?(
+    nodeId: string,
+    bindings: AirAppSiteEnvironmentBinding[],
+  ): Promise<AirAppSiteEnvironmentVO>;
+  /** Explicit opt-in: an older host must never silently discard input-only values. */
+  saveEnvironmentWithValues?(
+    nodeId: string,
+    input: {
+      bindings: AirAppSiteEnvironmentBinding[];
+      directValues?: AirAppSiteDirectValueInput[];
+    },
+  ): Promise<AirAppSiteEnvironmentVO>;
   /** Optional durable release capability: older/local hosts can keep offering sites. */
   readReleases?(nodeId: string): Promise<AirAppSiteReleasesVO>;
+  /** Read-only production logs; older/local hosts may omit this capability. */
+  readLogs?(nodeId: string, version: string, signal?: AbortSignal): Promise<AirAppSiteLogsVO>;
   rollback?(nodeId: string, version: string, appName: string): Promise<AirAppSiteRecord>;
   /** Optional provider capability; older or local hosts can keep offering sites without domains. */
   readDomains?(nodeId: string): Promise<AirAppSiteDomainsVO>;

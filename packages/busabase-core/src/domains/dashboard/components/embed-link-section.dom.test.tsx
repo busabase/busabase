@@ -38,8 +38,8 @@ const expiredLink: EmbedLinkVO = {
 const createdLink: CreatedEmbedLinkVO = {
   ...activeLink,
   id: "emb_created",
-  url: "https://busabase.com/embed/emb_created.secret",
-  iframeUrl: "https://busabase.com/embed/emb_created.secret",
+  url: "https://busabase.com/embed/emb_created?token=fixture-secret",
+  iframeUrl: "https://busabase.com/embed/emb_created?token=fixture-secret&view=iframe",
 };
 
 const stubOrpc = () =>
@@ -98,9 +98,10 @@ describe("EmbedLinkSection", () => {
   it("protects a newly created one-time link until either value is copied", async () => {
     const onUncopiedSecretChange = renderSection();
     expect(screen.queryByRole("button", { name: "QR code" })).toBeNull();
+    const writeText = vi.fn(async () => undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
-      value: { writeText: vi.fn(async () => undefined) },
+      value: { writeText },
     });
 
     fireEvent.change(screen.getByLabelText("Allowed sites"), {
@@ -109,15 +110,39 @@ describe("EmbedLinkSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create embed link" }));
 
     const created = await screen.findByTestId("embed-link-created");
-    fireEvent.click(within(created).getByRole("button", { name: "QR code" }));
-    expect(await within(created).findByAltText("QR code for this link")).toBeTruthy();
+    const qrTrigger = within(created).getByRole("button", { name: "QR code" });
+    qrTrigger.focus();
+    fireEvent.click(qrTrigger);
+    const qrPopup = await screen.findByRole("dialog", { name: "QR code" });
+    expect(created.contains(qrPopup)).toBe(false);
+    expect(await within(qrPopup).findByAltText("QR code for this link")).toBeTruthy();
     const { default: QRCode } = await import("qrcode");
-    expect(QRCode.toDataURL).toHaveBeenCalledWith(createdLink.url, expect.any(Object));
+    expect(QRCode.toDataURL).toHaveBeenCalledWith(createdLink.iframeUrl, expect.any(Object));
     expect(onUncopiedSecretChange).toHaveBeenCalledWith(true);
+    expect(onUncopiedSecretChange).toHaveBeenLastCalledWith(true);
+    fireEvent.keyDown(qrPopup, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "QR code" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(qrTrigger));
+    expect(screen.getByTestId("embed-link-created")).toBe(created);
+    expect(within(created).getByTestId("embed-link-created-url")).toHaveProperty(
+      "value",
+      createdLink.iframeUrl,
+    );
+    expect(onUncopiedSecretChange).toHaveBeenLastCalledWith(true);
     fireEvent.click(within(created).getByRole("button", { name: "Copy link" }));
     await waitFor(() => expect(onUncopiedSecretChange).toHaveBeenLastCalledWith(false));
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(createdLink.iframeUrl);
     expect(
       within(created).getByText("Copied. This one-time link is safe to close now."),
     ).toBeTruthy();
+
+    const snippet = within(created).getByTestId<HTMLTextAreaElement>(
+      "embed-link-created-iframe",
+    ).value;
+    const iframe = new DOMParser().parseFromString(snippet, "text/html").querySelector("iframe");
+    expect(iframe?.getAttribute("src")).toBe(createdLink.iframeUrl);
+    fireEvent.click(within(created).getByRole("button", { name: "Copy embed code" }));
+    await waitFor(() => expect(writeText).toHaveBeenNthCalledWith(2, snippet));
+    expect(onUncopiedSecretChange).toHaveBeenLastCalledWith(false);
   });
 });

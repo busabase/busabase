@@ -9,6 +9,8 @@ import type { ComponentProps, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 import type { RecordCellUpdateResult, UpdateRecordCell } from "../hooks/use-base-grid-editing";
+import { type AppUserFieldHost, AppUserFieldHostProvider } from "./app-user-field-slot";
+import { FileViewerSlotProvider, type HostFileViewer } from "./file-viewer-slot";
 import { SubmitPermissionProvider } from "./split-submit-button";
 
 vi.mock("wouter", async (importOriginal) => ({
@@ -147,13 +149,19 @@ const merged = (headCommitId = "cmt_after"): RecordCellUpdateResult => ({
   headCommitId,
 });
 
-function harness(level: ApiKeyPermissionLevel, children: ReactNode) {
+function harness(
+  level: ApiKeyPermissionLevel,
+  children: ReactNode,
+  appUserHost: AppUserFieldHost | null = null,
+) {
   return (
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <CoreI18nProvider locale="en">
-        <SubmitPermissionProvider permissionLevel={level}>{children}</SubmitPermissionProvider>
+        <AppUserFieldHostProvider value={appUserHost}>
+          <SubmitPermissionProvider permissionLevel={level}>{children}</SubmitPermissionProvider>
+        </AppUserFieldHostProvider>
       </CoreI18nProvider>
     </QueryClientProvider>
   );
@@ -161,9 +169,15 @@ function harness(level: ApiKeyPermissionLevel, children: ReactNode) {
 
 function renderGrid({
   level = "write",
+  appUserHost = null,
+  fileViewerHost = null,
   records = [robot, blocks],
   ...props
-}: Partial<ComponentProps<typeof BusaBaseTable>> & { level?: ApiKeyPermissionLevel } = {}) {
+}: Partial<ComponentProps<typeof BusaBaseTable>> & {
+  level?: ApiKeyPermissionLevel;
+  appUserHost?: AppUserFieldHost | null;
+  fileViewerHost?: HostFileViewer | null;
+} = {}) {
   const onUpdateRecordCell =
     props.onUpdateRecordCell ?? vi.fn<UpdateRecordCell>(async () => merged());
   const onOpenRecord = props.onOpenRecord ?? vi.fn();
@@ -178,20 +192,23 @@ function renderGrid({
   const element = (rows: RecordVO[]) =>
     harness(
       level,
-      <BusaBaseTable
-        activeView={null}
-        base={base}
-        client={client}
-        onCreateView={vi.fn()}
-        onDeleteView={vi.fn()}
-        onUpdateView={vi.fn()}
-        records={rows}
-        scrollElementRef={{ current: null }}
-        views={[]}
-        {...props}
-        onOpenRecord={onOpenRecord}
-        onUpdateRecordCell={onUpdateRecordCell}
-      />,
+      <FileViewerSlotProvider value={fileViewerHost}>
+        <BusaBaseTable
+          activeView={null}
+          base={base}
+          client={client}
+          onCreateView={vi.fn()}
+          onDeleteView={vi.fn()}
+          onUpdateView={vi.fn()}
+          records={rows}
+          scrollElementRef={{ current: null }}
+          views={[]}
+          {...props}
+          onOpenRecord={onOpenRecord}
+          onUpdateRecordCell={onUpdateRecordCell}
+        />
+      </FileViewerSlotProvider>,
+      appUserHost,
     );
   const result = render(element(records));
   return {
@@ -397,6 +414,59 @@ describe("attachment cells", () => {
   const attachmentRecord = makeRecord("rec_attachment", {
     ...robot.headCommit.payload,
     files: [],
+  });
+
+  it("keeps a portaled attachment preview open when its controls are double-clicked", async () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(220);
+    const attachment = {
+      id: "ast_report",
+      assetId: "ast_report",
+      attachmentId: "att_report",
+      fileName: "report.pdf",
+      mimeType: "application/pdf",
+      size: 100,
+      url: "/report.pdf",
+    };
+    const record = makeRecord("rec_pdf", { ...robot.headCommit.payload, files: [attachment] });
+    const onZoom = vi.fn();
+    const onUploadAttachment = vi.fn(async () => attachment);
+    const { container, onUpdateRecordCell } = renderGrid({
+      base: { ...base, fields: [...fields, attachmentField] },
+      fileViewerHost: {
+        canRender: () => true,
+        render: () => (
+          <button onClick={onZoom} type="button">
+            Zoom in
+          </button>
+        ),
+      },
+      onUploadAttachment,
+      records: [record],
+    });
+    const target = cell(container, record.id, "files");
+    const thumbnail = within(target).getByRole("link", { name: "report.pdf" });
+    fireEvent.click(thumbnail);
+    const dialog = await screen.findByTestId("attachment-preview-dialog");
+    expect(target.contains(dialog)).toBe(false);
+    const zoom = within(dialog).getByRole("button", { name: "Zoom in" });
+    fireEvent.focus(zoom);
+    fireEvent.click(zoom);
+    fireEvent.click(zoom);
+    fireEvent.doubleClick(zoom);
+
+    expect(onZoom).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("attachment-preview-dialog")).toBe(dialog);
+    expect(thumbnail.isConnected).toBe(true);
+    expect(target.querySelector("[data-inline-cell-editor]")).toBeNull();
+    expect(onUpdateRecordCell).not.toHaveBeenCalled();
+    expect(onUploadAttachment).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("attachment-preview-dialog")).toBeNull());
+    expect(within(target).getByRole("link", { name: "report.pdf" })).toBe(thumbnail);
+    fireEvent.doubleClick(target);
+    expect(target.querySelector("[data-inline-cell-editor]")).not.toBeNull();
+    expect(onUpdateRecordCell).not.toHaveBeenCalled();
   });
 
   it("uploads a picked file and saves its asset ref through the cell update path", async () => {
@@ -1261,7 +1331,7 @@ describe("permissions", () => {
     );
   });
 
-  it("a read-only viewer never enters edit mode and every cell opens the record", () => {
+  it("a read-only viewer never enters edit mode and secondary previews open the record", () => {
     const { container, onUpdateRecordCell, onOpenRecord } = renderGrid({ level: "read" });
     expect(container.querySelector("[data-grid-cell]")).toBeNull();
     expect(container.querySelector("[data-inline-editing]")).toBeNull();
@@ -1272,6 +1342,77 @@ describe("permissions", () => {
     fireEvent.click(priceLink);
     expect(onOpenRecord).toHaveBeenCalledWith(robot);
     expect(onUpdateRecordCell).not.toHaveBeenCalled();
+  });
+
+  it.each(["Walking Robot Buddy", "王五", "", "A\nB"])(
+    "renders the read-only primary value like the editable grid: %j",
+    (name) => {
+      const record = makeRecord("rec_plain", { ...robot.headCommit.payload, name });
+      const editable = renderGrid({ records: [record] });
+      const editableValue = cell(editable.container, record.id, "name").querySelector(
+        "[data-grid-cell-text]",
+      );
+      const expectedText = editableValue?.textContent;
+      const expectedClasses = editableValue?.className;
+      editable.unmount();
+
+      const { container, onOpenRecord, onUpdateRecordCell } = renderGrid({
+        level: "read",
+        records: [record],
+      });
+      const primary = container.querySelector<HTMLElement>(
+        `[data-cell-record="${record.id}"][data-cell-field="name"]`,
+      );
+      expect(primary).not.toBeNull();
+      const value = primary?.querySelector("[data-grid-cell-text]");
+      expect(value?.textContent).toBe(expectedText);
+      expect(value?.className).toBe(expectedClasses);
+      expect(primary?.querySelector("a")).toBeNull();
+      expect(primary?.querySelector(".lucide-chevron-right")).toBeNull();
+      fireEvent.click(value as HTMLElement);
+      expect(onOpenRecord).not.toHaveBeenCalled();
+      fireEvent.click(within(primary as HTMLElement).getByRole("button"));
+      expect(onOpenRecord).toHaveBeenCalledWith(record);
+      expect(onUpdateRecordCell).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a separate full-content action for a bounded read-only primary preview", () => {
+    const record = makeRecord("rec_long", {
+      ...robot.headCommit.payload,
+      name: `Start ${"x".repeat(20_000)} End`,
+    });
+    const { container, onOpenRecord } = renderGrid({ level: "read", records: [record] });
+    const primary = container.querySelector<HTMLElement>(
+      `[data-cell-record="${record.id}"][data-cell-field="name"]`,
+    );
+    const value = primary?.querySelector("[data-grid-cell-text]");
+    expect(value?.closest("a")).toBeNull();
+    expect(primary?.textContent?.length).toBeLessThan(20_000);
+    const action = within(primary as HTMLElement).getByRole("button", {
+      name: "View full content",
+    });
+    expect(action.getAttribute("type")).toBe("button");
+    expect(action.getAttribute("href")).toBeNull();
+    fireEvent.click(action);
+    expect(onOpenRecord).toHaveBeenCalledWith(record);
+  });
+
+  it("preserves a genuine URL in a read-only primary field", () => {
+    const urlField = field("website", "url");
+    const record = makeRecord("rec_url", { website: "https://example.com" });
+    const { container, onOpenRecord } = renderGrid({
+      level: "read",
+      base: { ...base, fields: [urlField] },
+      records: [record],
+    });
+    const primary = container.querySelector<HTMLElement>(
+      `[data-cell-record="${record.id}"][data-cell-field="website"]`,
+    );
+    const link = within(primary as HTMLElement).getByRole("link", { name: "https://example.com" });
+    expect(link.getAttribute("href")).toBe("https://example.com");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(onOpenRecord).not.toHaveBeenCalled();
   });
 
   it("stays read-only on a touch-only screen", () => {
@@ -1289,5 +1430,168 @@ describe("permissions", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("app-user inline grid editing", () => {
+  const person = {
+    id: "apu_ann",
+    email: "ann@shop.test",
+    status: "active" as const,
+    lastSignInAt: null,
+    apps: [],
+  };
+  const appField = field("customer", "appUser");
+  const appBase = { ...base, fields: [fields[0] as BaseFieldVO, appField] };
+  const appRecord = {
+    ...robot,
+    base: appBase,
+    headCommit: { ...robot.headCommit, payload: { name: "Order", customer: "apu_ann" } },
+  };
+  const host = (canPick = true): AppUserFieldHost => ({
+    scope: "shop",
+    resolve: vi.fn(async () => [person]),
+    search: vi.fn(async () => ({
+      users: canPick ? [person, { ...person, id: "apu_bob", email: "bob@shop.test" }] : [],
+      canPick,
+    })),
+    openManage: vi.fn(),
+  });
+
+  it("opens from an empty cell, focuses search, picks a user and shows the optimistic email", async () => {
+    const empty = {
+      ...appRecord,
+      headCommit: { ...appRecord.headCommit, payload: { name: "Order", customer: null } },
+    };
+    const { container, onUpdateRecordCell, onOpenRecord } = renderGrid({
+      base: appBase,
+      records: [empty],
+      appUserHost: host(),
+    });
+    fireEvent.click(cell(container, robot.id, "customer"));
+    const search = await screen.findByRole("searchbox");
+    expect(document.activeElement).toBe(search);
+    fireEvent.click(await screen.findByRole("option", { name: /bob@shop.test/ }));
+    await waitFor(() =>
+      expect(onUpdateRecordCell).toHaveBeenCalledWith(
+        expect.objectContaining({ id: robot.id }),
+        "customer",
+        "apu_bob",
+        { baseCommitId: robot.headCommitId, mergeImmediately: true },
+      ),
+    );
+    await waitFor(() =>
+      expect(cell(container, robot.id, "customer").textContent).toContain("bob@shop.test"),
+    );
+    expect(onOpenRecord).not.toHaveBeenCalled();
+  });
+
+  it("navigates picker results with arrows and ignores IME confirmation", async () => {
+    const { container, onUpdateRecordCell } = renderGrid({
+      base: appBase,
+      records: [appRecord],
+      appUserHost: host(),
+    });
+    fireEvent.click(cell(container, robot.id, "customer"));
+    const search = await screen.findByRole("searchbox");
+    const bob = await screen.findByRole("option", { name: /bob@shop.test/ });
+    fireEvent.keyDown(search, { key: "Enter", keyCode: 229 });
+    expect(onUpdateRecordCell).not.toHaveBeenCalled();
+    fireEvent.keyDown(search, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(bob);
+    fireEvent.click(bob);
+    await waitFor(() =>
+      expect(onUpdateRecordCell).toHaveBeenCalledWith(
+        expect.anything(),
+        "customer",
+        "apu_bob",
+        expect.anything(),
+      ),
+    );
+  });
+
+  it("lets a viewer without picker permission clear the existing id", async () => {
+    const { container, onUpdateRecordCell } = renderGrid({
+      base: appBase,
+      records: [appRecord],
+      appUserHost: host(false),
+    });
+    fireEvent.click(cell(container, robot.id, "customer"));
+    await waitFor(() =>
+      expect(document.querySelector("[data-app-user-cannot-pick]")).not.toBeNull(),
+    );
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await waitFor(() =>
+      expect(onUpdateRecordCell).toHaveBeenCalledWith(
+        expect.anything(),
+        "customer",
+        null,
+        expect.anything(),
+      ),
+    );
+  });
+
+  it("keeps required-field validation cancellable without writing", async () => {
+    const requiredBase = {
+      ...appBase,
+      fields: [fields[0] as BaseFieldVO, { ...appField, required: true }],
+    };
+    const { container, onUpdateRecordCell } = renderGrid({
+      base: requiredBase,
+      records: [appRecord],
+      appUserHost: host(),
+    });
+    fireEvent.click(cell(container, robot.id, "customer"));
+    await screen.findByRole("searchbox");
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Customer");
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("searchbox")).toBeNull());
+    expect(onUpdateRecordCell).not.toHaveBeenCalled();
+  });
+
+  it("edits a raw id without a cloud host and saves with Tab", async () => {
+    const { container, onUpdateRecordCell } = renderGrid({ base: appBase, records: [appRecord] });
+    fireEvent.doubleClick(cell(container, robot.id, "customer"));
+    const input = await screen.findByRole("textbox", { name: "Customer" });
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: "apu_new" } });
+    expect(onUpdateRecordCell).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Tab" });
+    await waitFor(() =>
+      expect(onUpdateRecordCell).toHaveBeenCalledWith(
+        expect.anything(),
+        "customer",
+        "apu_new",
+        expect.anything(),
+      ),
+    );
+  });
+
+  it("keeps a proposal-only pick pending instead of replacing the saved person", async () => {
+    const onUpdateRecordCell = vi.fn<UpdateRecordCell>(async () => ({
+      materialized: false,
+      changeRequestId: "cr_app_user",
+    }));
+    const { container } = renderGrid({
+      base: appBase,
+      records: [appRecord],
+      appUserHost: host(),
+      level: "changeRequest",
+      onUpdateRecordCell,
+    });
+    fireEvent.click(cell(container, robot.id, "customer"));
+    fireEvent.click(await screen.findByRole("option", { name: /bob@shop.test/ }));
+    await waitFor(() =>
+      expect(onUpdateRecordCell).toHaveBeenCalledWith(
+        expect.anything(),
+        "customer",
+        "apu_bob",
+        expect.objectContaining({ mergeImmediately: false }),
+      ),
+    );
+    expect((await screen.findByTestId("inline-edit-notice")).textContent).toMatch(/review/);
+    expect(cell(container, robot.id, "customer").textContent).not.toContain("bob@shop.test");
   });
 });

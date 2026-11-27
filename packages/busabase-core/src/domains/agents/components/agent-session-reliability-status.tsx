@@ -34,6 +34,15 @@ export function AgentSessionReliabilityStatus({
   recoverySnapshot?: AgentSessionRecoverySnapshotVO;
 }) {
   const copy = agentSessionReliabilityCopy(useCoreLocale());
+  if (
+    reliability.connection === "connected" &&
+    reliability.execution !== "unknown" &&
+    reliability.synchronization === "synced" &&
+    !updatesRecovering &&
+    !recoverySnapshot
+  )
+    return null;
+
   const hint =
     reliability.execution === "unknown"
       ? copy.unknownHint

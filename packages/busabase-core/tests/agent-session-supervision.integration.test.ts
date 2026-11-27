@@ -664,12 +664,23 @@ describe("session supervision through real manager, journals, ACP and PGLite", (
   });
 
   it("releases a no-demand idle owner after actual database-clock grace without deleting history", async () => {
+    const updateRuntime = journalStore.updateJournalRuntime;
+    vi.spyOn(journalStore, "updateJournalRuntime").mockImplementation(async (...args) => {
+      const result = await updateRuntime(...args);
+      if (args[1].connectionState === "connected")
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      return result;
+    });
     const session = await create();
     await vi.waitFor(async () => {
       await wakeAgentSessionSupervisor();
       expect(
         (await run(() => getJournalRuntime(session.id, scope)))?.session.reliability?.connection,
       ).toBe("connected");
+      expect((await run(() => loadSessionEvents(session.id, -1))).at(-1)).toMatchObject({
+        kind: "status",
+        status: "idle",
+      });
     });
     const before = await run(() => loadSessionEvents(session.id, -1));
     const graceStarted = performance.now();

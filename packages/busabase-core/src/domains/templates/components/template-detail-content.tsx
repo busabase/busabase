@@ -5,7 +5,10 @@ import { Badge } from "kui/badge";
 import { ExternalLink, MessageSquare } from "lucide-react";
 import { iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
-import { TemplateScreenshotShowcase } from "./template-screenshot-showcase";
+import {
+  type TemplateScreenshot,
+  TemplateScreenshotShowcase,
+} from "./template-screenshot-showcase";
 import { TemplateVideoPreview } from "./template-video-preview";
 
 export interface TemplateDetailLabels {
@@ -75,6 +78,10 @@ interface TemplateDetailContentProps {
   template: TemplateCardVO;
   labels?: TemplateDetailLabels;
   actions?: ReactNode;
+  /** Composed here so a Server Component caller sends nodes, not a function, to the gallery. */
+  renderScreenshot?: (screenshot: TemplateScreenshot, index: number) => ReactNode;
+  /** Tile posters are composed here; the client player keeps the original media URLs. */
+  renderVideoPoster?: (image: TemplateScreenshot, index: number) => ReactNode;
   /** See the identical note on `TemplateCardSummaryProps` — a prop, not a
    * hook, because this renders in a Server Component tree too. Also picks the
    * gallery and clip for this locale, falling back to the English defaults. */
@@ -97,6 +104,8 @@ export function TemplateDetailContent({
   template,
   labels = defaultLabels,
   actions,
+  renderScreenshot,
+  renderVideoPoster,
   descriptionLocale = "en",
 }: TemplateDetailContentProps) {
   const { stats } = template;
@@ -156,11 +165,21 @@ export function TemplateDetailContent({
           // outlive the list it indexed.
           key={`${template.id}:${descriptionLocale}`}
           screenshots={screenshots}
-          videoTiles={templateVideoTiles(media).map((clip) => (
+          thumbnailImages={
+            renderScreenshot
+              ? screenshots.map((screenshot, index) => renderScreenshot(screenshot, index))
+              : undefined
+          }
+          videoTiles={templateVideoTiles(media).map((clip, index) => (
             <TemplateVideoPreview
               key={clip.src}
               src={clip.src}
               poster={clip.poster}
+              posterImage={
+                clip.poster
+                  ? renderVideoPoster?.({ src: clip.poster, alt: title }, index)
+                  : undefined
+              }
               title={title}
               playLabel={clip.title ? `${labels.playVideo}: ${clip.title}` : labels.playVideo}
               clipTitle={clip.title}

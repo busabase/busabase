@@ -145,6 +145,33 @@ describe("records.listPage dateRange — oRPC integration", () => {
     expect(page.records).toEqual([]);
   });
 
+  it("finds only matches inside the date range before counting and paging", async () => {
+    const input = {
+      baseId,
+      dateRange: {
+        fieldSlug: "when",
+        gte: "2026-03-01T00:00:00.000Z",
+        lt: "2026-04-01T00:00:00.000Z",
+      },
+      find: { query: "WINDOW" },
+      pageSize: 1,
+    };
+    const first = await client.records.listPage(input);
+    const second = await client.records.listPage({ ...input, page: 2 });
+    expect(first.total).toBe(2);
+    expect(first.totalPages).toBe(2);
+    expect(second.total).toBe(2);
+    expect(
+      [...first.records, ...second.records].map((record) => record.headCommit.payload.title).sort(),
+    ).toEqual(["mid-window-1", "mid-window-2"]);
+    const filtered = await client.records.listPage({
+      ...input,
+      filters: [{ fieldSlug: "title", operator: "equals", value: "mid-window-2" }],
+    });
+    expect(filtered.total).toBe(1);
+    expect(filtered.records[0]?.headCommit.payload.title).toBe("mid-window-2");
+  });
+
   it("rejects a dateRange field that isn't a date type", async () => {
     await expect(
       client.records.listPage({

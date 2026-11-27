@@ -3,6 +3,9 @@
 import { z } from "zod";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { DEFAULT_SIDE_PANEL_WIDTH } from "../side-panel-layout";
+
+export { DEFAULT_SIDE_PANEL_WIDTH } from "../side-panel-layout";
 
 /**
  * Right-hand "side panel" that can pin content (e.g. a live AirApp preview)
@@ -96,7 +99,6 @@ export interface SidePanelStoreState {
   setWidth: (width: number) => void;
 }
 
-export const DEFAULT_SIDE_PANEL_WIDTH = 420;
 export const MIN_SIDE_PANEL_WIDTH = 320;
 export const MAX_SIDE_PANEL_WIDTH = 760;
 /** Drag past (MIN - this) on release auto-closes the panel instead of

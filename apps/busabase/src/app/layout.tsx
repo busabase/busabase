@@ -1,11 +1,11 @@
+import {
+  EMPTY_APP_BRANDING,
+  getAppBrandingSafe,
+} from "busabase-core/domains/settings/logic/app-branding-store";
 import type { Metadata } from "next";
 import { Fraunces, Inter, Noto_Serif_SC } from "next/font/google";
 import { headers } from "next/headers";
 import { getDb } from "~/db";
-import {
-  EMPTY_APP_BRANDING,
-  getAppBrandingSafe,
-} from "~/domains/settings/logic/app-branding-store";
 import { getBusabaseAppLL, getBusabaseLocaleFromRequestHeaders } from "~/lib/i18n";
 import { Providers } from "./providers";
 import "./global.css";

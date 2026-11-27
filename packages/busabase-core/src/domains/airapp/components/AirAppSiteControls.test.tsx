@@ -108,6 +108,12 @@ const state = (overrides: Partial<AirAppSiteStateVO> = {}): AirAppSiteStateVO =>
 });
 
 describe("canGoLive", () => {
+  it("keeps a fresh Free preview private until publishing is unlocked", () => {
+    const free = state({ publicationLock: { planLabel: "Plus" } });
+    expect(canGoLive(free)).toBe(false);
+    expect(goLiveNote(en, free)).toContain("Plus");
+    expect(showsAirAppSiteSettings(free)).toBe(false);
+  });
   it("is on for a fresh preview that has not gone live", () => {
     expect(canGoLive(state())).toBe(true);
   });
@@ -124,6 +130,18 @@ describe("canGoLive", () => {
     expect(canGoLive(state({ previewVersion: null }))).toBe(false);
     expect(canGoLive(state({ previewStale: true }))).toBe(false);
     expect(canGoLive(state({ liveVersion: "v1", isPublic: true }))).toBe(false);
+  });
+
+  it("allows an environment-only update to publish the latest values without a fresh environment preview", () => {
+    const pending = state({
+      liveVersion: "v1",
+      isPublic: true,
+      liveEnvironmentStale: true,
+      previewEnvironmentStale: true,
+    });
+    expect(canGoLive(pending)).toBe(true);
+    expect(goLiveNote(en, pending)).toBe(en.airapp.site.environment.latestOnPublish);
+    expect(canGoLive({ ...pending, previewStale: true })).toBe(false);
   });
 
   it("is off on a plan that leaves the engine out", () => {

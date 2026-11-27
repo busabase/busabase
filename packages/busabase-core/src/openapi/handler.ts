@@ -3,6 +3,7 @@ import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import type { Context, Router } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { encodeBusabaseOpenApiError } from "./error-envelope";
+import { BusabaseErrorLoggingPlugin } from "./error-logging";
 import { snapshotEventStream } from "./snapshot-event-stream";
 
 /**
@@ -63,5 +64,8 @@ export const createBusabaseOpenApiHandler = <T extends Context>(router: Router<a
         return result;
       },
     ],
-    plugins: [new SmartCoercionPlugin({ schemaConverters: [new ZodToJsonSchemaConverter()] })],
+    plugins: [
+      new SmartCoercionPlugin({ schemaConverters: [new ZodToJsonSchemaConverter()] }),
+      new BusabaseErrorLoggingPlugin(),
+    ],
   });

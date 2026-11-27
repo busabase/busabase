@@ -4,6 +4,8 @@ import {
   GRID_ROW_HEIGHT_PRESETS,
   VIEW_FIELD_MAX_WIDTH,
   VIEW_FIELD_MIN_WIDTH,
+  VIEW_GROUP_MAX_LEVELS,
+  VIEW_SUMMARY_FUNCTIONS,
   type ViewFilterConditionVO,
 } from "../types";
 
@@ -79,6 +81,33 @@ export const galleryCardSizeSchema = z.enum(["small", "medium", "large"]);
 
 export const gridRowHeightSchema = z.enum(GRID_ROW_HEIGHT_PRESETS);
 
+// Table grouping: one entry per level, outermost first. Stored as an array so
+// nested levels can be added later without migrating saved views.
+export const viewGroupBySchema = z.object({
+  fieldSlug: z.string().min(1),
+  // Stable field identity — survives slug reuse; populated by the dashboard.
+  fieldId: z.string().optional(),
+  direction: z
+    .enum(["asc", "desc"])
+    .default("asc")
+    .describe(
+      "Group order. A select follows its choice order (desc reverses it) with the no-value group last; a checkbox puts unchecked first (desc reverses it).",
+    ),
+});
+export const viewGroupByListSchema = z
+  .array(viewGroupBySchema)
+  .max(VIEW_GROUP_MAX_LEVELS)
+  .describe(
+    `Table-only grouping, at most ${VIEW_GROUP_MAX_LEVELS} level. Each entry names a select or checkbox field of the Base; an empty array removes the grouping.`,
+  );
+
+export const viewSummaryFunctionSchema = z.enum(VIEW_SUMMARY_FUNCTIONS);
+export const viewFieldSummariesSchema = z
+  .record(z.string().min(1), viewSummaryFunctionSchema)
+  .describe(
+    "Table-only footer summary per column, keyed by field slug. sum/avg/min/max need a number or auto_number field. checked/unchecked/percent_checked are for checkbox fields only (they count what the is_true filter keeps), and a checkbox takes no other summary. filled/empty/percent_filled count values the way the not_empty filter does, on every other field except the always-set ones (created/updated time and by, auto number). Omit a column to show no summary.",
+  );
+
 export const viewConfigSchema = z.object({
   filters: viewFiltersSchema.default([]),
   filterConjunction: viewFilterConjunctionSchema.optional(),
@@ -91,6 +120,8 @@ export const viewConfigSchema = z.object({
     .record(z.string().min(1), z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH))
     .optional(),
   rowHeight: gridRowHeightSchema.optional(),
+  groupBy: viewGroupByListSchema.optional(),
+  fieldSummaries: viewFieldSummariesSchema.optional(),
   // Gallery and Kanban: attachment cover (null = no cover). Omitted means
   // automatic in gallery views and no cover in Kanban views.
   coverFieldSlug: z.string().nullable().optional(),

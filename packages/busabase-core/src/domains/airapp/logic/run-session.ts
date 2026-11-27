@@ -1,12 +1,15 @@
 import "server-only";
 
-import type { AirAppRuntimeEvent } from "busabase-contract/domains/airapp/contract";
+import type {
+  AirAppPreviewStateVO,
+  AirAppRuntimeEvent,
+} from "busabase-contract/domains/airapp/contract";
 
 /** The engines that run server-side. `browser` never reaches this layer — it is the tab. */
 type AirAppRunnerEngine = "local" | "remote";
 
 import { ORPCError } from "@orpc/server";
-import { getContextVaultRuntimeEnv } from "../../../context";
+import { readContextVaultRuntimeEnv } from "../../../context";
 import { assertNodePermission } from "../../../logic/node-acl";
 import { assertEngineIncludedInPlan, resolveAvailableAirAppEngines } from "./engine-availability";
 import { currentPreviewOwner } from "./local-preview-registry";
@@ -71,11 +74,12 @@ export const DEFAULT_MAX_RUNS_PER_OWNER = 3;
 /** How long a finished run's output stays readable before the session is dropped. */
 const TERMINAL_RETENTION_MS = 5 * 60 * 1000;
 
-export type RunSessionStatus = "installing" | "running" | "exited" | "failed";
+export type RunSessionStatus = "installing" | "starting" | "running" | "exited" | "failed";
 
 interface RunSession {
   nodeId: string;
   owner: string;
+  engine: AirAppRunnerEngine;
   /** Replayed to every client that attaches, in order. */
   buffer: AirAppRuntimeEvent[];
   status: RunSessionStatus;
@@ -91,6 +95,25 @@ interface RunSession {
 /** owner -> nodeId -> session. Nested for the same anti-forgery reason as the preview registry. */
 const sessions = new Map<string, Map<string, RunSession>>();
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
+
+// Serialize starts/stops for an owner so simultaneous requests cannot create
+// duplicate processes or race the per-owner session limit.
+const ownerOperations = new Map<string, Promise<void>>();
+const withOwnerOperation = async <T>(owner: string, action: () => Promise<T>): Promise<T> => {
+  const previous = ownerOperations.get(owner) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  ownerOperations.set(owner, current);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (ownerOperations.get(owner) === current) ownerOperations.delete(owner);
+  }
+};
 
 const getOwnerBucket = (owner: string): Map<string, RunSession> | undefined => sessions.get(owner);
 
@@ -130,6 +153,9 @@ const record = (session: RunSession, event: AirAppRuntimeEvent): void => {
 
   switch (event.type) {
     case "installed":
+      session.status = "starting";
+      break;
+    case "ready":
       session.status = "running";
       break;
     case "exit":
@@ -207,6 +233,7 @@ const beginSession = (
   const session: RunSession = {
     nodeId: input.nodeId,
     owner,
+    engine,
     buffer: [],
     status: "installing",
     subscribers: new Set(),
@@ -239,8 +266,10 @@ const beginSession = (
       });
     } finally {
       if (!isTerminal(session)) {
-        session.status = "failed";
-        session.terminalSince = Date.now();
+        record(session, {
+          type: "error",
+          message: "The preview process ended without an exit result.",
+        });
       }
     }
   })();
@@ -304,6 +333,79 @@ const assertEngineOfferedHere = async (engine: AirAppRunnerEngine): Promise<void
   await assertEngineIncludedInPlan(engine);
 };
 
+interface RunInput {
+  nodeId: string;
+  files: Record<string, string>;
+  binaryFiles?: Record<string, string>;
+  engine: AirAppRunnerEngine;
+}
+
+const ensureRunSession = async (input: RunInput, owner: string): Promise<RunSession> =>
+  withOwnerOperation(owner, async () => {
+    const existing = readSession(input.nodeId, owner);
+    if (existing && !isTerminal(existing)) {
+      if (existing.engine !== input.engine) {
+        throw new ORPCError("CONFLICT", {
+          message: `This preview is already using the "${existing.engine}" engine. Stop it before selecting another engine.`,
+        });
+      }
+      if (existing.attached === 0) existing.idleSince = Date.now();
+      return existing;
+    }
+    if (existing) dropSession(input.nodeId, owner);
+    // Read Vault bindings while the authenticated request is still in scope.
+    // A live run keeps its startup values until explicitly stopped and restarted.
+    const runtimeEnv =
+      input.engine === "remote" ? { ...(await readContextVaultRuntimeEnv()) } : undefined;
+    await enforceOwnerLimit(owner, DEFAULT_MAX_RUNS_PER_OWNER);
+    return beginSession(input, input.engine, owner, runtimeEnv);
+  });
+
+const snapshot = (session: RunSession | undefined): AirAppPreviewStateVO => {
+  if (!session)
+    return {
+      status: "stopped",
+      engine: null,
+      previewUrl: null,
+      logs: [],
+      error: null,
+      exitCode: null,
+    };
+  const events = session.buffer;
+  const lastError = events.findLast((event) => event.type === "error");
+  const lastExit = events.findLast((event) => event.type === "exit");
+  const ready = events.findLast((event) => event.type === "ready");
+  return {
+    status: session.status,
+    engine: session.engine,
+    previewUrl: session.status === "running" && ready?.type === "ready" ? ready.previewUrl : null,
+    logs: events.flatMap((event) => (event.type === "log" ? [event.line] : [])),
+    error:
+      lastError?.type === "error"
+        ? lastError.message
+        : session.status === "failed" && lastExit?.type === "exit"
+          ? `Preview process exited with code ${lastExit.code}.`
+          : null,
+    exitCode: lastExit?.type === "exit" ? lastExit.code : null,
+  };
+};
+
+/** Finite counterpart of runOrAttachSession for callers that poll over REST. */
+export const startRunSession = async (input: RunInput): Promise<AirAppPreviewStateVO> => {
+  await assertNodePermission(input.nodeId, "write");
+  await assertEngineOfferedHere(input.engine);
+  return snapshot(await ensureRunSession(input, currentPreviewOwner()));
+};
+
+/** Reads only this caller's run. Polling counts as watching for idle reclamation;
+ * it never attaches to a stream or starts a process. */
+export const getRunSessionState = async (nodeId: string): Promise<AirAppPreviewStateVO> => {
+  await assertNodePermission(nodeId, "read");
+  const session = readSession(nodeId, currentPreviewOwner());
+  if (session && !isTerminal(session) && session.attached === 0) session.idleSince = Date.now();
+  return snapshot(session);
+};
+
 /**
  * Start a run, or attach to the one already going for this `(nodeId, owner)`.
  *
@@ -328,22 +430,7 @@ export async function* runOrAttachSession(
   await assertEngineOfferedHere(input.engine);
   const owner = currentPreviewOwner();
 
-  const existing = readSession(input.nodeId, owner);
-  let session: RunSession;
-  if (existing && !isTerminal(existing)) {
-    session = existing;
-  } else {
-    // A finished run is not something to attach to: the viewer would get a dead
-    // preview and no way forward. Clear it out and start fresh.
-    if (existing) dropSession(input.nodeId, owner);
-    // Capture only the host-resolved, runtime-enabled values while still in the
-    // authenticated request. The detached remote run must not read ambient Vault
-    // context or mutate process.env. Existing live runs keep their startup values;
-    // Stop then Run applies credential rotations/removals. Local stays unchanged.
-    const runtimeEnv = input.engine === "remote" ? { ...getContextVaultRuntimeEnv() } : undefined;
-    await enforceOwnerLimit(owner, DEFAULT_MAX_RUNS_PER_OWNER);
-    session = beginSession(input, input.engine, owner, runtimeEnv);
-  }
+  const session = await ensureRunSession(input, owner);
 
   const queue: AirAppRuntimeEvent[] = [...session.buffer];
   let wake: (() => void) | null = null;
@@ -388,13 +475,14 @@ export async function* runOrAttachSession(
 export async function stopRunSession(nodeId: string): Promise<{ stopped: boolean }> {
   await assertNodePermission(nodeId, "write");
   const owner = currentPreviewOwner();
-  const session = readSession(nodeId, owner);
-  if (!session) return { stopped: false };
-
-  session.abort.abort();
-  await session.finished.catch(() => undefined);
-  dropSession(nodeId, owner);
-  return { stopped: true };
+  return withOwnerOperation(owner, async () => {
+    const session = readSession(nodeId, owner);
+    if (!session) return { stopped: false };
+    session.abort.abort();
+    await session.finished.catch(() => undefined);
+    dropSession(nodeId, owner);
+    return { stopped: true };
+  });
 }
 
 /**

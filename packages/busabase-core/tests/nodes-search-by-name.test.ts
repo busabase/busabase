@@ -162,6 +162,16 @@ describe("nodes.searchByName", () => {
     const withIcon = await raw.nodes.searchByName({ query: "Icon Skill" });
     expect(withIcon[0]?.icon).toEqual({ type: "emoji", value: "📊" });
 
+    const cleared = await raw.nodes.createChangeRequest({
+      autoMerge: true,
+      message: "Clear the skill icon",
+      operations: [{ kind: "rename", nodeId: skillNode?.id ?? "", icon: null }],
+    });
+    expect(cleared.status).toBe("merged");
+
+    const restored = await raw.nodes.searchByName({ query: "Icon Skill" });
+    expect(restored[0]?.icon ?? null).toBeNull();
+
     // A node that never had a custom icon set must not silently inherit one —
     // this is the "no false positive" half of the same assertion.
     const withoutIcon = await raw.nodes.searchByName({ query: "Icon App" });

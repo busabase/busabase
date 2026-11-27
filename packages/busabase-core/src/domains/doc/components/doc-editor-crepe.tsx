@@ -12,10 +12,11 @@ import "@milkdown/crepe/theme/frame.css";
 import type { Ctx } from "@milkdown/kit/ctx";
 import { outline } from "@milkdown/kit/utils";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
-import { useEffect, useRef } from "react";
+import { type Ref, useEffect, useImperativeHandle, useRef } from "react";
 import { useCoreI18n } from "../../../i18n";
 import { DocContentSkeleton } from "../../dashboard/components/skeletons";
 import { createDocCodeTheme } from "./doc-code-theme";
+import { configureDocMermaidLanguage } from "./doc-mermaid-creation";
 import { createDocMermaidPreview } from "./doc-mermaid-preview";
 import { docVideoLinkPlugin, docVideoPlugin } from "./doc-video";
 import "./doc-editor.css";
@@ -25,12 +26,18 @@ export interface DocEditorCrepeProps {
    * `key`) to load different content instead of pushing updates in-place. */
   content: string;
   onChange: (markdown: string) => void;
+  /** Read the live document at save time without waiting for debounced onChange. */
+  editorRef?: Ref<DocEditorHandle>;
   /** @default true */
   editable?: boolean;
   onImageUpload?: (file: File) => Promise<string>;
   /** Called after the editor mounts and whenever the heading structure changes. */
   onOutlineChange?: (outline: DocOutlineItem[]) => void;
   className?: string;
+}
+
+export interface DocEditorHandle {
+  getMarkdown: () => string;
 }
 
 export interface DocOutlineItem {
@@ -42,6 +49,7 @@ export interface DocOutlineItem {
 function DocEditorInner({
   content,
   onChange,
+  editorRef,
   editable = true,
   onImageUpload,
   onOutlineChange,
@@ -77,8 +85,9 @@ function DocEditorInner({
       // The cause was not Placeholder: the workspace carried two copies of
       // prosemirror-view, and ProseMirror's DecorationGroup does
       // `instanceof DecorationSet` against its own class, so the first plugin
-      // to make Placeholder a *second* decoration source blew up. Deduped in
-      // #6619, and re-verified with the original repro (see the changelog).
+      // to make Placeholder a *second* decoration source blew up. Version pins
+      // alone do not unify hoisted physical copies; Cloud's host bundle aliases
+      // model/state/view to one ESM instance so these class checks stay valid.
       featureConfigs: {
         [Crepe.Feature.Placeholder]: {
           text: messages.docEditor.placeholder,
@@ -139,6 +148,7 @@ function DocEditorInner({
         },
       },
     });
+    crepe.editor.config(configureDocMermaidLanguage);
     // Registered after construction on purpose: docVideoPlugin wraps whichever
     // image node views Crepe's own features already installed, so it has to be
     // the last one to touch nodeViewCtx (see doc-video.ts).
@@ -152,6 +162,14 @@ function DocEditorInner({
     crepeRef.current = crepe;
     return crepe;
   });
+
+  useImperativeHandle(
+    editorRef,
+    () => ({
+      getMarkdown: () => (!loading && crepeRef.current ? crepeRef.current.getMarkdown() : content),
+    }),
+    [loading, content],
+  );
 
   // Only matters for a caller that toggles `editable` without remounting
   // (this repo's own DocDetailView remounts via `key` instead, so the initial

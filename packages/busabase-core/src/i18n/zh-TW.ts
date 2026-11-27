@@ -1,4 +1,5 @@
 import type { CoreI18nMessages } from "./messages";
+import { siteEnvironmentMessages } from "./site-environment";
 
 // Traditional Chinese (Taiwan) translations for the shared dashboard catalog.
 // Every key is written out explicitly; the terminology matches the Busabase Cloud
@@ -483,10 +484,16 @@ export const dashboardZhTW: CoreI18nMessages = {
     requireSignInLabel: "需登入後才能提交",
     requireSignInHint: "任何拿到連結的人都能開啟表單，但只有登入後的訪客才能提交。",
     passwordLabel: "密碼",
-    passwordHint: "留空表示不設密碼",
-    passwordPlaceholder: "設定密碼",
-    passwordSet: "已設定密碼——輸入新密碼可修改，或清除它",
-    passwordClear: "移除密碼",
+    passwordProtectionLabel: "密碼保護",
+    passwordProtectionHint: "訪客需要輸入密碼才能開啟此連結。",
+    passwordChange: "修改",
+    passwordSave: "儲存",
+    passwordCancel: "取消",
+    passwordLengthHint: "請使用 4–64 個字元。",
+    passwordLegacy: "已設定密碼，但這個密碼無法在這裡顯示。修改為新密碼後，就能查看和複製。",
+    copyLinkAndPassword: "複製連結和密碼",
+    linkAndPasswordCopied: "已複製連結和密碼",
+    linkAndPasswordClipboard: "連結：{url}\n密碼：{password}",
     expiryLabel: "過期時間",
     expiryHint: "到達所選時間後，連結將自動失效。",
     expiryNever: "永不到期",
@@ -739,6 +746,8 @@ export const dashboardZhTW: CoreI18nMessages = {
       newWindow: "新視窗預覽",
       phone: "手機掃碼預覽",
       signIn: "掃碼開啟目前的私人預覽，手機需登入同一帳號。這是預覽內容，不是已發布的 Site。",
+      sharedLink:
+        "任何持有連結的人都可在最長 24 小時內預覽此版本。請妥善保管連結；這不是已發佈的 Site。",
       browserOnly:
         "目前預覽在此瀏覽器中執行。請透過「發布 Site」產生 Site 預覽，再用手機掃碼開啟。",
       loopback: "目前是本機位址，手機無法透過此位址存取電腦。請使用可存取的部署位址。",
@@ -748,7 +757,35 @@ export const dashboardZhTW: CoreI18nMessages = {
       openLink: "開啟預覽",
     },
     site: {
+      environment: siteEnvironmentMessages["zh-TW"],
       publishUpdate: "發布更新",
+      logs: {
+        contentHiddenTitle: "日誌內容已隱藏",
+        contentHiddenDescription:
+          "無法確認部分日誌產生時的敏感資訊設定。為保護敏感資訊，相關日誌本文和請求路徑已隱藏；仍可查看請求時間、方法和狀態碼。",
+
+        button: "日誌",
+        versionButton: "查看 {version} 的日誌",
+        title: "日誌 · {version}",
+        description: "顯示最近 24 小時內此版本部署期間的正式環境日誌。跨越版本切換的請求可能重疊。",
+        collectionHint:
+          "新部署會開始收集日誌。舊版本可能沒有日誌；請發佈更新，並稍後重新整理查看。",
+        loading: "正在載入正式環境日誌…",
+        loadFailed: "日誌載入失敗，請重試。",
+        unavailable: "目前部署暫不支援正式環境日誌。",
+        empty: "最近 24 小時內此版本部署期間找不到日誌。",
+        refresh: "重新整理日誌",
+        close: "關閉日誌",
+        checkedAt: "查詢時間：{time}",
+        truncated: "僅顯示最近可用的日誌，部分事件或部署時段可能已省略。",
+        levels: {
+          debug: "偵錯",
+          info: "資訊",
+          log: "日誌",
+          warn: "警告",
+          error: "錯誤",
+        },
+      },
       releases: {
         busy: "正在套用發布操作，完成後會自動更新。",
         manage: "發布管理",
@@ -777,6 +814,8 @@ export const dashboardZhTW: CoreI18nMessages = {
         publicQrHint: "掃碼開啟已發布的 Site，不包含尚未發布的草稿修改。",
       },
       publish: {
+        alreadyLive: "此版本已上線。修改應用後，產生新預覽即可發佈更新。",
+        readyToPublish: "預覽已確認，可以發佈此版本。",
         previewStale: "檔案在此次預覽後發生了變更。請建立或重新整理網站預覽，再上線。",
         noPreview: "請先建立網站預覽，再上線。",
         previewUnavailable: "網站預覽未能載入。請重新建立預覽後再上線。",
@@ -786,10 +825,10 @@ export const dashboardZhTW: CoreI18nMessages = {
         preserveBrowser: "準備網站時，目前的瀏覽器預覽會繼續執行。",
         checking: "正在檢查網站發佈條件…",
         checkFailed: "無法檢查網站，請重試。",
-        planRequired: "{plan} 及以上方案包含網站託管。",
-        paidPlanRequired: "這個空間需要付費方案才能託管網站。",
+        planRequired: "{plan} 及以上方案支援公開發佈網站。",
+        paidPlanRequired: "這個空間需要付費方案才能公開發佈網站。",
         upgradeHint:
-          "可以先準備應用程式，再升級此空間以預覽和發佈。瀏覽器預覽連結無法提供持續在線的網站。",
+          "現在即可預覽，只有空間成員能查看。準備好後，升級此空間即可發佈持續在線的公開網站。",
         prepareTitle: "準備網站版本",
         prepareHint: "請讓 Agent 準備網站版本。發佈前可能需要調整應用程式程式碼。",
         copyPrompt: "複製 Agent 提示詞",
@@ -801,8 +840,7 @@ export const dashboardZhTW: CoreI18nMessages = {
         preparingPreview: "正在準備預覽…",
         refreshPreview: "重新整理網站預覽",
         previewTitle: "私人網站預覽",
-        publishConsent:
-          "上線會發佈你檢查過的版本。任何擁有網址的人都能使用網站，包括程式碼開放的資料和操作。",
+        publishConsent: "任何持有 Site 地址的人都能存取此版本及其開放的資料與操作。",
       },
       statusNotLive: "未發布",
       statusLive: "已上線",
@@ -836,7 +874,7 @@ export const dashboardZhTW: CoreI18nMessages = {
         guideNameHint:
           "有的服務商稱為「主機名稱」。填根網域前面的部分，例如 shop.company.com 填 shop；有的服務商要填完整網域。",
         guideStepCheck:
-          "回到這裡點「{check}」。DNS 生效可能需要幾分鐘到幾小時，生效後會自動設定 HTTPS。如果還需要 TXT 驗證記錄，新增網域後會顯示在這裡。",
+          "路由 CNAME 生效後，Cloudflare 會自動驗證網域並準備 HTTPS。點「{check}」查看最新狀態；DNS 變更生效需要一些時間。",
         guideRootDomain:
           "想使用 company.com 這樣的根網域？只有 DNS 服務商支援在根網域上設定 CNAME（又稱 CNAME 扁平化、ALIAS 或 ANAME，Cloudflare 支援）時才可以；否則請使用 www 或 shop 這樣的子網域。",
         guideLink: "查看設定說明",
@@ -851,8 +889,7 @@ export const dashboardZhTW: CoreI18nMessages = {
         add: "新增網域",
         adding: "正在新增…",
         pending: "等待完成設定",
-        pendingDnsHint:
-          "在 DNS 服務商處新增下方記錄，再重新檢查。DNS 變更可能需要一段時間才會生效。",
+        pendingDnsHint: "先在 DNS 服務商處新增路由 CNAME，再重新檢查；DNS 變更生效需要一些時間。",
         pendingHttpsHint: "網域所有權已驗證，正在準備 HTTPS。請稍後重新檢查。",
         active: "已連線",
         activeHint: "DNS 和 HTTPS 已就緒。",
@@ -866,8 +903,11 @@ export const dashboardZhTW: CoreI18nMessages = {
           "check-failed": "暫時無法檢查這個網域，請重新檢查。",
         },
         offlineHint: "網站已下線，所有網站位址均顯示找不到頁面。",
+        advancedVerification: "進階驗證",
+        advancedHint:
+          "用於遷移既有網域，或在切換流量前預先驗證擁有權與憑證。一般子網域設定先新增上方的路由 CNAME 即可。",
         dnsInstructions:
-          "在 DNS 服務商處新增這些記錄，並保留網域所需的其他記錄。確認網域連接到此網站後，也支援開啟 Cloudflare 代理。",
+          "在 DNS 服務商處新增這筆 CNAME，然後重新檢查。網站路由通過驗證後支援 Cloudflare 代理。",
         dnsName: "名稱",
         dnsValue: "值 / 目標",
         httpInstructions: "如需透過 HTTP 驗證，請在此 URL 提供下方回應內容，再重新檢查。",
@@ -1640,6 +1680,7 @@ export const dashboardZhTW: CoreI18nMessages = {
     typeToSearchBody: "輸入幾個字元，即可在此分頁中搜尋記錄和檔案內容。",
   },
   trash: {
+    deletedAt: "刪除時間",
     title: "垃圾桶",
     body: "已封存專案會從側邊欄隱藏。還原後會重新變為可用。",
     bases: "資料表",
@@ -1647,7 +1688,7 @@ export const dashboardZhTW: CoreI18nMessages = {
     noArchivedBasesBody: "封存的資料表會顯示在這裡。",
     foldersDocsSkills: "資料夾、文件和技能",
     noArchivedItemsTitle: "暫無已封存專案",
-    noArchivedItemsBody: "刪除的資料夾、文件和技能會顯示在這裡。",
+    noArchivedItemsBody: "已刪除的項目將顯示在這裡。",
     deleteForever: "永久刪除",
     deletePermanentlyTitle: "永久刪除？",
     deletePermanentlyBody: "永久刪除「{name}」？此操作無法撤銷。",
@@ -1688,6 +1729,8 @@ export const dashboardZhTW: CoreI18nMessages = {
     changeIcon: "更換圖示",
     iconUploadLabel: "上傳圖片",
     iconUploadFormatHint: "支援 PNG、JPG、GIF 或 WebP，最大 2MB",
+    restoreDefaultIcon: "恢復預設圖示",
+    restoreDefaultIconHint: "移除自訂圖片或表情符號",
     cropDialogTitle: "編輯圖示",
     confirmCrop: "套用",
     iconFileMustBeImage: "請選擇圖片檔案",
@@ -2288,6 +2331,8 @@ export const dashboardZhTW: CoreI18nMessages = {
     deleteRequestBody: "這會為「{title}」開啟刪除變更請求。正式記錄會保留到請求審核並合併後。",
     editRecord: "編輯記錄",
     newRecordTitle: "新建 {base} 記錄",
+    newRecordHelp:
+      "不知道怎麼填？開啟「Agent 提示詞」→「建立一筆練習記錄」，先看一筆標明虛構的範例，確認後再儲存。填寫真實記錄時，請提供自己的資料和檔案。",
     failedSaveChangeRequest: "儲存變更請求失敗",
     invalidFields: "請檢查以下欄位：{fields}。",
     submitRequest: "提交請求",
@@ -2697,6 +2742,7 @@ export const dashboardZhTW: CoreI18nMessages = {
     untitledStep: "未命名步驟",
     completed: "已完成",
     previewFrame: "{name} 預覽",
+    htmlSourcePlainText: "原始碼較大，已使用純文字顯示以保持預覽流暢，內容完整保留。",
     save: "儲存",
     saved: "已儲存",
     unsaved: "有未儲存變更",

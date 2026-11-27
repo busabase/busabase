@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { ORPCError } from "@orpc/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type {
@@ -6,8 +8,10 @@ import type {
   AirAppSiteBlocker,
 } from "busabase-contract/domains/airapp/contract";
 import type { AirAppVO } from "busabase-contract/types";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
+import { SubmitPermissionProvider } from "../../dashboard/components/split-submit-button";
 import { useAirAppRunnerStore } from "../store/airapp-runner-store";
 import { AirAppEngineAvailabilityProvider } from "./engine-availability-context";
 import { AirAppRunPreview, useAirAppRunner } from "./RunPanel";
@@ -44,25 +48,37 @@ const response = (blockers: AirAppSiteBlocker[] = [], version = "latest"): AirAp
 
 const deploy = vi.fn<() => Promise<AirAppSiteActionVO>>();
 const goLive = vi.fn();
+const readState = vi.fn(async () => response().state);
+const clients: QueryClient[] = [];
 const readFile = vi.fn(async () => ({
   encoding: "utf8",
   content: JSON.stringify({ runtime: "node", preferredEngine: "site" }),
 }));
 const orpc = {
   fileTrees: { readFile: { call: readFile } },
-  airapps: { siteDeployPreview: { call: deploy }, siteGoLive: { call: goLive } },
+  airapps: {
+    siteDeployPreview: { call: deploy },
+    siteGoLive: { call: goLive },
+    siteState: {
+      call: readState,
+      queryOptions: ({ input }: { input: { nodeId: string } }) => ({
+        queryKey: ["site-state", input.nodeId],
+        queryFn: readState,
+      }),
+    },
+  },
 } as unknown as BusabaseQueryUtils;
 
-function Surface({ airapp }: { airapp: AirAppVO }) {
+function Surface({ airapp, showToolbar = false }: { airapp: AirAppVO; showToolbar?: boolean }) {
   const runner = useAirAppRunner({ orpc, airapp });
   return (
-    <>
+    <div>
       <button type="button" onClick={() => void runner.run()}>
         Run manually
       </button>
       <output data-testid="run-status">{runner.status}</output>
-      <AirAppRunPreview airapp={airapp} runner={runner} showToolbar={false} />
-    </>
+      <AirAppRunPreview airapp={airapp} runner={runner} showToolbar={showToolbar} />
+    </div>
   );
 }
 
@@ -70,17 +86,26 @@ function View({
   airapp,
   surfaces = 1,
   secondAirapp = airapp,
+  showToolbar = false,
 }: {
   airapp: AirAppVO;
   surfaces?: number;
   secondAirapp?: AirAppVO;
+  showToolbar?: boolean;
 }) {
+  const [client] = useState(() => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    clients.push(queryClient);
+    return queryClient;
+  });
   return (
     <CoreI18nProvider locale="en">
-      <AirAppEngineAvailabilityProvider engines={["browser", "site", "remote"]}>
-        <Surface airapp={airapp} />
-        {surfaces > 1 ? <Surface airapp={secondAirapp} /> : null}
-      </AirAppEngineAvailabilityProvider>
+      <QueryClientProvider client={client}>
+        <AirAppEngineAvailabilityProvider engines={["browser", "site", "remote"]}>
+          <Surface airapp={airapp} showToolbar={showToolbar} />
+          {surfaces > 1 ? <Surface airapp={secondAirapp} /> : null}
+        </AirAppEngineAvailabilityProvider>
+      </QueryClientProvider>
     </CoreI18nProvider>
   );
 }
@@ -107,6 +132,7 @@ beforeEach(async () => {
   await useAirAppRunnerStore.persist.rehydrate();
   deploy.mockReset().mockResolvedValue(response([missingSite]));
   goLive.mockReset();
+  readState.mockReset().mockResolvedValue(response().state);
   readFile.mockReset().mockResolvedValue({
     encoding: "utf8",
     content: JSON.stringify({ runtime: "node", preferredEngine: "site" }),
@@ -114,6 +140,8 @@ beforeEach(async () => {
 });
 afterEach(() => {
   cleanup();
+  for (const client of clients) client.clear();
+  clients.length = 0;
   useAirAppRunnerStore.getState().disposeEntry(NODE_ID);
 });
 
@@ -278,6 +306,87 @@ describe("recovering an edited, blocked website preview", () => {
     const reordered = app("one");
     reordered.files.reverse();
     view.rerender(<View airapp={reordered} />);
+    await act(async () => {});
+    expect(deploy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("website access guidance", () => {
+  it("keeps manual refresh on Site and coalesces clicks after the manifest changes", async () => {
+    deploy.mockResolvedValue(response());
+    render(
+      <SubmitPermissionProvider permissionLevel="changeRequest">
+        <View airapp={app("one")} showToolbar />
+      </SubmitPermissionProvider>,
+    );
+    await waitForStatus("ready");
+    readFile.mockResolvedValue({
+      encoding: "utf8",
+      content: JSON.stringify({ runtime: "node", requiredEngine: "remote" }),
+    });
+    deploy.mockResolvedValue(response([missingSite]));
+
+    const refresh = screen.getByRole("button", { name: "Refresh page" });
+    fireEvent.click(refresh);
+    fireEvent.click(refresh);
+
+    await waitForStatus("error");
+    expect(useAirAppRunnerStore.getState().entries[NODE_ID]?.runnerKind).toBe("site");
+    expect(document.querySelector('[data-airapp-site-blocker="not-a-site-app"]')).toBeTruthy();
+    expect(deploy).toHaveBeenCalledTimes(2);
+    expect(goLive).not.toHaveBeenCalled();
+  });
+  it("shows manager guidance when a locked preview needs deployment", async () => {
+    readState.mockResolvedValue({
+      ...response().state,
+      previewStale: true,
+      environmentDeploymentLock: { reason: "SPACE_VAULT_MANAGE_REQUIRED" },
+    });
+    const view = render(<View airapp={app("one")} />);
+    await waitForStatus("error");
+    expect(await screen.findByText(/A workspace owner or admin/)).toBeTruthy();
+    expect(document.querySelector("[data-airapp-site-access-denied]")).toBeTruthy();
+    expect(screen.queryByText("The app failed to start.")).toBeNull();
+    expect(deploy).not.toHaveBeenCalled();
+    view.rerender(<View airapp={app("two")} />);
+    await act(async () => {});
+    expect(deploy).not.toHaveBeenCalled();
+    expect(readState).toHaveBeenCalledTimes(2);
+  });
+  it("lets a member retry after an owner prepares the locked preview", async () => {
+    readState.mockResolvedValue({
+      ...response().state,
+      previewStale: true,
+      environmentDeploymentLock: { reason: "SPACE_VAULT_MANAGE_REQUIRED" },
+    });
+    render(
+      <SubmitPermissionProvider permissionLevel="changeRequest">
+        <View airapp={app("one")} showToolbar />
+      </SubmitPermissionProvider>,
+    );
+    await waitForStatus("error");
+    expect(deploy).not.toHaveBeenCalled();
+
+    readState.mockResolvedValue({
+      ...response().state,
+      environmentDeploymentLock: { reason: "SPACE_VAULT_MANAGE_REQUIRED" },
+    });
+    deploy.mockResolvedValue(response());
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+
+    await waitForStatus("ready");
+    expect(deploy).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("[data-airapp-site-access-denied]")).toBeNull();
+  });
+  it("classifies a generic FORBIDDEN deployment race and preserves manual retries only for transient errors", async () => {
+    deploy.mockRejectedValue(new ORPCError("FORBIDDEN", { message: "internal-permission-detail" }));
+    const view = render(<View airapp={app("one")} />);
+    await waitForStatus("error");
+    expect(
+      await screen.findByText(/You do not have permission to manage this website/),
+    ).toBeTruthy();
+    expect(document.body.textContent).not.toContain("internal-permission-detail");
+    view.rerender(<View airapp={app("two")} />);
     await act(async () => {});
     expect(deploy).toHaveBeenCalledTimes(1);
   });

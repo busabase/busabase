@@ -270,3 +270,20 @@ describe("unchanged values write nothing", () => {
     expect(isSameInlineCellValue(status, "New", "chc_new")).toBe(true);
   });
 });
+
+describe("app-user inline values", () => {
+  it("supports only a single id and normalizes clearing and required checks", () => {
+    const appUser = field("appUser");
+    expect(getInlineCellEditorKind(appUser)).toBe("appUser");
+    expect(canEditCellValueInline(appUser, "apu_ann")).toBe(true);
+    expect(canEditCellValueInline(appUser, null)).toBe(true);
+    expect(canEditCellValueInline(appUser, ["apu_ann"])).toBe(false);
+    expect(parseInlineCellDraft(appUser, "apu_ann")).toEqual({ ok: true, value: "apu_ann" });
+    expect(parseInlineCellDraft(appUser, "")).toEqual({ ok: true, value: null });
+    expect(parseInlineCellDraft({ ...appUser, required: true }, null)).toEqual({
+      ok: false,
+      error: "required",
+    });
+    expect(isSameInlineCellValue(appUser, null, null)).toBe(true);
+  });
+});

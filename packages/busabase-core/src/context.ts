@@ -296,6 +296,14 @@ export interface BusabaseContext {
    * must only be exposed to the request / hosted execution they belong to.
    */
   vaultRuntimeEnv?: Record<string, string>;
+  /**
+   * Lazy alternative to `vaultRuntimeEnv` for hosts where reading the Vault
+   * costs a query (and an audit row) per request. Called at most once per
+   * context, and only by code that actually consumes Vault values (see
+   * `readContextVaultRuntimeEnv`). An eager `vaultRuntimeEnv` wins when both
+   * are set.
+   */
+  loadVaultRuntimeEnv?: () => Promise<Record<string, string>>;
   /** Server-only Drive preview configuration. The API key must never cross a contract boundary. */
   filePreview?: FilePreviewRuntimeConfig;
   resolveUsers?: (userIds: string[]) => Promise<Map<string, UserRefVO>>;
@@ -852,13 +860,56 @@ export function withContextSourceMeta(
   };
 }
 
-/** User-scoped Vault runtime values for the current hosted/request execution. */
+/**
+ * User-scoped Vault runtime values for the current hosted/request execution,
+ * as eagerly provided by the host (the open-source app does).
+ *
+ * Throws when the host supplied only a lazy `loadVaultRuntimeEnv` (Busabase
+ * Cloud): a synchronous read cannot run the loader, and silently returning
+ * `{}` there would hide a missing secret. Use
+ * {@link readContextVaultRuntimeEnv} instead, which works on every host.
+ */
 export function getContextVaultRuntimeEnv(): Record<string, string> {
   const store = storage.getStore();
-  return store?.vaultRuntimeEnv ?? {};
+  if (store?.vaultRuntimeEnv) return store.vaultRuntimeEnv;
+  if (store?.loadVaultRuntimeEnv) {
+    throw new Error(
+      "Vault values are loaded lazily on this host; use `await readContextVaultRuntimeEnv()` instead of getContextVaultRuntimeEnv()/getContextVaultRuntimeValue().",
+    );
+  }
+  return {};
 }
 
-/** Read one user-scoped Vault runtime value from the current hosted/request execution. */
+// Keyed by the loader itself: contexts are often re-entered as shallow copies
+// (`{ ...store, db }`), which keep the same loader and so share one read.
+const vaultRuntimeLoads = new WeakMap<
+  () => Promise<Record<string, string>>,
+  Promise<Record<string, string>>
+>();
+
+/**
+ * Vault runtime values for the current execution, reading them on first use
+ * when the host supplied a lazy `loadVaultRuntimeEnv`. A failed read is not
+ * cached, so a retry in the same request reads again.
+ */
+export async function readContextVaultRuntimeEnv(): Promise<Record<string, string>> {
+  const store = storage.getStore();
+  if (store?.vaultRuntimeEnv) return store.vaultRuntimeEnv;
+  const load = store?.loadVaultRuntimeEnv;
+  if (!load) return {};
+  let pending = vaultRuntimeLoads.get(load);
+  if (!pending) {
+    pending = load();
+    vaultRuntimeLoads.set(load, pending);
+    pending.catch(() => vaultRuntimeLoads.delete(load));
+  }
+  return pending;
+}
+
+/**
+ * Read one user-scoped Vault runtime value from the current hosted/request
+ * execution. Throws on lazy-loading hosts, like {@link getContextVaultRuntimeEnv}.
+ */
 export function getContextVaultRuntimeValue(key: string): string | undefined {
   return getContextVaultRuntimeEnv()[key];
 }
@@ -1030,7 +1081,7 @@ export async function resolveContextAirAppEngineLock(): Promise<AirAppEnginePlan
   const hook = storage.getStore()?.resolveAirAppEngineLock;
   if (!hook) return null;
   const lock = await hook();
-  return lock && lock.lockedEngines.length > 0 ? lock : null;
+  return lock && (lock.lockedEngines.length > 0 || lock.sitePublishingLocked) ? lock : null;
 }
 
 /** Emit a host-owned performance metric without allowing observability failure to break a read. */

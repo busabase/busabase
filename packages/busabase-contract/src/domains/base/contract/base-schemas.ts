@@ -222,6 +222,7 @@ export const baseSchema = z.object({
     requiredApprovals: z.number(),
   }),
   createdAt: z.string(),
+  archivedAt: z.string().nullable().optional(),
   fields: z.array(baseFieldSchema),
   viewerPermissionLevel: z
     .enum(["read", "changeRequest", "write", "manage"])
@@ -405,6 +406,7 @@ export const previewFieldConversionOutputSchema = z.object({
 });
 
 export const convertFieldChangeRequestInputSchema = z.object({
+  name: fieldNameSchema.optional(),
   fieldId: z.string().min(1),
   newType: fieldTypeSchema,
   selectChoiceMode: z.enum(["auto_create", "null_on_missing"]).default("null_on_missing"),

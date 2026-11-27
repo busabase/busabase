@@ -1,4 +1,4 @@
-import { expect, test } from "./_fixtures";
+import { expect, json, test, unique } from "./_fixtures";
 
 interface ScrollContractCase {
   name: string;
@@ -66,37 +66,73 @@ const cases: ScrollContractCase[] = [
 
 test.describe("dashboard scroll contract", () => {
   for (const scrollCase of cases) {
-    test(`${scrollCase.name} owns its overflow and reaches the bottom`, async ({ page }) => {
-      await page.setViewportSize(scrollCase.viewport);
-      await page.goto(scrollCase.route);
+    test(`${scrollCase.name} owns its overflow and reaches the bottom`, async ({
+      page,
+      request,
+    }) => {
+      const archivedBaseIds: string[] = [];
+      try {
+        if (scrollCase.scrollOwner === "archived") {
+          for (let index = 0; index < 4; index += 1) {
+            const base = await json<{ id: string }>(
+              await request.post("/api/v1/bases", {
+                data: {
+                  autoMerge: true,
+                  name: unique(`Trash scroll fixture ${index}`),
+                  slug: `trash-scroll-${Date.now()}-${index}`,
+                  fields: [{ name: "Title", slug: "title", type: "text" }],
+                },
+              }),
+            );
+            archivedBaseIds.push(base.id);
+            await json(
+              await request.post(`/api/v1/bases/${base.id}/lifecycle/change-requests`, {
+                data: { operation: "archive", autoMerge: true },
+              }),
+            );
+          }
+        }
+        await page.setViewportSize(scrollCase.viewport);
+        await page.goto(scrollCase.route);
 
-      const activeView = page.locator("[data-dashboard-active-view]");
-      const scrollOwner = page.locator(`[data-dashboard-scroll="${scrollCase.scrollOwner}"]`);
-      await expect(activeView).toBeVisible({ timeout: 45_000 });
-      await expect(scrollOwner).toBeVisible({ timeout: 45_000 });
+        const activeView = page.locator("[data-dashboard-active-view]");
+        const scrollOwner = page.locator(`[data-dashboard-scroll="${scrollCase.scrollOwner}"]`);
+        await expect(activeView).toBeVisible({ timeout: 45_000 });
+        await expect(scrollOwner).toBeVisible({ timeout: 45_000 });
 
-      await expect
-        .poll(() =>
-          activeView.evaluate((element) => element.scrollHeight <= element.clientHeight + 1),
-        )
-        .toBe(true);
-      await expect
-        .poll(() => scrollOwner.evaluate((element) => element.scrollHeight > element.clientHeight))
-        .toBe(true);
+        await expect
+          .poll(() =>
+            activeView.evaluate((element) => element.scrollHeight <= element.clientHeight + 1),
+          )
+          .toBe(true);
+        await expect
+          .poll(() =>
+            scrollOwner.evaluate((element) => element.scrollHeight > element.clientHeight),
+          )
+          .toBe(true);
 
-      await scrollOwner.evaluate((element) => {
-        element.scrollTop = element.scrollHeight;
-        element.dispatchEvent(new Event("scroll"));
-      });
+        await scrollOwner.evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+          element.dispatchEvent(new Event("scroll"));
+        });
 
-      await expect
-        .poll(() =>
-          scrollOwner.evaluate(
-            (element) =>
-              Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 1,
-          ),
-        )
-        .toBe(true);
+        await expect
+          .poll(() =>
+            scrollOwner.evaluate(
+              (element) =>
+                Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop) <= 1,
+            ),
+          )
+          .toBe(true);
+      } finally {
+        for (const baseId of archivedBaseIds) {
+          await json(
+            await request.post(`/api/v1/bases/${baseId}/lifecycle/change-requests`, {
+              data: { operation: "restore", autoMerge: true },
+            }),
+          );
+        }
+      }
     });
   }
 });

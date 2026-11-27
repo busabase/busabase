@@ -41,7 +41,7 @@ test("archived (trash) view renders with its empty state", async ({ page }) => {
     timeout: RENDER_TIMEOUT,
   });
   // The demo seed keeps every base active, so the archived list is empty.
-  await expect(page.getByText("No archived bases")).toBeVisible();
+  await expect(page.getByText("No archived items", { exact: true })).toBeVisible();
 });
 
 test("assets library route renders the seeded media", async ({ page }) => {

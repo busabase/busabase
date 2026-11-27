@@ -11,7 +11,7 @@
 
 import { type iString, iStringParse } from "openlib/i18n/i-string";
 import { LOCALE_NATIVE_NAMES } from "openlib/i18n/i18n";
-import { createContext, type ReactNode, useCallback, useContext } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useMemo } from "react";
 import { createLocaleLoader } from "ts7-i18n/react";
 import { CORE_LOCALES, type CoreLocale, isCoreLocale } from "./locales";
 import { type CoreI18nMessages, coreMessagesEn } from "./messages";
@@ -39,6 +39,10 @@ const nonEnglishCatalogs: Record<Exclude<CoreLocale, "en">, () => Promise<CoreI1
 export const loadCoreMessages = async (locale: CoreLocale): Promise<CoreI18nMessages> =>
   locale === "en" ? coreMessagesEn : nonEnglishCatalogs[locale]();
 
+/** Optional host identity/copy overlay; shared catalogs are never mutated. */
+export type CoreMessagesTransformer = (messages: CoreI18nMessages) => CoreI18nMessages;
+const CoreMessagesTransformContext = createContext<CoreMessagesTransformer | undefined>(undefined);
+
 export const coreMessagesLoader = createLocaleLoader(loadCoreMessages);
 coreMessagesLoader.prime("en", coreMessagesEn);
 
@@ -47,7 +51,9 @@ coreMessagesLoader.prime("en", coreMessagesEn);
  * first time a locale is asked for, until its catalog chunk has loaded.
  */
 export function useCoreMessages(locale?: string): CoreI18nMessages {
-  return coreMessagesLoader.read(isCoreLocale(locale) ? locale : "en");
+  const transform = useContext(CoreMessagesTransformContext);
+  const messages = coreMessagesLoader.read(isCoreLocale(locale) ? locale : "en");
+  return useMemo(() => (transform ? transform(messages) : messages), [messages, transform]);
 }
 
 const ENGLISH_NAMES: Record<CoreLocale, string> = {
@@ -77,17 +83,25 @@ const CoreLocaleContext = createContext<CoreLocale>("en");
 export function CoreI18nProvider({
   children,
   locale,
+  transformMessages,
 }: {
   children: ReactNode;
   /** Active locale from the host (e.g. cloud's `[lang]`, or busabase's cookie). */
   locale?: string;
+  /** Inherited by nested providers, so a host can brand its complete dashboard. */
+  transformMessages?: CoreMessagesTransformer;
 }) {
+  const inheritedTransform = useContext(CoreMessagesTransformContext);
+  const transform = transformMessages ?? inheritedTransform;
   const resolved = isCoreLocale(locale) ? locale : "en";
-  const messages = useCoreMessages(resolved);
+  const source = coreMessagesLoader.read(resolved);
+  const messages = useMemo(() => (transform ? transform(source) : source), [source, transform]);
   return (
-    <CoreLocaleContext.Provider value={resolved}>
-      <CoreI18nContext.Provider value={messages}>{children}</CoreI18nContext.Provider>
-    </CoreLocaleContext.Provider>
+    <CoreMessagesTransformContext.Provider value={transform}>
+      <CoreLocaleContext.Provider value={resolved}>
+        <CoreI18nContext.Provider value={messages}>{children}</CoreI18nContext.Provider>
+      </CoreLocaleContext.Provider>
+    </CoreMessagesTransformContext.Provider>
   );
 }
 

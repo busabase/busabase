@@ -23,6 +23,9 @@ export default defineConfig({
     "attachment-overflow.spec.ts",
     "attachment-file-icons.spec.ts",
     "row-height.spec.ts",
+    "group-summary.spec.ts",
+    "gallery-linked-record-names.spec.ts",
+    "app-user-grid-fallback.spec.ts",
     "agent-prompt-context.spec.ts",
     "agent-chat.spec.ts",
     "agent-context.spec.ts",
@@ -35,6 +38,8 @@ export default defineConfig({
     "agent-session-supervision.spec.ts",
     "agent-permission.spec.ts",
     "agent-permission-live.spec.ts",
+    // Forum evidence. Needs the dedicated server in playwright.forum-green.config.ts.
+    "workflow-toolbar-overlap.spec.ts",
   ],
   // The dashboard is a client SPA that streams its RSC response, so each full-page
   // navigation reloads the bundle and refetches over RPC before content mounts.

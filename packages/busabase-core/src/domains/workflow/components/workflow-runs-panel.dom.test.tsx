@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { ListWorkflowRunsOutput, WorkflowRun } from "busabase-contract/domains/workflow/run";
 import type { ReactNode } from "react";
@@ -447,19 +447,85 @@ describe("WorkflowRunsPanel", () => {
   });
 
   it("opens the run a notification link names", async () => {
-    window.location.hash = "#approval-run-waiting";
+    const scrollIntoView = vi.fn();
+    const previousScroll = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    window.location.hash = "#approval-run-approval";
     try {
-      const { renderPanel } = setup([approvalRun, waitingRun]);
+      const { renderPanel } = setup([waitingRun, approvalRun]);
       const { container } = renderPanel();
       await waitFor(() =>
         expect(
           container.querySelector("[data-workflow-run-details]")?.getAttribute("data-run-id"),
-        ).toBe("run-waiting"),
+        ).toBe("run-approval"),
       );
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
     } finally {
+      HTMLElement.prototype.scrollIntoView = previousScroll;
       window.location.hash = "";
     }
   });
+
+  it("opens a decidable run for an older coalesced approval link", async () => {
+    const previousScroll = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    window.location.hash = "#approval";
+    try {
+      const { renderPanel } = setup([waitingRun, approvalRun]);
+      const { container } = renderPanel();
+      await waitFor(() =>
+        expect(
+          container.querySelector("[data-workflow-run-details]")?.getAttribute("data-run-id"),
+        ).toBe("run-approval"),
+      );
+      await waitFor(() => expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled());
+    } finally {
+      HTMLElement.prototype.scrollIntoView = previousScroll;
+      window.location.hash = "";
+    }
+  });
+
+  it.each(["unmount", "switch notification"])(
+    "stops legacy approval pagination on %s",
+    async (action) => {
+      window.history.replaceState(null, "", "#approval");
+      try {
+        const { list, renderPanel } = setup([]);
+        const page = {
+          runs: [],
+          canRun: true,
+          decidableRunIds: [],
+          retryableRunIds: [],
+          queuedCount: 0,
+          actorNames: {},
+          nextCursor: "page-2",
+        };
+        let finishSecondPage!: (page: ListWorkflowRunsOutput) => void;
+        const secondPage = new Promise<ListWorkflowRunsOutput>((resolve) => {
+          finishSecondPage = resolve;
+        });
+        list.mockResolvedValueOnce(page).mockReturnValueOnce(secondPage);
+        const { unmount } = renderPanel();
+        await waitFor(() =>
+          expect(list).toHaveBeenCalledWith({
+            nodeId: "workflow-1",
+            limit: 20,
+            cursor: "page-2",
+          }),
+        );
+        if (action === "unmount") {
+          unmount();
+        } else {
+          window.history.replaceState(null, "", "#failed");
+          fireEvent(window, new HashChangeEvent("hashchange"));
+        }
+        await act(async () => finishSecondPage({ ...page, nextCursor: "page-3" }));
+        expect(list).toHaveBeenCalledTimes(2);
+      } finally {
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
+    },
+  );
 
   it("shows the server's reason when continuing fails", async () => {
     const { renderPanel, resume } = setup([waitingRun]);

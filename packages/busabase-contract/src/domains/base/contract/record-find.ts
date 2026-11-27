@@ -1,6 +1,11 @@
-import type { BaseFieldVO, FieldType } from "../../../types";
+import type { BaseFieldVO, FieldType, ViewConfigVO } from "../../../types";
+import { getVisibleViewFieldSlugs } from "../utils/view-fields";
 
-/** Fields searched together by the table's "Common fields" option. */
+/**
+ * Field types eligible for the default find scope: a find without a chosen
+ * field searches every field of these types that the saved View shows (see
+ * `getDefaultRecordFindFields`). Other supported types must be chosen.
+ */
 export const COMMON_RECORD_FIND_FIELD_TYPES: ReadonlySet<FieldType> = new Set([
   "text",
   "longtext",
@@ -61,4 +66,24 @@ export const getRecordFindFieldSupport = (
         ? "dynamic"
         : "unsupported",
   };
+};
+
+/**
+ * The default find scope, shared by the server and the web table so the rows a
+ * find keeps and the cells it marks agree: eligible field types shown in the
+ * saved View, in Base order. Without a View (a view-less Base shows every
+ * field), every eligible field is searched. Hidden fields are only searched
+ * when the person chooses one explicitly.
+ */
+export const getDefaultRecordFindFields = <
+  Field extends Pick<BaseFieldVO, "position" | "slug" | "type">,
+>(
+  fields: readonly Field[],
+  viewConfig?: ViewConfigVO | null,
+): Field[] => {
+  const visible = viewConfig ? new Set(getVisibleViewFieldSlugs(viewConfig, fields)) : null;
+  return fields.filter(
+    (field) =>
+      COMMON_RECORD_FIND_FIELD_TYPES.has(field.type) && (!visible || visible.has(field.slug)),
+  );
 };

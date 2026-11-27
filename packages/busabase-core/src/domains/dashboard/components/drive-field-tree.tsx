@@ -4,23 +4,24 @@
 // cell with it, and the record editor (`drive-field-editor.tsx`) reuses its
 // pieces. Rows are the Drive node's own (`DriveFileTree` + `renderFileTree`),
 // so a drive column's files look like a Drive's files; a file opens in the same
-// preview the attachment column uses (`AttachmentFilePreviewBody`).
+// preview the attachment column uses.
 
-import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { FileText } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
-import { useCoreI18n } from "../../../i18n";
+import { type RefObject, useCallback, useMemo, useRef, useState } from "react";
+import {
+  useAssetContentUrlResolver,
+  useAssetDownloadUrlBuilder,
+} from "../../assets/hooks/asset-content-url-context";
 import { buildAssetDownloadUrl } from "../../assets/utils/asset-content-url";
 import { getDriveFieldEntries, getSafeAttachmentUrl } from "../helpers/field";
 import { fileTreeFileName } from "../helpers/file-tree-files";
-import { AttachmentFilePreviewBody } from "./attachment-value-preview";
+import { AttachmentPreviewDialog } from "./attachment-preview-dialog";
 import {
   buildFileTree,
   collectFolderPaths,
   DriveFileTree,
   renderFileTree,
 } from "./file-tree-browser";
-import { DialogContent } from "./localized-dialog-content";
 
 export type DriveFieldEntry = ReturnType<typeof getDriveFieldEntries>[number];
 
@@ -37,11 +38,12 @@ const asShown = (entry: DriveFieldEntry): DriveFieldEntry => ({
 });
 
 /** Download one file of a drive cell under the name the tree shows for it. */
-export const downloadDriveEntry = (entry: DriveFieldEntry) => {
+export const downloadDriveEntry = (
+  entry: DriveFieldEntry,
+  buildDownloadUrl: (assetId: string, fileName?: string | null) => string = buildAssetDownloadUrl,
+) => {
   const name = fileTreeFileName(entry.path);
-  const url = entry.assetId
-    ? buildAssetDownloadUrl(entry.assetId, name)
-    : getSafeAttachmentUrl(entry);
+  const url = entry.assetId ? buildDownloadUrl(entry.assetId, name) : getSafeAttachmentUrl(entry);
   if (!url) return;
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -82,36 +84,48 @@ export function useDriveTreeExpansion(folders: readonly string[]) {
 export function DriveFilePreviewDialog({
   entry,
   onClose,
+  opener,
 }: {
   entry: DriveFieldEntry | null;
   onClose: () => void;
+  opener?: RefObject<HTMLElement | null>;
 }) {
-  const messages = useCoreI18n();
+  const resolveAssetUrl = useAssetContentUrlResolver();
   const shown = entry ? asShown(entry) : null;
   return (
-    <Dialog
+    <AttachmentPreviewDialog
+      entries={
+        shown
+          ? [
+              {
+                key: shown.path,
+                item: shown,
+                url:
+                  shown.assetId && resolveAssetUrl
+                    ? resolveAssetUrl(shown.assetId)
+                    : getSafeAttachmentUrl(shown),
+              },
+            ]
+          : []
+      }
+      selectedKey={shown?.path ?? null}
+      onSelect={() => {}}
+      onCloseAutoFocus={
+        opener
+          ? (event) => {
+              if (opener.current?.isConnected) {
+                event.preventDefault();
+                opener.current.focus({ preventScroll: true });
+              }
+            }
+          : undefined
+      }
+      testId="drive-file-preview-dialog"
       onOpenChange={(open) => {
         if (!open) onClose();
       }}
       open={shown !== null}
-    >
-      <DialogContent
-        className="flex max-h-[90vh] max-w-4xl flex-col overflow-y-auto"
-        data-testid="drive-file-preview-dialog"
-      >
-        <DialogHeader>
-          <DialogTitle className="break-all pr-6">
-            {shown?.fileName ?? messages.nodeDetail.filePreviewTitle}
-          </DialogTitle>
-          <DialogDescription className="break-all font-mono text-xs">
-            {shown?.path ?? ""}
-          </DialogDescription>
-        </DialogHeader>
-        {shown ? (
-          <AttachmentFilePreviewBody item={shown} url={getSafeAttachmentUrl(shown)} />
-        ) : null}
-      </DialogContent>
-    </Dialog>
+    />
   );
 }
 
@@ -130,16 +144,27 @@ export function DriveFieldTree({ value }: { value: unknown }) {
   const folders = useMemo(() => collectFolderPaths(tree), [tree]);
   const expansion = useDriveTreeExpansion(folders);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const previewOpener = useRef<HTMLElement | null>(null);
+  const buildDownloadUrl = useAssetDownloadUrlBuilder();
 
   if (entries.length === 0) return <span className="text-muted-foreground">-</span>;
 
   return (
-    <div className="min-w-0" data-drive-field-tree>
+    <div
+      className="min-w-0"
+      data-drive-field-tree
+      onClickCapture={(event) => {
+        if (event.target instanceof Element) {
+          const trigger = event.target.closest<HTMLElement>('[role="treeitem"]');
+          if (trigger) previewOpener.current = trigger;
+        }
+      }}
+    >
       <DriveFileTree
         expanded={expansion.expanded}
         onDownloadFile={(path) => {
           const entry = entryByPath.get(path);
-          if (entry) downloadDriveEntry(entry);
+          if (entry) downloadDriveEntry(entry, buildDownloadUrl);
         }}
         onExpandedChange={expansion.onExpandedChange}
         onSelect={(path) => {
@@ -149,6 +174,7 @@ export function DriveFieldTree({ value }: { value: unknown }) {
         {renderFileTree(tree)}
       </DriveFileTree>
       <DriveFilePreviewDialog
+        opener={previewOpener}
         entry={previewPath ? (entryByPath.get(previewPath) ?? null) : null}
         onClose={() => setPreviewPath(null)}
       />

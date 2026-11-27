@@ -204,7 +204,19 @@ describe("plain-text and source attachment dialog", () => {
         fireEvent.click(source as HTMLElement);
         expect(source?.getAttribute("aria-pressed")).toBe("true");
       }
-      expect(screen.getByTestId("attachment-text-content").textContent).toBe(content);
+      const rendered = screen.getByTestId("attachment-text-content");
+      if (fileName === "source.html") {
+        await waitFor(() =>
+          expect(rendered.querySelector('code > span > span[style*="#"]')).toBeTruthy(),
+        );
+        expect(
+          Array.from(rendered.querySelectorAll("code > span"))
+            .map((line) => (line.textContent === "\n" ? "" : line.textContent))
+            .join("\n"),
+        ).toBe(content.replaceAll("\r\n", "\n"));
+      } else {
+        expect(rendered.textContent).toBe(content);
+      }
       expect(dialog.querySelector("script")).toBeNull();
       expect(within(dialog).getByRole("link", { name: "Download file" })).toBeTruthy();
       expect(within(dialog).getByRole("link", { name: "Open in new tab" })).toBeTruthy();

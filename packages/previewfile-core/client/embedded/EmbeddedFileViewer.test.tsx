@@ -11,6 +11,18 @@ vi.mock("../viewers/VideoViewerWithMpegSupport", () => ({
   ),
 }));
 
+vi.mock("../viewers/ImageViewer", () => ({
+  default: ({ fitToContainer }: { fitToContainer?: boolean }) => (
+    <p data-testid="image" data-fit={String(fitToContainer)} />
+  ),
+}));
+
+vi.mock("../viewers/PdfViewer", () => ({
+  default: ({ pdfScrollMode }: { pdfScrollMode?: string }) => (
+    <p data-testid="pdf" data-scroll-mode={pdfScrollMode} />
+  ),
+}));
+
 const viewerRoot = (container: HTMLElement) =>
   container.querySelector<HTMLElement>("div.bg-muted, div.gap-2");
 
@@ -37,6 +49,33 @@ describe("viewer layout", () => {
 });
 
 describe("EmbeddedFileViewer", () => {
+  it.each([undefined, "continuous"] as const)(
+    "forwards the PDF scroll mode %s through the embedded host",
+    async (pdfScrollMode) => {
+      render(
+        <EmbeddedFileViewer
+          fileName="report.pdf"
+          mimeType="application/pdf"
+          pdfScrollMode={pdfScrollMode}
+          url="/x"
+        />,
+      );
+      expect((await screen.findByTestId("pdf")).dataset.scrollMode).toBe(pdfScrollMode ?? "single");
+    },
+  );
+
+  it("forwards the host's container fitting opt-in", async () => {
+    render(
+      <EmbeddedFileViewer fileName="image.png" mimeType="image/png" fitToContainer url="/x" />,
+    );
+    expect((await screen.findByTestId("image")).dataset.fit).toBe("true");
+  });
+
+  it("keeps embedded image fitting off unless requested", async () => {
+    render(<EmbeddedFileViewer fileName="image.png" mimeType="image/png" url="/x" />);
+    expect((await screen.findByTestId("image")).dataset.fit).toBe("false");
+  });
+
   it("renders FileViewer inside a full-size frame, in the fill layout", () => {
     const { container } = render(
       <div style={{ height: 300 }}>

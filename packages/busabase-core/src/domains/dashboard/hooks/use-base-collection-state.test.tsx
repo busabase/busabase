@@ -4,7 +4,11 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { useCallback } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useLocation, useSearch } from "wouter";
-import { readRecordPagination, writeRecordPagination } from "../helpers/record-pagination-url";
+import {
+  type RecordPageSize,
+  readRecordPagination,
+  writeRecordPagination,
+} from "../helpers/record-pagination-url";
 import { useBaseCollectionState } from "./use-base-collection-state";
 import { useDashboardRoutes } from "./use-dashboard-routes";
 
@@ -22,7 +26,7 @@ function useCollectionRoute() {
       routes.baseChildParams?.childId === view || routes.baseChildParams?.childId === `viw_${view}`,
   );
   const onPaginationChange = useCallback(
-    (page: number, pageSize: 25 | 50 | 100, replace: boolean) =>
+    (page: number, pageSize: RecordPageSize, replace: boolean) =>
       navigate(`${path}?${writeRecordPagination(search, { page, pageSize })}`, { replace }),
     [navigate, path, search],
   );

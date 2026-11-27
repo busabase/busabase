@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fixture = vi.hoisted(() => ({ store: null as unknown }));
 vi.mock("openlib/storage", () => ({ createStorage: () => fixture.store }));
 
-import { resetConversionStorage, stageConversionSource } from "./conversion-storage";
+import {
+  resetConversionStorage,
+  stageConversionSource,
+  uploadPrivateConversionOutput,
+} from "./conversion-storage";
 
 let server: Server;
 let origin: string;
@@ -345,5 +349,27 @@ describe("remote staging requires private source storage", () => {
       providerCode: "Unauthorized",
     });
     expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret");
+  });
+});
+
+describe("private derivative storage", () => {
+  it("refuses an anonymously accessible output and removes it", async () => {
+    publicStatus = 200;
+    await expect(
+      uploadPrivateConversionOutput({ content: Buffer.from("%PDF-private"), format: "pdf" }),
+    ).rejects.toThrow("Could not store conversion output privately");
+    expect(uploaded).toHaveLength(1);
+    expect(uploaded[0]).toMatch(/^private-conversions\//);
+    expect(removed).toEqual(uploaded);
+  });
+  it("accepts only when unsigned API and public URL both deny access", async () => {
+    await expect(
+      uploadPrivateConversionOutput({ content: Buffer.from("%PDF-private"), format: "pdf" }),
+    ).resolves.toMatchObject({ uri: expect.stringContaining("private-conversions/") });
+    expect(observedRequests.some((r) => r.path.startsWith("/cdn/private-conversions/"))).toBe(true);
+    expect(observedRequests.some((r) => r.path.startsWith("/private/private-conversions/"))).toBe(
+      true,
+    );
+    expect(removed).toEqual([]);
   });
 });

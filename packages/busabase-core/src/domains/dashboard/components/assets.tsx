@@ -28,6 +28,7 @@ import { INLINE_ASSET_TEXT_MAX_BYTES, isTxtFile, utf8ByteLength } from "../helpe
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { AssetMetadataEditorDialog } from "./asset-metadata-editor";
 import {
+  type HostFileViewer,
   type HostFileViewerFile,
   type HostFileViewerScope,
   useHostFileViewer,
@@ -77,6 +78,7 @@ interface AssetMediaPreviewProps {
   mediaClassName: string;
   size?: number;
   viewerScope?: HostFileViewerScope;
+  viewerOptions?: Parameters<HostFileViewer["render"]>[1];
 }
 
 /** Hands the asset to a host-registered viewer (`FileViewerSlotProvider`) when
@@ -89,6 +91,7 @@ export function AssetMediaPreview({
   size,
   mediaClassName,
   viewerScope = "inline",
+  viewerOptions,
 }: AssetMediaPreviewProps) {
   const messages = useCoreI18n();
   const hostViewer = useAssetHostViewer({ mimeType, name, url }, viewerScope);
@@ -98,7 +101,13 @@ export function AssetMediaPreview({
         className={cn("h-[70vh] w-full overflow-auto", mediaClassName)}
         data-asset-preview="host"
       >
-        {hostViewer.render({ mimeType, name, url, size })}
+        {hostViewer.render(
+          { mimeType, name, url, size },
+          viewerOptions ??
+            (viewerScope === "attachment"
+              ? { fitToContainer: true, pdfScrollMode: "continuous" }
+              : undefined),
+        )}
       </div>
     );
   }

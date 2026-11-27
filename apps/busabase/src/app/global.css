@@ -3,6 +3,7 @@
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
 @import "../../../../packages/openlib/shared.css";
+@import "../../../../packages/busabase-core/src/domains/dashboard/components/dialog-motion.css";
 
 /* Fumadocs 16.14.5 applies this logical negative inset utility internally. */
 @utility -inset-s-4 {

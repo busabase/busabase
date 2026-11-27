@@ -6,6 +6,7 @@ import {
   type VaultRow,
   VaultSettingsPanel,
   type VaultSettingsPanelLabels,
+  type VaultSettingsPanelProps,
 } from "./vault-settings-panel";
 
 const labels = new Proxy({} as VaultSettingsPanelLabels, {
@@ -23,7 +24,7 @@ const row = (id: string, kind: VaultRow["kind"] = "secret"): VaultRow => ({
 
 const noop = () => undefined;
 
-const panel = (rows: VaultRow[]) => (
+const panel = (rows: VaultRow[], overrides: Partial<VaultSettingsPanelProps> = {}) => (
   <VaultSettingsPanel
     accessFlags={[]}
     activeItemTab="secrets"
@@ -39,6 +40,7 @@ const panel = (rows: VaultRow[]) => (
     onUpdateRow={noop}
     rows={rows}
     showSecrets={false}
+    {...overrides}
   />
 );
 
@@ -75,5 +77,47 @@ describe("VaultSettingsPanel added-row focus", () => {
     const { rerender } = render(panel([row("a")]));
     rerender(panel([{ ...row("a"), key: "API_KEY" }]));
     expect(focusedId()).toBe("");
+  });
+
+  it("does not allow a failed-load surface to change or clear its snapshot", () => {
+    const { getByRole, queryByRole } = render(
+      panel([row("a")], {
+        readOnly: true,
+        isError: true,
+      }),
+    );
+    expect(queryByRole("textbox")).toBeNull();
+    expect((getByRole("button", { name: "save" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((getByRole("button", { name: "clear" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((getByRole("button", { name: "addSecret" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps locked values and capabilities read-only while allowing another item to change", () => {
+    const { getByLabelText, getByRole } = render(
+      panel(
+        [
+          { ...row("locked"), key: "LOCKED_TOKEN" },
+          { ...row("editable"), key: "EDITABLE_TOKEN" },
+        ],
+        {
+          isRowReadOnly: (id) => id === "locked",
+          accessFlags: [{ key: "edit", label: "Edit" }],
+          variant: "list",
+        },
+      ),
+    );
+    expect(
+      (getByLabelText("nameLabel", { selector: "#vault-key-locked" }) as HTMLInputElement).disabled,
+    ).toBe(true);
+    expect(
+      (getByLabelText("nameLabel", { selector: "#vault-key-editable" }) as HTMLInputElement)
+        .disabled,
+    ).toBe(false);
+    expect(
+      (getByRole("switch", { name: "LOCKED_TOKEN: Edit" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (getByRole("button", { name: "clear: LOCKED_TOKEN" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 });

@@ -100,6 +100,9 @@ export interface FileViewerProps {
   watermark?: string | null;
   /** Hide the viewers' own download controls (the host may offer its own). */
   noDownload?: boolean;
+  fitToContainer?: boolean;
+  /** Continuous PDF reading is opt-in; other file kinds ignore it. */
+  pdfScrollMode?: "single" | "continuous";
   /**
    * Convert MPEG and QuickTime/MOV videos to MP4 in the browser (default
    * `true`). It downloads ffmpeg.wasm's ~30 MB core from unpkg.com at run time,
@@ -129,6 +132,8 @@ export function FileViewer({
   watermark,
   fileSize,
   noDownload = false,
+  fitToContainer = false,
+  pdfScrollMode = "single",
   transcodeVideo = true,
   previewSession,
   model3dViewer: Model3DViewer,
@@ -142,9 +147,11 @@ export function FileViewer({
 
   switch (detectFileType(file)) {
     case FileType.PDF:
-      return <PdfViewer {...viewer} />;
+      return (
+        <PdfViewer {...viewer} fitToContainer={fitToContainer} pdfScrollMode={pdfScrollMode} />
+      );
     case FileType.IMAGE:
-      return <ImageViewer {...viewer} />;
+      return <ImageViewer {...viewer} fitToContainer={fitToContainer} />;
     case FileType.TIFF:
       return <TiffViewer {...viewer} />;
     case FileType.PSD:

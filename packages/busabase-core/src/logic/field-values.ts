@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { getContextSpaceId } from "../context";
 import { getDb } from "../db";
 import type { BaseFieldPO } from "../db/schema";
@@ -11,6 +11,7 @@ import {
   busabaseRecords,
 } from "../db/schema";
 import { isReverseRelationDef } from "../domains/base/field-types";
+import { getRelationRecordIds } from "../domains/base/utils/relation-record-ids";
 import { id, now } from "./kernel";
 import { normalizeFieldValue } from "./vo";
 
@@ -62,15 +63,7 @@ export const refreshRecordQueryStatistics = async (
   }
 };
 
-export const getRelationRecordIds = (value: unknown) => {
-  if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === "string" && item.length > 0);
-  }
-  if (typeof value === "string" && value.length > 0) {
-    return [value];
-  }
-  return [];
-};
+export { getRelationRecordIds };
 
 export const projectCommitFields = async (input: {
   baseId: string;
@@ -133,19 +126,35 @@ export const projectCommitFields = async (input: {
       })
     : [];
   const relationTargetIds = [...new Set(relationEntries.map((link) => link.targetRecordId))];
-  const existingRelationTargetIds =
-    relationTargetIds.length > 0
-      ? new Set(
-          (
-            await db
-              .select({ id: busabaseRecords.id })
-              .from(busabaseRecords)
-              .where(inArray(busabaseRecords.id, relationTargetIds))
-          ).map((record) => record.id),
+  const relationTargets = relationTargetIds.length
+    ? await db
+        .select({
+          id: busabaseRecords.id,
+          status: busabaseRecords.status,
+          archivedAt: busabaseRecords.archivedAt,
+        })
+        .from(busabaseRecords)
+        .where(
+          and(
+            inArray(busabaseRecords.id, relationTargetIds),
+            eq(busabaseRecords.spaceId, getContextSpaceId()),
+          ),
         )
-      : new Set<string>();
-  const relationLinks = relationEntries.filter((link) =>
-    existingRelationTargetIds.has(link.targetRecordId),
+    : [];
+  const activeTargetIds = new Set(
+    relationTargets
+      .filter((record) => record.status === "active" && !record.archivedAt)
+      .map((record) => record.id),
+  );
+  const archivedTargetIds = new Set(
+    relationTargets.filter((record) => record.archivedAt).map((record) => record.id),
+  );
+  const relationLinks = relationEntries.filter((link) => activeTargetIds.has(link.targetRecordId));
+  // Retain the archive timestamp on still-selected links: restoring the target
+  // un-deletes exactly those tombstones. Removing the target from the source
+  // must still delete its tombstone, so a later restore cannot re-add it.
+  const retainedArchivedLinks = relationEntries.filter((link) =>
+    archivedTargetIds.has(link.targetRecordId),
   );
   const projectedValues = Object.entries(input.fields).flatMap(([fieldSlug, value]) => {
     const field = fieldsBySlug.get(fieldSlug);
@@ -209,9 +218,44 @@ export const projectCommitFields = async (input: {
           and(
             eq(busabaseRecordLinks.sourceRecordId, input.recordId),
             inArray(busabaseRecordLinks.fieldId, relationFieldIds),
+            retainedArchivedLinks.length
+              ? sql`not (${and(
+                  isNotNull(busabaseRecordLinks.deletedAt),
+                  or(
+                    ...retainedArchivedLinks.map((link) =>
+                      and(
+                        eq(busabaseRecordLinks.fieldId, link.fieldId),
+                        eq(busabaseRecordLinks.targetRecordId, link.targetRecordId),
+                      ),
+                    ),
+                  ),
+                )})`
+              : undefined,
           ),
         );
     }
+  }
+
+  // Preserve archive identity/timestamp while keeping the still-selected
+  // relationship's ordering and projection metadata current for target restore.
+  for (const link of retainedArchivedLinks) {
+    await db
+      .update(busabaseRecordLinks)
+      .set({
+        fieldSlug: link.fieldSlug,
+        targetBaseId: link.targetBaseId,
+        commitId: link.commitId,
+        position: link.position,
+        updatedAt: timestamp,
+      })
+      .where(
+        and(
+          eq(busabaseRecordLinks.sourceRecordId, link.sourceRecordId),
+          eq(busabaseRecordLinks.fieldId, link.fieldId),
+          eq(busabaseRecordLinks.targetRecordId, link.targetRecordId),
+          isNotNull(busabaseRecordLinks.deletedAt),
+        ),
+      );
   }
 
   if (relationLinks.length > 0) {

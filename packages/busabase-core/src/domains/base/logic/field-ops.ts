@@ -27,7 +27,7 @@ import { insertAuditEvent } from "../../../logic/audit";
 import { insertCommit } from "../../../logic/commits";
 import { closeChangeRequest, finalizeChangeRequest } from "../../../logic/cr-lifecycle";
 import { id, now } from "../../../logic/kernel";
-import { assertNodePermission } from "../../../logic/node-acl";
+import { assertBaseChangeRequestPermission, assertNodePermission } from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
 import { fieldSchema } from "../../../logic/store";
 import { assertValidFormulaField } from "../field-rules";
@@ -228,6 +228,9 @@ export const createFieldChangeRequest = async (
   if (!base) {
     throw baseNotFound(baseId);
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(base.id);
 
   const parsed = createFieldChangeRequestInputSchema.parse(input);
   await assertFieldOriginView(db, base.id, parsed.originViewId);
@@ -367,6 +370,9 @@ export const createDeleteFieldChangeRequest = async (
   if (!base) {
     throw baseNotFound(baseId);
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(base.id);
   const [field] = await db
     .select()
     .from(busabaseBaseFields)
@@ -482,6 +488,9 @@ export const createUpdateFieldChangeRequest = async (
   if (!base) {
     throw baseNotFound(baseId);
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(base.id);
   const [field] = await db
     .select()
     .from(busabaseBaseFields)
@@ -778,6 +787,7 @@ export const createConvertFieldChangeRequest = async (
   submittedBy = "local-editor",
   message?: string,
   autoMerge?: boolean,
+  name?: z.infer<typeof convertFieldChangeRequestInputSchema>["name"],
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -785,6 +795,9 @@ export const createConvertFieldChangeRequest = async (
   if (!base) {
     throw baseNotFound(baseId);
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(base.id);
   const [field] = await db
     .select()
     .from(busabaseBaseFields)
@@ -841,6 +854,7 @@ export const createConvertFieldChangeRequest = async (
     slug: field.slug,
     fromType: field.type,
     newType,
+    ...(name !== undefined ? { name } : {}),
     selectChoiceMode,
     choices: field.options?.choices ?? [],
   };
@@ -931,6 +945,9 @@ export const createReorderFieldsChangeRequest = async (
   if (!base) {
     throw baseNotFound(baseId);
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(base.id);
 
   // All active (non-deleted) field IDs must be included
   const activeFieldIds = new Set(base.fields.map((f) => f.id));
@@ -1025,6 +1042,9 @@ export const createRestoreFieldChangeRequest = async (
   if (!base) {
     throw baseNotFound(baseId);
   }
+  // Proposing needs changeRequest on the Base — the level the API-key policy
+  // declares; a web session is held to it only by this check.
+  await assertBaseChangeRequestPermission(base.id);
   const [field] = await db
     .select()
     .from(busabaseBaseFields)

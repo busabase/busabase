@@ -5,6 +5,11 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
+import {
+  AssetContentUrlProvider,
+  type AssetContentUrlResolver,
+} from "../../assets/hooks/asset-content-url-context";
+import { type DashboardVisitorKind, DashboardVisitorProvider } from "../visitor-context";
 
 vi.mock("wouter", () => ({
   useLocation: () => ["/folder/handbook", vi.fn()],
@@ -35,6 +40,7 @@ function renderFolder(
   body: string,
   children: ReturnType<typeof node>[],
   bodyFormat: "markdown" | "html" = "markdown",
+  options: { visitorKind?: DashboardVisitorKind; resolveAssetUrl?: AssetContentUrlResolver } = {},
 ) {
   const orpc = {
     nodes: {
@@ -57,7 +63,11 @@ function renderFolder(
   return render(
     <QueryClientProvider client={queryClient}>
       <CoreI18nProvider locale="zh-CN">
-        <FolderDetailView hideActions orpc={orpc} slug="handbook" />
+        <DashboardVisitorProvider visitorKind={options.visitorKind ?? "member"}>
+          <AssetContentUrlProvider value={options.resolveAssetUrl ?? null}>
+            <FolderDetailView hideActions orpc={orpc} slug="handbook" />
+          </AssetContentUrlProvider>
+        </DashboardVisitorProvider>
       </CoreI18nProvider>
     </QueryClientProvider>,
   );
@@ -89,6 +99,21 @@ describe("folder detail — readme above the children", () => {
     ]);
     // Readme before the list, in document order.
     expect(readme.compareDocumentPosition(links[0] as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("in an Embed Link, reads its images through the link and lists children as plain rows", async () => {
+    renderFolder(README, DOCS, "markdown", {
+      visitorKind: "embed",
+      resolveAssetUrl: (assetId) => `/embed/emb_x/assets/${assetId}/raw?token=t`,
+    });
+
+    await screen.findByTestId("folder-readme");
+    expect(screen.getByRole("img", { name: "流程图" }).getAttribute("src")).toBe(
+      "/embed/emb_x/assets/ast_flow/raw?token=t",
+    );
+    expect(screen.getByText("入职第一天")).toBeTruthy();
+    expect(screen.getByText("产品定价")).toBeTruthy();
+    expect(screen.queryAllByRole("link")).toEqual([]);
   });
 
   it("looks exactly as before when the folder has no readme", async () => {

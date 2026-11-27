@@ -82,6 +82,7 @@ export const zhCN: Messages = {
   zoomInShortcut: () => "放大（Ctrl/Cmd + +）",
   zoomOutShortcut: () => "缩小（Ctrl/Cmd + -）",
   fitWidth: () => "适合宽度",
+  fitPage: () => "适合整页",
   fitHeight: () => "适合高度",
   fitToWidth: () => "适合宽度",
   fitToHeight: () => "适合高度",

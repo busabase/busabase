@@ -21,19 +21,49 @@ afterEach(() => {
 function Preview({
   url = "/api/airapp-preview/app/?__busabase_site_version=v1",
   kind = "site",
+  shareable = false,
 }: {
   url?: string | null;
   kind?: "site" | "browser";
+  shareable?: boolean;
 }) {
   const [viewport, setViewport] = useState<AirAppPreviewViewport>("desktop");
   return (
     <CoreI18nProvider locale="en">
-      <AirAppPreviewTools kind={kind} setViewport={setViewport} url={url} viewport={viewport} />
+      <AirAppPreviewTools
+        kind={kind}
+        setViewport={setViewport}
+        shareable={shareable}
+        url={url}
+        viewport={viewport}
+      />
     </CoreI18nProvider>
   );
 }
 
 describe("preview device access", () => {
+  it("uses the same shared private preview for display, copy, new window and the phone QR", async () => {
+    const url =
+      "https://workspace.busabase.com/api/airapp-preview/app/?__busabase_site_version=v1&__busabase_preview=bounded-share-link";
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    render(<Preview shareable url={url} />);
+    const input = screen.getByRole("textbox", { name: "Preview link" }) as HTMLInputElement;
+    expect(input.value).toBe(url);
+    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledExactlyOnceWith(url));
+    fireEvent.click(screen.getByRole("button", { name: "Open preview in new window" }));
+    expect(open).toHaveBeenCalledExactlyOnceWith(url, "_blank", "noopener,noreferrer,popup");
+    fireEvent.click(screen.getByRole("button", { name: "Preview on your phone" }));
+    await screen.findByRole("img");
+    expect(encode).toHaveBeenCalledExactlyOnceWith(url, expect.any(Object));
+    expect(
+      screen.getAllByText(/Anyone with this link can preview this version for up to 24 hours/),
+    ).toHaveLength(1);
+    expect(screen.queryByText(/Sign in with the same account/)).toBeNull();
+  });
+
   it("opens the exact versioned preview in an isolated separate window", () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     render(<Preview />);
@@ -133,6 +163,34 @@ describe("preview device access", () => {
     expect(encode).toHaveBeenLastCalledWith(
       expect.stringContaining("__busabase_site_version=v2"),
       expect.any(Object),
+    );
+  });
+
+  it("downloads the current exact private QR and keeps the readable host at the start of the selected URL", async () => {
+    const url =
+      "https://site-private.busabase.app/?__busabase_preview=bounded-link&__busabase_site_version=v2";
+    let saved: { href: string; name: string } | undefined;
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      saved = { href: this.href, name: this.download };
+    });
+    render(<Preview shareable url={url} />);
+    const input = screen.getByRole("textbox", { name: "Preview link" }) as HTMLInputElement;
+    input.scrollLeft = 200;
+    fireEvent.focus(input);
+    fireEvent.click(input);
+    expect(input.scrollLeft).toBe(0);
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(url.length);
+    expect(input.dir).toBe("ltr");
+    fireEvent.click(screen.getByRole("button", { name: "Preview on your phone" }));
+    const image = await screen.findByRole("img");
+    fireEvent.click(screen.getByRole("button", { name: "Download PNG" }));
+    expect(saved).toEqual({ href: image.getAttribute("src"), name: "busabase-qr.png" });
+    expect(encode).toHaveBeenLastCalledWith(
+      url,
+      expect.objectContaining({ margin: 4, width: 512 }),
     );
   });
 

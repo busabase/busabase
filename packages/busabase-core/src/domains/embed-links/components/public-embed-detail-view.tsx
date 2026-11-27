@@ -1,12 +1,14 @@
 "use client";
 
 import type { ChangeRequestVO, RecordVO } from "busabase-contract/types";
-import { type ComponentProps, useMemo } from "react";
+import { type ComponentProps, type ReactNode, useMemo } from "react";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 import { BusabaseDashboard } from "../../dashboard";
 import { BusabaseDashboardRouteRenderer } from "../../dashboard/components/dashboard-route-renderer";
 import { getBusabaseDashboardRoutes } from "../../dashboard/routes";
+import { EmbedContentNavigation } from "./embed-content-navigation";
+import { EmbedSessionBoundary } from "./embed-session-boundary";
 
 const EMPTY: never[] = [];
 
@@ -17,6 +19,9 @@ export type PublicEmbedDetail =
 export interface PublicEmbedDetailHostProps {
   embed: PublicEmbedDetail;
   spaceId: string;
+  publicId: string;
+  secret: string;
+  expiresAt: string;
 }
 
 export interface PublicEmbedDetailViewProps extends PublicEmbedDetailHostProps {
@@ -24,15 +29,26 @@ export interface PublicEmbedDetailViewProps extends PublicEmbedDetailHostProps {
   apiClientOptions?: ComponentProps<typeof BusabaseDashboard>["apiClientOptions"];
   locale?: string;
   provideQueryClient?: boolean;
+  /** Hosts register the same file viewer their workbench uses. */
+  wrapContent?: (content: ReactNode) => ReactNode;
 }
 
-export function PublicEmbedDetailView({
+export function PublicEmbedDetailView(props: PublicEmbedDetailViewProps) {
+  return (
+    <EmbedSessionBoundary {...props}>
+      <PublicEmbedDetailContent {...props} />
+    </EmbedSessionBoundary>
+  );
+}
+
+function PublicEmbedDetailContent({
   apiBasePath = "/api/rpc",
   apiClientOptions,
   embed,
   locale,
-  provideQueryClient = true,
   spaceId,
+  publicId,
+  wrapContent = (content) => content,
 }: PublicEmbedDetailViewProps) {
   const changeRequest = embed.type === "change-request" ? embed.changeRequest : null;
   const record = embed.type === "record-detail" ? embed.record : null;
@@ -46,22 +62,22 @@ export function PublicEmbedDetailView({
         apiClientOptions={apiClientOptions}
         auditEvents={EMPTY}
         bases={changeRequest?.base ? [changeRequest.base] : record ? [record.base] : EMPTY}
-        cacheSpaceKey={spaceId}
+        cacheSpaceKey={`${spaceId}:embed:${publicId}`}
         changeRequests={changeRequest ? [changeRequest] : EMPTY}
         chromeless
         embedded
         nodes={EMPTY}
         currentUserId={null}
         locale={locale}
-        provideQueryClient={provideQueryClient}
+        provideQueryClient={false}
         records={record ? [record] : EMPTY}
         views={EMPTY}
-        visitorKind="anonymous"
+        visitorKind="embed"
         readOnlyChangeRequestPreview={Boolean(changeRequest)}
         readOnlyRecordPreview={Boolean(record)}
       />
     ),
-    [apiBasePath, apiClientOptions, changeRequest, locale, provideQueryClient, record, spaceId],
+    [apiBasePath, apiClientOptions, changeRequest, locale, publicId, record, spaceId],
   );
   const routes = useMemo(() => getBusabaseDashboardRoutes(dashboard), [dashboard]);
   const lockedLocation = useMemo(
@@ -76,11 +92,15 @@ export function PublicEmbedDetailView({
         searchHook={lockedLocation.searchHook}
         ssrPath={initialPath}
       >
-        <BusabaseDashboardRouteRenderer
-          NotFoundComponent={() => null}
-          className="flex min-h-0 flex-1 flex-col"
-          routes={routes}
-        />
+        <EmbedContentNavigation locale={locale}>
+          {wrapContent(
+            <BusabaseDashboardRouteRenderer
+              NotFoundComponent={() => null}
+              className="flex min-h-0 flex-1 flex-col"
+              routes={routes}
+            />,
+          )}
+        </EmbedContentNavigation>
       </Router>
     </div>
   );

@@ -14,6 +14,7 @@ import {
   busabaseRecords,
 } from "../../../db/schema";
 import { buildBaseVisibilityExists } from "../../../logic/node-acl";
+import { type LegacyRelationLink, legacyRelationLinks } from "./legacy-relation-links";
 
 /**
  * Reverse relation columns.
@@ -61,7 +62,9 @@ export const reverseRelationFields = <T extends FieldLike>(fields: ReadonlyArray
 
 /**
  * Current value of every reverse column on `records`, in one query for the
- * whole batch: `recordId → slug → source record ids`, oldest link first.
+ * whole batch: `recordId → slug → source record ids`, oldest indexed link first.
+ * Legacy fallback rows use the field projection's latest write time because
+ * their original link creation time was never stored; ties use source ID.
  * Sources that are archived, sit on a Base the viewer cannot see, or whose
  * forward field was deleted do not appear. Records with no reverse columns are
  * absent from the map.
@@ -70,6 +73,7 @@ export const resolveReverseRelationValues = async (
   db: Db,
   records: ReadonlyArray<{ id: string; baseId: string }>,
   fieldsByBaseId: ReadonlyMap<string, ReadonlyArray<FieldLike>>,
+  recoveredLinks?: ReadonlyArray<LegacyRelationLink>,
 ): Promise<Map<string, Record<string, string[]>>> => {
   const out = new Map<string, Record<string, string[]>>();
   const relevant = records.filter((record) =>
@@ -90,6 +94,7 @@ export const resolveReverseRelationValues = async (
       fieldId: busabaseRecordLinks.fieldId,
       sourceRecordId: busabaseRecordLinks.sourceRecordId,
       targetRecordId: busabaseRecordLinks.targetRecordId,
+      createdAt: busabaseRecordLinks.createdAt,
     })
     .from(busabaseRecordLinks)
     .innerJoin(busabaseRecords, eq(busabaseRecords.id, busabaseRecordLinks.sourceRecordId))
@@ -109,8 +114,32 @@ export const resolveReverseRelationValues = async (
       ),
     )
     .orderBy(asc(busabaseRecordLinks.createdAt), asc(busabaseRecordLinks.sourceRecordId));
+  const forwardFields = recoveredLinks
+    ? []
+    : await db
+        .select({
+          id: busabaseBaseFields.id,
+          baseId: busabaseBaseFields.baseId,
+          slug: busabaseBaseFields.slug,
+        })
+        .from(busabaseBaseFields)
+        .where(inArray(busabaseBaseFields.id, forwardFieldIds));
+  const requestedIds = new Set(relevant.map((record) => record.id));
+  const recovered = (
+    recoveredLinks ?? (await legacyRelationLinks(db, forwardFields, undefined, [...requestedIds]))
+  ).filter(
+    (link) =>
+      link.sourceActive &&
+      forwardFieldIds.includes(link.fieldId) &&
+      requestedIds.has(link.targetRecordId),
+  );
+  const allLinks = [...links, ...recovered].sort(
+    (a, b) =>
+      a.createdAt.getTime() - b.createdAt.getTime() ||
+      a.sourceRecordId.localeCompare(b.sourceRecordId),
+  );
   const sourcesByKey = new Map<string, string[]>();
-  for (const link of links) {
+  for (const link of allLinks) {
     const key = `${link.targetRecordId}|${link.fieldId}`;
     const list = sourcesByKey.get(key) ?? [];
     if (!list.includes(link.sourceRecordId)) list.push(link.sourceRecordId);

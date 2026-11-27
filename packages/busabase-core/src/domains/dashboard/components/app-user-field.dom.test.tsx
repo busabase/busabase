@@ -8,6 +8,7 @@ import { AppUserFieldEditor, AppUserFieldValue } from "./app-user-field";
 import {
   type AppUserFieldHost,
   AppUserFieldHostProvider,
+  type AppUserFieldSearchResult,
   type AppUserFieldUser,
 } from "./app-user-field-slot";
 
@@ -80,6 +81,10 @@ describe("AppUserFieldValue", () => {
     expect(deleted.closest("[data-app-user-id]")?.getAttribute("data-app-user-id")).toBe(
       "apu_gone",
     );
+    const deletedChip = deleted.closest("[data-app-user-state]");
+    expect(deletedChip?.getAttribute("data-app-user-state")).toBe("deleted");
+    expect(deletedChip?.getAttribute("title")).toBe("Deleted app user");
+    expect(deletedChip?.textContent).not.toContain("apu_gone");
     expect(screen.getByText("-")).toBeTruthy();
 
     // Batched: three ids, one request, scoped to the Base that holds them.
@@ -114,12 +119,19 @@ describe("AppUserFieldValue", () => {
   });
 });
 
-function EditorHarness({ initial }: { initial: string | null }) {
+function EditorHarness({
+  initial,
+  focusOnMount = false,
+}: {
+  initial: string | null;
+  focusOnMount?: boolean;
+}) {
   const [value, setValue] = useState<string | null>(initial);
   return (
     <>
       <AppUserFieldEditor
         field={field}
+        focusOnMount={focusOnMount}
         fieldName="Buyer"
         inputId="buyer"
         onChange={setValue}
@@ -132,6 +144,67 @@ function EditorHarness({ initial }: { initial: string | null }) {
 const currentValue = () => screen.getByTestId("value").textContent;
 
 describe("AppUserFieldEditor", () => {
+  it("focuses Clear for a grid viewer who cannot use the picker", async () => {
+    const host = makeHost({ search: vi.fn(async () => ({ users: [], canPick: false })) });
+    wrap(<EditorHarness initial="apu_ann" focusOnMount />, host);
+    await screen.findByText(/Only space owners and admins can pick an app user/);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Clear" }));
+  });
+
+  it("focuses the grid editor itself when there is no search or value to clear", async () => {
+    const host = makeHost({ search: vi.fn(async () => ({ users: [], canPick: false })) });
+    const { container } = wrap(<EditorHarness initial={null} focusOnMount />, host);
+    await screen.findByText(/Only space owners and admins can pick an app user/);
+    expect(document.activeElement).toBe(container.querySelector("[data-app-user-editor]"));
+  });
+
+  it("removes old options immediately while the next email search is debounced or loading", async () => {
+    let finishSearch:
+      | ((result: { users: AppUserFieldUser[]; canPick: boolean }) => void)
+      | undefined;
+    const host = makeHost({
+      search: vi.fn((query: string) =>
+        query
+          ? new Promise<AppUserFieldSearchResult>((resolve) => {
+              finishSearch = resolve;
+            })
+          : Promise.resolve({ users: [ann, bob], canPick: true }),
+      ),
+    });
+    wrap(<EditorHarness initial={null} />, host);
+    const search = await screen.findByRole("searchbox");
+    expect(await screen.findByRole("option", { name: "Choose ann@shop.test" })).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: "bob" } });
+    // Even before the 250ms debounce elapses, the grid's Enter handler must
+    // have no stale option it could click on the user's behalf.
+    expect(screen.queryByRole("option")).toBeNull();
+    expect(screen.getByRole("listbox").getAttribute("aria-busy")).toBe("true");
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(currentValue()).toBe("null");
+    await waitFor(() => expect(host.search).toHaveBeenLastCalledWith("bob"));
+    expect(screen.queryByRole("option")).toBeNull();
+    finishSearch?.({ users: [bob], canPick: true });
+    fireEvent.click(await screen.findByRole("option", { name: "Choose bob@shop.test" }));
+    expect(currentValue()).toBe('"apu_bob"');
+  });
+
+  it("shows a search failure with no previously available candidates", async () => {
+    const host = makeHost({
+      search: vi.fn(async (query: string) => {
+        if (query) throw new Error("Search unavailable");
+        return { users: [ann], canPick: true };
+      }),
+    });
+    wrap(<EditorHarness initial={null} />, host);
+    const search = await screen.findByRole("searchbox");
+    expect(await screen.findByRole("option", { name: "Choose ann@shop.test" })).toBeTruthy();
+    fireEvent.change(search, { target: { value: "bob" } });
+    expect((await screen.findByRole("alert")).textContent).toContain("load");
+    expect(screen.queryByRole("option")).toBeNull();
+    expect(currentValue()).toBe("null");
+  });
+
   it("searches by email and picks a person; Clear empties the cell", async () => {
     const host = makeHost();
     wrap(<EditorHarness initial={null} />, host);

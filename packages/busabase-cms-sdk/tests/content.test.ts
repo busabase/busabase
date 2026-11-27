@@ -8,6 +8,7 @@ import {
   DEFAULT_TAGS_BASE_SLUG,
   mapPublishedPageSummaryRecord,
   mapPublishedPostRecord,
+  mapPublishedPostSummaryRecord,
 } from "../src/index";
 import type { BusabaseCmsRecord, BusabaseCmsSource } from "../src/source";
 
@@ -91,6 +92,100 @@ const source = (
 };
 
 describe("createBusabaseCms", () => {
+  it("projects validated Post summaries without keeping media or duplicate bodies in raw fields", () => {
+    const huge = "x".repeat(2 * 1024 * 1024);
+    const fields = {
+      ...postFields,
+      body: huge,
+      attachments: [{ ...attachment, fileName: huge }],
+      "cover-image": [{ ...attachment, fileName: huge }],
+      keywords: '["accepted"]',
+      "source-path": "legacy/article",
+      "updated-at": "2026-11-19T01:02:03.000Z",
+    };
+    const input = record("post-summary", fields);
+    const summary = mapPublishedPostSummaryRecord(input);
+    expect(summary).toMatchObject({
+      id: "post-summary",
+      path: fields.path,
+      locale: "en",
+      title: fields.title,
+      publishedAt: fields["published-at"],
+      updatedAt: fields["updated-at"],
+      canonicalUrl: fields["canonical-url"],
+      seoTitle: fields["seo-title"],
+      rawFields: { keywords: '["accepted"]', "source-path": "legacy/article" },
+    });
+    for (const key of ["body", "attachments", "coverImage"])
+      expect(summary).not.toHaveProperty(key);
+    for (const key of ["body", "attachments", "cover-image"])
+      expect(summary?.rawFields).not.toHaveProperty(key);
+    expect(JSON.stringify(summary).length).toBeLessThan(3000);
+    expect(mapPublishedPostRecord(input)).toMatchObject({
+      body: huge,
+      attachments: [{ fileName: huge }],
+      coverImage: { fileName: huge },
+    });
+    expect(input.headCommit.payload).toEqual(fields);
+  });
+
+  it("paginates every Post summary with the same published and invalid-record policy", async () => {
+    const invalid = vi.fn();
+    const mock = source({
+      [`base-${DEFAULT_POSTS_BASE_SLUG}`]: [
+        {
+          records: [
+            record("post-en", postFields),
+            record("draft", { status: "draft" }),
+            record("archived", postFields, "archived"),
+            record("invalid", { ...postFields, body: "" }),
+          ],
+          nextCursor: "more",
+        },
+        {
+          records: [record("post-ja", { ...postFields, path: "/ja/blog/sdk-test", locale: "ja" })],
+          nextCursor: null,
+        },
+      ],
+    });
+    const cms = createBusabaseCms({ source: mock, onInvalidRecord: invalid });
+    await expect(cms.posts.listSummaries()).resolves.toMatchObject([
+      { id: "post-en", locale: "en" },
+      { id: "post-ja", locale: "ja" },
+    ]);
+    expect(invalid).toHaveBeenCalledOnce();
+    expect(invalid).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "post", recordId: "invalid" }),
+    );
+    expect(mock.listRecordsPage).toHaveBeenNthCalledWith(2, {
+      baseId: `base-${DEFAULT_POSTS_BASE_SLUG}`,
+      limit: 100,
+      cursor: "more",
+    });
+    const strict = createBusabaseCms({
+      source: source({
+        [`base-${DEFAULT_POSTS_BASE_SLUG}`]: [
+          { records: [record("invalid", { ...postFields, body: "" })], nextCursor: null },
+        ],
+      }),
+      invalidRecords: "throw",
+    });
+    await expect(strict.posts.listSummaries()).rejects.toThrow(
+      "Published Busabase Post record invalid is invalid",
+    );
+  });
+
+  it("rejects a Post summary pagination failure without returning the successful prefix", async () => {
+    const cms = createBusabaseCms({
+      source: source({
+        [`base-${DEFAULT_POSTS_BASE_SLUG}`]: [
+          { records: [record("post", postFields)], nextCursor: "missing-page" },
+        ],
+      }),
+    });
+    await expect(cms.posts.listSummaries()).rejects.toThrow("Unexpected page request");
+  });
+
   it("builds a cache-safe Page summary without rendered content fields", () => {
     const mapped = mapPublishedPageSummaryRecord(
       record("page-1", {

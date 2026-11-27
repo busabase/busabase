@@ -37,6 +37,7 @@ export type InlineCellEditorKind = Extract<
   | "url"
   | "email"
   | "tel"
+  | "appUser"
   | "member"
   | "relation"
   | "attachment"
@@ -56,6 +57,7 @@ const INLINE_FIELD_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "url",
   "email",
   "phone",
+  "appUser",
   "member",
   "relation",
   "attachment",
@@ -81,7 +83,7 @@ export const canEditCellValueInline = (field: BaseFieldVO, value: unknown): bool
     if (value === null || value === undefined) return true;
     return typeof value === "string" && value.length <= TABLE_CELL_PREVIEW_MAX_CHARS;
   }
-  if (kind === "select") {
+  if (kind === "select" || kind === "appUser") {
     return value === null || value === undefined || typeof value === "string";
   }
   if (kind === "member") {
@@ -188,6 +190,7 @@ const errorForKind: Record<InlineCellEditorKind, InlineCellDraftError> = {
   url: "url",
   email: "email",
   tel: "phone",
+  appUser: "invalid",
   member: "invalid",
   relation: "invalid",
   attachment: "invalid",

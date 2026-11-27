@@ -10,8 +10,8 @@
  * - `/llms-full.txt`: optional short intro, then the processed Markdown of every docs page, then
  *   the content index.
  *
- * Neither the docs nor the content index is worth failing the file over: if generating either
- * throws, that part is left out and the rest is served.
+ * Historically a failed docs/content generator is omitted. Apps with runtime response wrappers
+ * can opt into strict docs so an incomplete documentation file is never cached as successful.
  *
  * Lives in `openlib/seo` next to the index formatter it builds on. It is kept off the
  * `openlib/seo` barrel because it imports `fumadocs-core/source` at runtime, which the pure
@@ -19,6 +19,12 @@
  */
 import { type LoaderConfig, type LoaderOutput, llms, type Page } from "fumadocs-core/source";
 import { notFound } from "next/navigation";
+import {
+  countUnresolvedLlmsImages,
+  needsLlmsImageSources,
+  resolveLlmsImageSources,
+  restoreLlmsImageSources,
+} from "./llms-images";
 import { appendLlmsIndex, type LlmsIndexContent, withLlmsIndex } from "./llms-index";
 
 /** Text that may refer to the site's own URLs. */
@@ -41,6 +47,8 @@ export interface LlmsRoutesOptions<C extends LoaderConfig = LoaderConfig> {
   docsTitleFallback?: string;
   /** The docs source's default (fallback) language. Default `en`. */
   defaultLanguage?: string;
+  /** Keep legacy exports by default; fail mode also validates compiled image references. */
+  docsErrorMode?: "omit" | "fail";
 }
 
 export interface LlmsRoutes {
@@ -72,21 +80,96 @@ type ProcessedTextData = { getText: (type: "processed") => Promise<string> };
 const hasProcessedText = (data: object): data is ProcessedTextData =>
   "getText" in data && typeof data.getText === "function";
 
+type DocsPhase =
+  | "processed-text"
+  | "image-sources"
+  | "image-validation"
+  | "index"
+  | "pages"
+  | "lookup";
+
+/** Deliberately carries no upstream error, filesystem path, body or authored expression. */
+export class LlmsDocsGenerationError extends Error {
+  readonly pageUrl?: string;
+
+  constructor(
+    readonly phase: DocsPhase,
+    pageUrl?: string,
+    readonly unresolvedImageCount?: number,
+  ) {
+    super(
+      phase === "image-validation"
+        ? "Unresolved compiled documentation image"
+        : "Documentation generation failed",
+    );
+    this.name = "LlmsDocsGenerationError";
+    this.pageUrl = safePageUrl(pageUrl);
+  }
+}
+
+const safePageUrl = (url: string | undefined): string | undefined => {
+  if (!url) return undefined;
+  try {
+    // Page identity is public routing information. Queries, fragments and credentials never log.
+    const parsed = new URL(url, "https://docs.invalid");
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed.pathname
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const logDocsFailure = (error: unknown, phase: DocsPhase, pageUrl?: string) => {
+  const metadata = error instanceof LlmsDocsGenerationError ? error : undefined;
+  console.warn("[llms.txt] Documentation generation failed", {
+    phase: metadata?.phase ?? phase,
+    pageUrl: safePageUrl(metadata?.pageUrl ?? pageUrl),
+    unresolvedImageCount: metadata?.unresolvedImageCount,
+  });
+};
+
 /**
  * A Fumadocs page as Markdown for LLMs: `# Title (url)` and its processed Markdown (needs
- * `postprocess.includeProcessedMarkdown: true` in source.config.ts). Virtual OpenAPI pages have
- * no Markdown body: title and description only.
+ * `postprocess.includeProcessedMarkdown: true` in source.config.ts). Virtual OpenAPI pages may
+ * provide their own processed text; otherwise they retain the title/description fallback.
+ * Strict image validation is opt-in for apps with the corresponding image compiler plugin.
  */
 export const getLlmsDocText = async (
   page: Page,
   titleFallback = "Documentation",
+  strictImages = false,
 ): Promise<string> => {
   const { data } = page;
-  if (page.type === "openapi" || !hasProcessedText(data)) {
+  if (!hasProcessedText(data)) {
     const description = data.description ? `\n\n${data.description}` : "";
     return `# ${data.title ?? titleFallback} (${page.url})${description}`;
   }
-  return `# ${data.title} (${page.url})\n\n${await data.getText("processed")}`;
+  let processed: string;
+  try {
+    processed = await data.getText("processed");
+  } catch {
+    throw new LlmsDocsGenerationError("processed-text", page.url);
+  }
+  const needsSources = needsLlmsImageSources(processed);
+  // Apps which have not opted into strict Docs retain their existing unmapped exports.
+  if (!strictImages && !needsSources)
+    return `# ${data.title ?? titleFallback} (${page.url})\n\n${processed}`;
+  let assets: unknown;
+  if (needsSources) {
+    try {
+      assets = await resolveLlmsImageSources(data);
+    } catch {
+      throw new LlmsDocsGenerationError("image-sources", page.url);
+    }
+  }
+  const restored = restoreLlmsImageSources(processed, assets);
+  const unresolvedImageCount = strictImages
+    ? countUnresolvedLlmsImages(restored)
+    : Number(needsLlmsImageSources(restored));
+  if (unresolvedImageCount)
+    throw new LlmsDocsGenerationError("image-validation", page.url, unresolvedImageCount);
+  return `# ${data.title ?? titleFallback} (${page.url})\n\n${restored}`;
 };
 
 /**
@@ -174,12 +257,25 @@ export const getLlmsDocsIndex = <C extends LoaderConfig>(
     .replace(/^# /gm, "### ");
 };
 
-/** Run a generator, or log and return `""` if it throws. */
-const orEmpty = async (label: string, generate: () => string | Promise<string>) => {
+const docsUnavailable = () =>
+  new Response("Documentation temporarily unavailable", {
+    status: 503,
+    headers: { ...TEXT_HEADERS, "Cache-Control": "no-store", "Retry-After": "60" },
+  });
+
+/** Only Docs failures use this boundary; brand text and other program errors still propagate. */
+const orEmpty = async (
+  generate: () => string | Promise<string>,
+  mode: "omit" | "fail",
+  phase: DocsPhase,
+) => {
   try {
     return await generate();
   } catch (error) {
-    console.warn(`[llms.txt] Could not generate the ${label}; leaving it out`, error);
+    logDocsFailure(error, phase);
+    if (mode === "fail") {
+      return docsUnavailable();
+    }
     return "";
   }
 };
@@ -193,9 +289,10 @@ export const createLlmsRoutes = <C extends LoaderConfig>({
   docsHeading = "Documentation",
   docsTitleFallback = "Documentation",
   defaultLanguage = "en",
+  docsErrorMode = "omit",
 }: LlmsRoutesOptions<C>): LlmsRoutes => {
   const baseUrl = rawBaseUrl.replace(/\/+$/, "");
-  const docText = (page: Page) => getLlmsDocText(page, docsTitleFallback);
+  const docText = (page: Page) => getLlmsDocText(page, docsTitleFallback, docsErrorMode === "fail");
 
   const withContentIndex = (text: string) =>
     loadIndex ? withLlmsIndex(text, loadIndex, { baseUrl }) : Promise.resolve(text);
@@ -207,28 +304,51 @@ export const createLlmsRoutes = <C extends LoaderConfig>({
     docText,
     docMarkdown: async (params) => {
       const { lang, slug } = await params;
-      const page = docsSource?.getPage(slug, lang);
+      let page: Page | undefined;
+      try {
+        page = docsSource?.getPage(slug, lang);
+      } catch (error) {
+        if (docsErrorMode === "fail") {
+          logDocsFailure(error, "lookup");
+          return docsUnavailable();
+        }
+        throw error;
+      }
       if (!page) notFound();
-      return new Response(await docText(page), { headers: MARKDOWN_HEADERS });
+      try {
+        return new Response(await docText(page), { headers: MARKDOWN_HEADERS });
+      } catch (error) {
+        if (docsErrorMode === "fail") {
+          logDocsFailure(error, "processed-text", page.url);
+          return docsUnavailable();
+        }
+        throw error;
+      }
     },
     llmsTxt: async () => {
       const docsIndex = docsSource
-        ? await orEmpty("docs index", () => getLlmsDocsIndex(docsSource, defaultLanguage))
+        ? await orEmpty(() => getLlmsDocsIndex(docsSource, defaultLanguage), docsErrorMode, "index")
         : "";
+      if (docsIndex instanceof Response) return docsIndex;
       const docsSection = docsIndex ? `## ${docsHeading}\n\n${docsIndex}` : "";
       return respond(joinBlocks(resolveText(intro, baseUrl), docsSection));
     },
     llmsFullTxt: async () => {
       const docsText = docsSource
-        ? await orEmpty("full docs text", async () => {
-            // Real translations only: a fallback page is the default-locale text again.
-            const pages = docsSource
-              .getPages()
-              .filter((page) => isOwnLocalePage(docsSource, page, page.locale, defaultLanguage));
-            const texts = await Promise.all(pages.map(docText));
-            return texts.join("\n\n");
-          })
+        ? await orEmpty(
+            async () => {
+              // Real translations only: a fallback page is the default-locale text again.
+              const pages = docsSource
+                .getPages()
+                .filter((page) => isOwnLocalePage(docsSource, page, page.locale, defaultLanguage));
+              const texts = await Promise.all(pages.map(docText));
+              return texts.join("\n\n");
+            },
+            docsErrorMode,
+            "pages",
+          )
         : "";
+      if (docsText instanceof Response) return docsText;
       return respond(joinBlocks(resolveText(fullIntro, baseUrl), docsText));
     },
   };

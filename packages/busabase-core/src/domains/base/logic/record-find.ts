@@ -3,9 +3,10 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import {
   COMMON_RECORD_FIND_FIELD_TYPES,
+  getDefaultRecordFindFields,
   getRecordFindFieldSupport,
 } from "busabase-contract/domains/base/contract/record-find";
-import type { BaseFieldVO } from "busabase-contract/types";
+import type { BaseFieldVO, ViewConfigVO } from "busabase-contract/types";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { getContextSpaceId } from "../../../context";
 import type { getDb } from "../../../db";
@@ -28,12 +29,17 @@ export interface RecordFindInput {
   fieldId?: string;
 }
 
+/**
+ * Without a chosen field, search the eligible fields the saved View shows —
+ * the columns the person can see — or every eligible field when there is no
+ * View. A chosen field is searched even when the View hides it.
+ */
 export const resolveRecordFindFields = (
   fields: ReadonlyArray<BaseFieldVO>,
   find: RecordFindInput,
+  viewConfig?: ViewConfigVO | null,
 ): BaseFieldVO[] => {
-  if (!find.fieldId)
-    return fields.filter((field) => COMMON_RECORD_FIND_FIELD_TYPES.has(field.type));
+  if (!find.fieldId) return getDefaultRecordFindFields(fields, viewConfig);
   const field = fields.find((candidate) => candidate.id === find.fieldId);
   if (!field) {
     throw new ORPCError("BAD_REQUEST", {

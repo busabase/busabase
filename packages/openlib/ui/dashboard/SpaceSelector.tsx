@@ -236,6 +236,8 @@ export function SpaceSelector({
 
   // Control dropdown open state
   const [isOpen, setIsOpen] = React.useState(false);
+  const isMountedRef = React.useRef(false);
+  const pendingModalActionRef = React.useRef<(() => void) | undefined>(undefined);
   const [isHydrated, setIsHydrated] = React.useState(false);
   const [scrollRegion, setScrollRegion] = React.useState<HTMLDivElement | null>(null);
   const scrollContentRef = React.useRef<HTMLDivElement>(null);
@@ -258,7 +260,12 @@ export function SpaceSelector({
   // Streaming SSR can expose this button before React attaches the dropdown
   // handler. Keep it disabled until hydration so an early click is not lost.
   React.useEffect(() => {
+    isMountedRef.current = true;
     setIsHydrated(true);
+    return () => {
+      isMountedRef.current = false;
+      pendingModalActionRef.current = undefined;
+    };
   }, []);
 
   const updateScrollAffordances = React.useCallback(() => {
@@ -300,19 +307,9 @@ export function SpaceSelector({
     setIsOpen(false); // Close dropdown after space change
   };
 
-  const handleSettingsClick = () => {
-    setIsOpen(false); // Close dropdown before opening settings modal
-    onSettingsClick?.();
-  };
-
-  const handleInviteMembersClick = () => {
-    setIsOpen(false); // Close dropdown before opening invite modal
-    onInviteMembersClick?.();
-  };
-
-  const handleAddSpace = () => {
-    setIsOpen(false); // Close dropdown before opening add space modal
-    onAddSpace?.();
+  const handleModalAction = (action: (() => void) | undefined) => {
+    pendingModalActionRef.current = action;
+    setIsOpen(false);
   };
 
   const handleViewAllSpaces = () => {
@@ -371,7 +368,13 @@ export function SpaceSelector({
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+        <DropdownMenu
+          open={isOpen}
+          onOpenChange={(open) => {
+            if (open) pendingModalActionRef.current = undefined;
+            setIsOpen(open);
+          }}
+        >
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               disabled={!isHydrated}
@@ -408,6 +411,15 @@ export function SpaceSelector({
             align="start"
             side={isMobile ? "bottom" : "right"}
             sideOffset={4}
+            onCloseAutoFocus={() => {
+              const action = pendingModalActionRef.current;
+              pendingModalActionRef.current = undefined;
+              if (action) {
+                queueMicrotask(() => {
+                  if (isMountedRef.current) action();
+                });
+              }
+            }}
           >
             {/* Active Space Header */}
             <div
@@ -465,7 +477,7 @@ export function SpaceSelector({
                       variant="outline"
                       size="sm"
                       className="h-8 flex-1 text-xs"
-                      onClick={handleSettingsClick}
+                      onClick={() => handleModalAction(onSettingsClick)}
                     >
                       <Settings className="mr-1.5 size-3.5" />
                       {labels.settings}
@@ -476,7 +488,7 @@ export function SpaceSelector({
                       variant="outline"
                       size="sm"
                       className="h-8 flex-1 text-xs"
-                      onClick={handleInviteMembersClick}
+                      onClick={() => handleModalAction(onInviteMembersClick)}
                     >
                       <UserPlus className="mr-1.5 size-3.5" />
                       {labels.inviteMembers}
@@ -561,7 +573,7 @@ export function SpaceSelector({
                       <div className="p-1">
                         <DropdownMenuItem
                           className="cursor-pointer gap-2 p-2"
-                          onClick={handleAddSpace}
+                          onClick={() => handleModalAction(onAddSpace)}
                         >
                           <div className="flex size-6 items-center justify-center rounded-md border bg-background">
                             <Plus className="size-4" />

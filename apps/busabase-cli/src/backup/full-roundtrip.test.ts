@@ -117,7 +117,21 @@ describe("exportFull -> verifyArchive -> importFull round trip", () => {
       nodes: [{ id: "root", parentId: null, type: "folder" }],
       bases: [{ id: "base", nodeId: "root" }],
       comments: [{ id: "comment", body: "Mention" }],
-      nodeShares: [{ id: "share", nodeId: "root", passwordHash: "preserved-password-verifier" }],
+      nodeShares: [
+        {
+          id: "share",
+          nodeId: "root",
+          passwordHash: "preserved-password-verifier",
+          passwordCiphertext: {
+            version: 1,
+            encoding: "encrypted",
+            algorithm: "aes-256-gcm",
+            iv: "preserved-iv",
+            tag: "preserved-tag",
+            ciphertext: "preserved-ciphertext",
+          },
+        },
+      ],
       favorites: [{ id: "favorite", nodeId: "root" }],
       nodeSubscriptions: [{ id: "subscription", nodeId: "root", mutedAt: "2026-11-11T00:00:00Z" }],
       spaceInstructions: [{ spaceId: "source", body: "Original instructions", version: 7 }],

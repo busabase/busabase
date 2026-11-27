@@ -86,15 +86,22 @@ describe("mergeBaseConvertField — text → select auto_create at scale", () =>
       operation: "convert",
       baseId,
       fieldId: tagFieldId,
+      autoMerge: false,
       newType: "select",
+      name: { en: "Category", "zh-CN": "分类" },
       selectChoiceMode: "auto_create",
     });
+    const pendingBase = (await client.bases.list({})).find((base) => base.id === baseId);
+    const pendingField = pendingBase?.fields.find((field) => field.slug === "tag");
+    expect(pendingField?.name).toBe("Tag");
+    expect(pendingField?.type).toBe("text");
     await client.changeRequests.review({ changeRequestIds: [convertCr.id], verdict: "approved" });
     await client.changeRequests.merge({ changeRequestIds: [convertCr.id] });
 
     const updatedBase = (await client.bases.list({})).find((base) => base.id === baseId);
     const tagField = updatedBase?.fields.find((field) => field.slug === "tag");
     expect(tagField?.type).toBe("select");
+    expect(tagField?.name).toEqual({ en: "Category", "zh-CN": "分类" });
     const choiceIdByName = new Map(
       (tagField?.options?.choices ?? []).map((choice) => [choice.name, choice.id]),
     );

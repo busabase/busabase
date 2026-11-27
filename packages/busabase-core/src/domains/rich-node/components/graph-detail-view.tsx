@@ -16,12 +16,15 @@ import {
   type ReactFlowProps,
   ReactFlowProvider,
   useEdgesState,
+  useNodesInitialized,
   useNodesState,
   useReactFlow,
   type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
+import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import {
   type WorkflowDocument,
@@ -40,6 +43,7 @@ import {
 } from "busabase-contract/domains/workflow/run";
 import type { NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
+import { DropdownMenuItem } from "kui/dropdown-menu";
 import { Input } from "kui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { Textarea } from "kui/textarea";
@@ -57,7 +61,7 @@ import {
   Webhook,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type CoreI18nMessages, fmt, useCoreI18n } from "../../../i18n";
 import { getGraphAriaLabels } from "../../../i18n/graph-aria";
 import {
@@ -69,6 +73,7 @@ import {
   usePreviewFullscreen,
 } from "../../dashboard/components/preview-fullscreen";
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { useWorkspacePermissionLevel } from "../../dashboard/components/split-submit-button";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
@@ -92,6 +97,10 @@ import { WorkflowTriggerBasePicker } from "../../workflow/components/workflow-tr
 import { WorkflowTriggerFieldFilter } from "../../workflow/components/workflow-trigger-field-filter";
 import { WorkflowWebhookHeaders } from "../../workflow/components/workflow-webhook-headers";
 import { WorkflowWebhookSigning } from "../../workflow/components/workflow-webhook-signing";
+import {
+  getNewWorkflowNodePosition,
+  getWorkflowNodeViewport,
+} from "../../workflow/utils/canvas-viewport";
 import { newWorkflowHookToken } from "../../workflow/utils/hook";
 import type { WorkflowRunStepState } from "../../workflow/utils/run-view";
 import { parseWorkflowRunLink } from "../../workflow/utils/run-view";
@@ -244,12 +253,14 @@ const workflowNodeSummary = (data: WorkflowNodeData, messages: CoreI18nMessages)
 const RUN_STATE_FRAME: Record<WorkflowRunStepState, string> = {
   done: "border-primary/60 ring-2 ring-primary/25",
   paused: "border-dashed border-primary ring-2 ring-primary/40",
+  waiting_approval: "border-dashed border-primary ring-2 ring-primary/40",
   failed: "border-destructive ring-2 ring-destructive/30",
 };
 
 const RUN_STATE_CHIP: Record<WorkflowRunStepState, string> = {
   done: "bg-primary/10 text-primary",
   paused: "bg-muted text-foreground",
+  waiting_approval: "bg-muted text-foreground",
   failed: "bg-destructive/10 text-destructive",
 };
 
@@ -258,7 +269,9 @@ const runStateLabel = (state: WorkflowRunStepState, messages: CoreI18nMessages) 
     ? messages.workflowRuns.stepDone
     : state === "paused"
       ? messages.workflowRuns.stepPaused
-      : messages.workflowRuns.stepFailed;
+      : state === "waiting_approval"
+        ? messages.workflowRuns.statusWaitingApproval
+        : messages.workflowRuns.stepFailed;
 
 function WorkflowStepNode({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
   const messages = useCoreI18n();
@@ -507,11 +520,20 @@ interface GraphEditorProps {
   document: WorkflowDocument;
   node: NodeVO;
   orpc: BusabaseQueryUtils;
+  viewerPermissionLevel?: ApiKeyPermissionLevel;
 }
 
-function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProps) {
+function GraphEditor({
+  document: workflowDocument,
+  node,
+  orpc,
+  viewerPermissionLevel,
+}: GraphEditorProps) {
   const messages = useCoreI18n();
   const isAnonymous = useIsAnonymousVisitor();
+  const permissionLevel = useWorkspacePermissionLevel();
+  const readOnly =
+    isAnonymous || !hasApiKeyLevel(viewerPermissionLevel ?? permissionLevel, "changeRequest");
   const fullscreenState = usePreviewFullscreen({ syncWithUrl: true });
   const initialNodes = useMemo<WorkflowFlowNode[]>(
     () =>
@@ -531,10 +553,51 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
   const [edges, setEdges, applyEdgeChanges] = useEdgesState(initialEdges);
   const [selectedId, setSelectedId] = useState<string | null>(nodes[0]?.id ?? null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [pendingRevealId, setPendingRevealId] = useState<string | null>(null);
+  const nodesInitialized = useNodesInitialized();
+  const { getNode, getViewport, setViewport } = useReactFlow<WorkflowFlowNode, Edge>();
+
+  // Wait for React Flow's measurement, not a timer: a just-inserted node has no
+  // dimensions yet. Only local additions move the camera; edits and server
+  // refreshes must leave the author's viewport alone.
+  useEffect(() => {
+    if (!pendingRevealId || !nodesInitialized) return;
+    const added = getNode(pendingRevealId);
+    const canvas = canvasRef.current;
+    if (!added?.measured?.width || !added.measured.height || !canvas) return;
+    if (!canvas.clientWidth || !canvas.clientHeight) return;
+    const viewport = getWorkflowNodeViewport(
+      { ...added.position, width: added.measured.width, height: added.measured.height },
+      getViewport(),
+      { width: canvas.clientWidth, height: canvas.clientHeight },
+    );
+    if (viewport) {
+      void setViewport(viewport, {
+        duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 250,
+      });
+    }
+    setPendingRevealId(null);
+  }, [getNode, getViewport, nodesInitialized, pendingRevealId, setViewport]);
   const [workflowSettings, setWorkflowSettings] = useState<WorkflowSettings>(
     workflowDocument.settings,
   );
   const [asideTab, setAsideTab] = useState<"configure" | "runs">("configure");
+  const [asideWidth, setAsideWidth] = useState(272);
+  const [asideMaxWidth, setAsideMaxWidth] = useState(800);
+  const layoutRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const layout = layoutRef.current;
+    if (!layout || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      const max = Math.max(200, Math.min(800, entry.contentRect.width - 200));
+      setAsideMaxWidth(max);
+      setAsideWidth((width) => Math.min(width, max));
+    });
+    observer.observe(layout);
+    return () => observer.disconnect();
+  }, []);
   // A notification about a run links here with a fragment: open on the Runs tab.
   useEffect(() => {
     const follow = () => {
@@ -566,6 +629,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
   // screen until a full page reload.
   useServerDocumentSync({
     apply: (document: WorkflowDocument) => {
+      setPendingRevealId(null);
       setNodes(
         document.nodes.map((workflowNode) => ({
           id: workflowNode.id,
@@ -607,10 +671,13 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
   const onNodesChange = useCallback(
     (changes: NodeChange<WorkflowFlowNode>[]) => {
       applyNodeChanges(changes);
+      if (changes.some((change) => change.type === "remove" && change.id === pendingRevealId)) {
+        setPendingRevealId(null);
+      }
       if (changes.some((change) => change.type === "position" || change.type === "remove"))
         markDirty();
     },
-    [applyNodeChanges, markDirty],
+    [applyNodeChanges, markDirty, pendingRevealId],
   );
 
   const onEdgesChange = useCallback(
@@ -622,13 +689,20 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
   );
 
   const addNode = () => {
+    if (readOnly) return;
     // Short, because people write this id in formulas.
     let id = newId("step").slice(0, 13);
     while (nodes.some((node) => node.id === id)) id = newId("step").slice(0, 13);
-    const position = { x: nodes.length * 56, y: nodes.length * 72 };
+    const canvas = canvasRef.current;
+    const viewport = getViewport();
+    const position = getNewWorkflowNodePosition(nodes, selectedId, {
+      x: ((canvas?.clientWidth ?? 0) / 2 - viewport.x) / viewport.zoom,
+      y: ((canvas?.clientHeight ?? 0) / 2 - viewport.y) / viewport.zoom,
+    });
     const next: WorkflowFlowNode = {
       id,
       type: "workflowStep",
+      selected: true,
       position,
       data: {
         kind: "webhook",
@@ -664,17 +738,24 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
         outcome: "completed",
       },
     };
-    setNodes((current) => [...current, next]);
+    setNodes((current) => [
+      ...current.map((entry) => (entry.selected ? { ...entry, selected: false } : entry)),
+      next,
+    ]);
+    setPendingRevealId(id);
+    setAsideTab("configure");
     setSelectedId(id);
     setSelectedEdgeId(null);
     markDirty();
   };
 
   const deleteSelected = () => {
+    if (readOnly) return;
     if (selectedEdgeId) {
       setEdges((current) => current.filter((edge) => edge.id !== selectedEdgeId));
       setSelectedEdgeId(null);
     } else if (selectedId) {
+      if (selectedId === pendingRevealId) setPendingRevealId(null);
       setNodes((current) => current.filter((entry) => entry.id !== selectedId));
       setEdges((current) =>
         current.filter((edge) => edge.source !== selectedId && edge.target !== selectedId),
@@ -687,7 +768,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
   };
 
   const updateSelected = (patch: WorkflowNodePatch) => {
-    if (!selectedId) return;
+    if (readOnly || !selectedId) return;
     setNodes((current) =>
       current.map((entry) => {
         if (entry.id !== selectedId) return entry;
@@ -753,7 +834,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
   };
 
   const updateSelectedEdge = (patch: { label?: string; outcome?: string }) => {
-    if (!selectedEdgeId) return;
+    if (readOnly || !selectedEdgeId) return;
     setEdges((current) =>
       current.map((edge) =>
         edge.id === selectedEdgeId
@@ -769,6 +850,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
   };
 
   const updateWorkflowSettings = (patch: Partial<WorkflowSettings>) => {
+    if (readOnly) return;
     setWorkflowSettings((current) => ({ ...current, ...patch }));
     markDirty();
   };
@@ -779,6 +861,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
   };
 
   const saveGraph = () => {
+    if (readOnly) return;
     const document: WorkflowDocument = {
       version: 2,
       nodes: nodes.map((entry) => persistedWorkflowNode(entry, messages)),
@@ -811,9 +894,12 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
               <Play className="size-3.5" />
             </Button>
           )}
+          {/* Add step and Delete move into the "•••" menu on a phone (see
+              `menuActions` below); Run stays, it is what the page is for. */}
           <Button
             aria-label={messages.richNodes.addStep}
-            className="size-7 shrink-0 overflow-hidden sm:size-8"
+            className="size-7 shrink-0 overflow-hidden max-sm:hidden sm:size-8"
+            disabled={readOnly}
             onClick={addNode}
             size="icon"
             title={messages.richNodes.addStep}
@@ -824,8 +910,8 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
           </Button>
           <Button
             aria-label={messages.richNodes.deleteSelection}
-            className="size-7 shrink-0 overflow-hidden sm:size-8"
-            disabled={!selectedId && !selectedEdgeId}
+            className="size-7 shrink-0 overflow-hidden max-sm:hidden sm:size-8"
+            disabled={readOnly || (!selectedId && !selectedEdgeId)}
             onClick={deleteSelected}
             size="icon"
             title={messages.richNodes.deleteSelection}
@@ -834,6 +920,22 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
           >
             <Trash2 className="size-3.5" />
           </Button>
+        </>
+      }
+      menuActions={
+        <>
+          <DropdownMenuItem className="sm:hidden" disabled={readOnly} onSelect={addNode}>
+            <Plus className="mr-2 size-3.5" />
+            {messages.richNodes.addStep}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="sm:hidden"
+            disabled={readOnly || (!selectedId && !selectedEdgeId)}
+            onSelect={deleteSelected}
+          >
+            <Trash2 className="mr-2 size-3.5" />
+            {messages.richNodes.deleteSelection}
+          </DropdownMenuItem>
         </>
       }
       error={error}
@@ -845,10 +947,16 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
       status={status}
     >
       <div
+        ref={layoutRef}
+        style={
+          {
+            "--workflow-panel-width": `min(${asideWidth}px, max(200px, calc(100% - 200px)))`,
+          } as CSSProperties
+        }
         className={
           isAnonymous || fullscreenState.fullscreen
             ? "grid h-full min-h-0 grid-cols-1"
-            : "grid h-full min-h-0 grid-cols-[minmax(0,1fr)_17rem] max-md:grid-cols-1 max-md:grid-rows-[minmax(18rem,1fr)_auto]"
+            : "relative grid h-full min-h-0 grid-cols-[minmax(0,1fr)_var(--workflow-panel-width)] max-md:grid-cols-1 max-md:grid-rows-[minmax(18rem,1fr)_auto]"
         }
       >
         <div className="flex min-h-0 flex-col">
@@ -860,12 +968,13 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
             <Info aria-hidden="true" className="size-3.5 shrink-0" />
             <span>{messages.richNodes.notExecutedNote}</span>
           </p>
-          <div className="min-h-0 flex-1">
+          <div className="min-h-0 flex-1" ref={canvasRef}>
             <WorkflowRunHighlightContext.Provider value={runHighlight ?? EMPTY_RUN_HIGHLIGHT}>
               <WorkflowCanvas
                 edges={edges}
                 nodes={nodes}
                 onConnect={(connection) => {
+                  if (readOnly) return;
                   setEdges((current) =>
                     addEdge(
                       { ...connection, type: "smoothstep", data: { outcome: "default" } },
@@ -875,24 +984,65 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                   markDirty();
                 }}
                 onEdgeClick={(_, selected) => {
+                  setPendingRevealId(null);
                   setSelectedEdgeId(selected.id);
                   setSelectedId(null);
                 }}
                 onEdgesChange={onEdgesChange}
                 onNodeClick={(_, selected) => {
+                  setPendingRevealId(null);
                   setSelectedId(selected.id);
                   setSelectedEdgeId(null);
                 }}
                 onNodesChange={onNodesChange}
                 onPaneClick={() => {
+                  setPendingRevealId(null);
                   setSelectedId(null);
                   setSelectedEdgeId(null);
                 }}
-                readOnly={isAnonymous}
+                readOnly={readOnly}
               />
             </WorkflowRunHighlightContext.Provider>
           </div>
         </div>
+        {!isAnonymous && !fullscreenState.fullscreen ? (
+          <div
+            aria-label={messages.sidePanel.resize}
+            aria-orientation="vertical"
+            aria-valuemin={200}
+            aria-valuemax={asideMaxWidth}
+            aria-valuenow={Math.min(asideWidth, asideMaxWidth)}
+            className="absolute inset-y-0 right-[var(--workflow-panel-width)] z-10 hidden w-3 translate-x-1/2 cursor-col-resize touch-none hover:bg-accent/50 focus-visible:bg-accent md:block"
+            data-workflow-panel-resize=""
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={(event) => {
+              if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+              const rect = layoutRef.current?.getBoundingClientRect();
+              if (rect)
+                setAsideWidth(
+                  Math.max(200, Math.min(800, rect.width - 200, rect.right - event.clientX)),
+                );
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              const max = Math.max(
+                200,
+                Math.min(800, (layoutRef.current?.clientWidth ?? 1000) - 200),
+              );
+              setAsideWidth((width) =>
+                Math.max(
+                  200,
+                  Math.min(max, Math.min(width, max) + (event.key === "ArrowLeft" ? 20 : -20)),
+                ),
+              );
+            }}
+            role="separator"
+            tabIndex={0}
+          />
+        ) : null}
         <aside
           aria-label={messages.richNodes.configuration}
           data-workflow-configuration=""
@@ -925,519 +1075,523 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
               </TabsList>
             )}
             <TabsContent className="m-0" value="configure">
-              {selectedEdge ? (
-                <div className="grid gap-3">
-                  <label
-                    className="grid gap-1.5 text-muted-foreground text-xs"
-                    htmlFor="rich-edge-label"
-                  >
-                    {messages.richNodes.edgeLabel}
-                    <Input
-                      id="rich-edge-label"
-                      onChange={(event) => updateSelectedEdge({ label: event.target.value })}
-                      value={typeof selectedEdge.label === "string" ? selectedEdge.label : ""}
-                    />
-                  </label>
-                  <label
-                    className="grid gap-1.5 text-muted-foreground text-xs"
-                    htmlFor="rich-edge-outcome"
-                  >
-                    {messages.richNodes.edgeOutcome}
-                    <Input
-                      id="rich-edge-outcome"
-                      onChange={(event) =>
-                        updateSelectedEdge({ outcome: event.target.value || "default" })
-                      }
-                      placeholder={messages.richNodes.defaultOutcome}
-                      value={
-                        selectedEdge.data?.outcome === "default"
-                          ? ""
-                          : String(selectedEdge.data?.outcome ?? "")
-                      }
-                    />
-                  </label>
-                </div>
-              ) : selectedNode ? (
-                <div className="grid gap-3">
-                  <label
-                    className="grid gap-1.5 text-muted-foreground text-xs"
-                    htmlFor="rich-node-label"
-                  >
-                    {messages.richNodes.label}
-                    <Input
-                      id="rich-node-label"
-                      onChange={(event) => updateSelected({ label: event.target.value })}
-                      value={String(selectedNode.data.label)}
-                    />
-                  </label>
-                  <WorkflowStepReference stepId={selectedNode.id} />
+              <fieldset disabled={readOnly}>
+                {selectedEdge ? (
+                  <div className="grid gap-3">
+                    <label
+                      className="grid gap-1.5 text-muted-foreground text-xs"
+                      htmlFor="rich-edge-label"
+                    >
+                      {messages.richNodes.edgeLabel}
+                      <Input
+                        id="rich-edge-label"
+                        onChange={(event) => updateSelectedEdge({ label: event.target.value })}
+                        value={typeof selectedEdge.label === "string" ? selectedEdge.label : ""}
+                      />
+                    </label>
+                    <label
+                      className="grid gap-1.5 text-muted-foreground text-xs"
+                      htmlFor="rich-edge-outcome"
+                    >
+                      {messages.richNodes.edgeOutcome}
+                      <Input
+                        id="rich-edge-outcome"
+                        onChange={(event) =>
+                          updateSelectedEdge({ outcome: event.target.value || "default" })
+                        }
+                        placeholder={messages.richNodes.defaultOutcome}
+                        value={
+                          selectedEdge.data?.outcome === "default"
+                            ? ""
+                            : String(selectedEdge.data?.outcome ?? "")
+                        }
+                      />
+                    </label>
+                  </div>
+                ) : selectedNode ? (
+                  <div className="grid gap-3">
+                    <label
+                      className="grid gap-1.5 text-muted-foreground text-xs"
+                      htmlFor="rich-node-label"
+                    >
+                      {messages.richNodes.label}
+                      <Input
+                        id="rich-node-label"
+                        onChange={(event) => updateSelected({ label: event.target.value })}
+                        value={String(selectedNode.data.label)}
+                      />
+                    </label>
+                    <WorkflowStepReference stepId={selectedNode.id} />
+                    <label className="grid gap-1.5 text-muted-foreground text-xs">
+                      {messages.richNodes.type}
+                      <select
+                        className="h-9 border border-input bg-card px-3 text-foreground text-sm"
+                        onChange={(event) =>
+                          updateSelected({ kind: event.target.value as WorkflowNodeKind })
+                        }
+                        value={String(selectedNode.data.kind)}
+                      >
+                        <option value="trigger">{messages.richNodes.trigger}</option>
+                        <option value="webhook">{messages.richNodes.webhook}</option>
+                        <option value="function">{messages.richNodes.function}</option>
+                        <option value="condition">{messages.richNodes.condition}</option>
+                        <option value="wait">{messages.richNodes.wait}</option>
+                        <option value="approval">{messages.richNodes.approval}</option>
+                        <option value="action">{messages.richNodes.action}</option>
+                        <option value="end">{messages.richNodes.end}</option>
+                      </select>
+                    </label>
+                    <label
+                      className="grid gap-1.5 text-muted-foreground text-xs"
+                      htmlFor="rich-node-description"
+                    >
+                      {messages.richNodes.description}
+                      <Textarea
+                        id="rich-node-description"
+                        onChange={(event) => updateSelected({ description: event.target.value })}
+                        rows={3}
+                        value={String(selectedNode.data.description)}
+                      />
+                    </label>
+                    {selectedNode.data.kind === "webhook" ? (
+                      <>
+                        <label className="grid gap-1.5 text-muted-foreground text-xs">
+                          {messages.richNodes.method}
+                          <select
+                            className="h-9 border border-input bg-card px-3 text-foreground text-sm"
+                            onChange={(event) =>
+                              updateSelected({
+                                method: event.target.value as WorkflowNodeFields["method"],
+                              })
+                            }
+                            value={String(selectedNode.data.method)}
+                          >
+                            {(["GET", "POST", "PUT", "PATCH", "DELETE"] as const).map((method) => (
+                              <option key={method} value={method}>
+                                {method}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label
+                          className="grid gap-1.5 text-muted-foreground text-xs"
+                          htmlFor="rich-node-webhook-url"
+                        >
+                          {messages.richNodes.url}
+                          <Input
+                            id="rich-node-webhook-url"
+                            onChange={(event) => updateSelected({ url: event.target.value })}
+                            placeholder="https://example.com/webhook"
+                            type="url"
+                            value={String(selectedNode.data.url)}
+                          />
+                        </label>
+                        <WorkflowWebhookHeaders
+                          onChange={(headers) => updateSelected({ headers })}
+                          value={selectedNode.data.headers}
+                        />
+                        <WorkflowWebhookSigning
+                          onChange={(signingSecret) => updateSelected({ signingSecret })}
+                          value={selectedNode.data.signingSecret}
+                        />
+                        <p
+                          className="text-[11px] leading-snug text-muted-foreground/80"
+                          data-workflow-webhook-hint=""
+                        >
+                          {messages.richNodes.webhookHint}
+                        </p>
+                      </>
+                    ) : null}
+                    {selectedNode.data.kind === "trigger" ? (
+                      <>
+                        <label
+                          className="grid gap-1.5 text-muted-foreground text-xs"
+                          htmlFor="rich-node-event-name"
+                        >
+                          {messages.richNodes.eventName}
+                          <select
+                            aria-describedby="rich-node-event-hint"
+                            className="h-9 border border-input bg-card px-3 text-foreground text-sm"
+                            data-workflow-trigger-event=""
+                            id="rich-node-event-name"
+                            onChange={(event) => updateSelected({ eventName: event.target.value })}
+                            value={selectedNode.data.eventName || "manual"}
+                          >
+                            <option value="manual">{messages.richNodes.manual}</option>
+                            <option value="record.created">
+                              {messages.richNodes.eventRecordCreated}
+                            </option>
+                            <option value="record.updated">
+                              {messages.richNodes.eventRecordUpdated}
+                            </option>
+                            <option value={WORKFLOW_SCHEDULE_EVENT}>
+                              {messages.richNodes.eventSchedule}
+                            </option>
+                            <option value={WORKFLOW_WEBHOOK_EVENT}>
+                              {messages.richNodes.eventWebhook}
+                            </option>
+                            {customTriggerEvent ? (
+                              <option value={customTriggerEvent}>
+                                {fmt(messages.richNodes.customEventOption, {
+                                  name: customTriggerEvent,
+                                })}
+                              </option>
+                            ) : null}
+                          </select>
+                          <span
+                            className="text-[11px] leading-snug text-muted-foreground/80"
+                            id="rich-node-event-hint"
+                          >
+                            {messages.richNodes.triggerEventHint}
+                          </span>
+                        </label>
+                        {isWorkflowRecordEvent(selectedNode.data.eventName) ? (
+                          <>
+                            <WorkflowTriggerBasePicker
+                              id="rich-node-trigger-base"
+                              // Another Base has other fields: start the filter over.
+                              onChange={(baseId) =>
+                                updateSelected({ baseId, fieldSlug: "", toValue: "" })
+                              }
+                              orpc={orpc}
+                              value={selectedNode.data.baseId}
+                            />
+                            <WorkflowTriggerFieldFilter
+                              baseId={selectedNode.data.baseId}
+                              onChange={(filter) => updateSelected(filter)}
+                              orpc={orpc}
+                              value={{
+                                fieldSlug: selectedNode.data.fieldSlug,
+                                toValue: selectedNode.data.toValue,
+                              }}
+                            />
+                          </>
+                        ) : null}
+                        {selectedNode.data.eventName === WORKFLOW_WEBHOOK_EVENT &&
+                        selectedNode.data.hookToken ? (
+                          <WorkflowHookUrl
+                            armed={workflowSettings.executionMode === "event"}
+                            onRegenerate={() =>
+                              updateSelected({ hookToken: newWorkflowHookToken() })
+                            }
+                            token={selectedNode.data.hookToken}
+                            workflowNodeId={node.id}
+                          />
+                        ) : null}
+                        {selectedNode.data.eventName === WORKFLOW_SCHEDULE_EVENT ? (
+                          <WorkflowScheduleSettings
+                            armed={workflowSettings.executionMode === "event"}
+                            onChange={(schedule) => updateSelected({ schedule })}
+                            value={selectedNode.data.schedule}
+                          />
+                        ) : null}
+                      </>
+                    ) : null}
+                    {selectedNode.data.kind === "function" ? (
+                      <>
+                        <WorkflowFunctionRunIn
+                          onChange={updateSelected}
+                          value={{
+                            runIn: selectedNode.data.runIn,
+                            language: selectedNode.data.language,
+                            packages: selectedNode.data.packages,
+                          }}
+                        />
+                        <label
+                          className="grid gap-1.5 text-muted-foreground text-xs"
+                          htmlFor="rich-node-function-code"
+                        >
+                          {messages.richNodes.functionCode}
+                          <Textarea
+                            className="font-mono text-[12px]"
+                            data-workflow-function-code=""
+                            id="rich-node-function-code"
+                            onChange={(event) => updateSelected({ code: event.target.value })}
+                            placeholder={
+                              selectedNode.data.runIn === "sandbox" &&
+                              selectedNode.data.language === "python"
+                                ? PYTHON_CODE_PLACEHOLDER
+                                : FUNCTION_CODE_PLACEHOLDER
+                            }
+                            rows={10}
+                            spellCheck={false}
+                            value={String(selectedNode.data.code)}
+                          />
+                          <span className="text-[11px] leading-snug text-muted-foreground/80">
+                            {selectedNode.data.runIn === "sandbox"
+                              ? messages.richNodes.sandboxCodeHint
+                              : messages.richNodes.functionCodeHint}
+                          </span>
+                        </label>
+                        {/* Saved rules run in the app's own sandbox only. */}
+                        {selectedNode.data.runIn === "sandbox" ? null : (
+                          <>
+                            <p className="pt-1 font-medium text-foreground text-xs">
+                              {messages.richNodes.savedFunction}
+                            </p>
+                            <label
+                              className="grid gap-1.5 text-muted-foreground text-xs"
+                              htmlFor="rich-node-webhook-rule-id"
+                            >
+                              {messages.richNodes.webhookRuleId}
+                              <Input
+                                id="rich-node-webhook-rule-id"
+                                onChange={(event) =>
+                                  updateSelected({ webhookRuleId: event.target.value })
+                                }
+                                placeholder="whr_..."
+                                value={String(selectedNode.data.webhookRuleId)}
+                              />
+                            </label>
+                            <label
+                              className="grid gap-1.5 text-muted-foreground text-xs"
+                              htmlFor="rich-node-function-name"
+                            >
+                              {messages.richNodes.functionName}
+                              <Input
+                                id="rich-node-function-name"
+                                onChange={(event) =>
+                                  updateSelected({ functionName: event.target.value })
+                                }
+                                value={String(selectedNode.data.functionName)}
+                              />
+                            </label>
+                            <p
+                              className="text-[11px] leading-snug text-muted-foreground/80"
+                              data-workflow-function-hint=""
+                            >
+                              {messages.richNodes.functionHint}
+                            </p>
+                          </>
+                        )}
+                      </>
+                    ) : null}
+                    {selectedNode.data.kind === "condition" ? (
+                      <label
+                        className="grid gap-1.5 text-muted-foreground text-xs"
+                        htmlFor="rich-node-expression"
+                      >
+                        {messages.richNodes.expression}
+                        <Textarea
+                          id="rich-node-expression"
+                          onChange={(event) => updateSelected({ expression: event.target.value })}
+                          placeholder="input.score >= 80"
+                          rows={3}
+                          value={String(selectedNode.data.expression)}
+                        />
+                      </label>
+                    ) : null}
+                    {selectedNode.data.kind === "wait" ? (
+                      <div className="grid grid-cols-[minmax(0,1fr)_7rem] gap-2">
+                        <label
+                          className="grid gap-1.5 text-muted-foreground text-xs"
+                          htmlFor="rich-node-duration"
+                        >
+                          {messages.richNodes.duration}
+                          <Input
+                            id="rich-node-duration"
+                            min={0}
+                            onChange={(event) =>
+                              updateSelected({ duration: Number(event.target.value) || 0 })
+                            }
+                            type="number"
+                            value={Number(selectedNode.data.duration)}
+                          />
+                        </label>
+                        <label className="grid gap-1.5 text-muted-foreground text-xs">
+                          {messages.richNodes.unit}
+                          <select
+                            className="h-9 border border-input bg-card px-2 text-foreground text-sm"
+                            onChange={(event) =>
+                              updateSelected({
+                                unit: event.target.value as WorkflowNodeFields["unit"],
+                              })
+                            }
+                            value={String(selectedNode.data.unit)}
+                          >
+                            <option value="minutes">{messages.richNodes.minutes}</option>
+                            <option value="hours">{messages.richNodes.hours}</option>
+                            <option value="days">{messages.richNodes.days}</option>
+                          </select>
+                        </label>
+                      </div>
+                    ) : null}
+                    {selectedNode.data.kind === "approval" ? (
+                      <>
+                        <label
+                          className="grid gap-1.5 text-muted-foreground text-xs"
+                          htmlFor="rich-node-approver"
+                        >
+                          {messages.richNodes.approver}
+                          <Input
+                            aria-describedby="rich-node-approver-hint"
+                            id="rich-node-approver"
+                            onChange={(event) => updateSelected({ approver: event.target.value })}
+                            placeholder="lead@example.com"
+                            value={String(selectedNode.data.approver)}
+                          />
+                          <span
+                            className="text-[11px] leading-snug text-muted-foreground/80"
+                            id="rich-node-approver-hint"
+                          >
+                            {messages.richNodes.approverHint}
+                          </span>
+                        </label>
+                        <WorkflowApproverPicker
+                          onChange={(approver) => updateSelected({ approver })}
+                          orpc={orpc}
+                          value={String(selectedNode.data.approver)}
+                        />
+                        <label className="flex items-start gap-2 text-muted-foreground text-xs">
+                          <input
+                            checked={selectedNode.data.allowAgents}
+                            className="mt-0.5"
+                            data-workflow-allow-agents=""
+                            onChange={(event) =>
+                              updateSelected({ allowAgents: event.target.checked })
+                            }
+                            type="checkbox"
+                          />
+                          <span className="grid gap-1">
+                            {messages.richNodes.allowAgents}
+                            <span className="text-[11px] leading-snug text-muted-foreground/80">
+                              {messages.richNodes.allowAgentsHint}
+                            </span>
+                          </span>
+                        </label>
+                      </>
+                    ) : null}
+                    {selectedNode.data.kind === "action" ? (
+                      <WorkflowActionSettings
+                        actionName={selectedNode.data.actionName}
+                        baseId={selectedNode.data.baseId}
+                        fields={selectedNode.data.fields}
+                        find={{
+                          viewId: selectedNode.data.viewId,
+                          limit: selectedNode.data.limit,
+                          forEach: selectedNode.data.forEach,
+                        }}
+                        onChange={updateSelected}
+                        orpc={orpc}
+                        stepId={selectedNode.id}
+                        targetRecordId={selectedNode.data.targetRecordId}
+                      />
+                    ) : null}
+                    {selectedNode.data.kind === "end" ? (
+                      <label
+                        className="grid gap-1.5 text-muted-foreground text-xs"
+                        htmlFor="rich-node-outcome"
+                      >
+                        {messages.richNodes.outcome}
+                        <Input
+                          id="rich-node-outcome"
+                          onChange={(event) =>
+                            updateSelected({ outcome: event.target.value || "completed" })
+                          }
+                          placeholder={messages.richNodes.completed}
+                          value={
+                            selectedNode.data.outcome === "completed"
+                              ? ""
+                              : String(selectedNode.data.outcome)
+                          }
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground text-xs">
+                    {messages.richNodes.selectStepOrEdge}
+                  </p>
+                )}
+                <div className="mt-4 grid gap-3 border-border/60 border-t pt-4">
+                  <h3 className="font-medium text-foreground text-xs">
+                    {messages.richNodes.workflowSettings}
+                  </h3>
                   <label className="grid gap-1.5 text-muted-foreground text-xs">
-                    {messages.richNodes.type}
+                    {messages.richNodes.executionMode}
+                    <select
+                      aria-describedby="rich-workflow-execution-mode-hint"
+                      className="h-9 border border-input bg-card px-3 text-foreground text-sm"
+                      onChange={(event) =>
+                        updateWorkflowSettings({
+                          executionMode: event.target.value === "event" ? "event" : "manual",
+                        })
+                      }
+                      value={workflowSettings.executionMode}
+                    >
+                      <option value="manual">{messages.richNodes.manual}</option>
+                      <option value="event">{messages.richNodes.event}</option>
+                    </select>
+                    <span
+                      className="text-[11px] leading-snug text-muted-foreground/80"
+                      id="rich-workflow-execution-mode-hint"
+                    >
+                      {messages.richNodes.executionModeHint}
+                    </span>
+                  </label>
+                  <label className="grid gap-1.5 text-muted-foreground text-xs">
+                    {messages.richNodes.errorPolicy}
                     <select
                       className="h-9 border border-input bg-card px-3 text-foreground text-sm"
                       onChange={(event) =>
-                        updateSelected({ kind: event.target.value as WorkflowNodeKind })
+                        updateWorkflowSettings({
+                          errorPolicy: event.target.value === "continue" ? "continue" : "stop",
+                        })
                       }
-                      value={String(selectedNode.data.kind)}
+                      value={workflowSettings.errorPolicy}
                     >
-                      <option value="trigger">{messages.richNodes.trigger}</option>
-                      <option value="webhook">{messages.richNodes.webhook}</option>
-                      <option value="function">{messages.richNodes.function}</option>
-                      <option value="condition">{messages.richNodes.condition}</option>
-                      <option value="wait">{messages.richNodes.wait}</option>
-                      <option value="approval">{messages.richNodes.approval}</option>
-                      <option value="action">{messages.richNodes.action}</option>
-                      <option value="end">{messages.richNodes.end}</option>
+                      <option value="stop">{messages.richNodes.stop}</option>
+                      <option value="continue">{messages.richNodes.continue}</option>
                     </select>
                   </label>
                   <label
                     className="grid gap-1.5 text-muted-foreground text-xs"
-                    htmlFor="rich-node-description"
+                    htmlFor="rich-workflow-concurrency"
                   >
-                    {messages.richNodes.description}
-                    <Textarea
-                      id="rich-node-description"
-                      onChange={(event) => updateSelected({ description: event.target.value })}
-                      rows={3}
-                      value={String(selectedNode.data.description)}
+                    {messages.richNodes.concurrency}
+                    <Input
+                      aria-describedby="rich-workflow-concurrency-hint"
+                      id="rich-workflow-concurrency"
+                      max={50}
+                      min={1}
+                      onChange={(event) =>
+                        updateWorkflowSettings({
+                          concurrency: Math.max(1, Math.min(50, Number(event.target.value) || 1)),
+                        })
+                      }
+                      type="number"
+                      value={workflowSettings.concurrency}
+                    />
+                    <span
+                      className="text-[11px] leading-snug text-muted-foreground/80"
+                      id="rich-workflow-concurrency-hint"
+                    >
+                      {messages.richNodes.concurrencyHint}
+                    </span>
+                  </label>
+                  <label
+                    className="grid gap-1.5 text-muted-foreground text-xs"
+                    htmlFor="rich-workflow-timeout"
+                  >
+                    {messages.richNodes.timeoutMs}
+                    <Input
+                      id="rich-workflow-timeout"
+                      max={300000}
+                      min={1000}
+                      onChange={(event) =>
+                        updateWorkflowSettings({
+                          timeoutMs: Math.max(
+                            1000,
+                            Math.min(300000, Number(event.target.value) || 30000),
+                          ),
+                        })
+                      }
+                      type="number"
+                      value={workflowSettings.timeoutMs}
                     />
                   </label>
-                  {selectedNode.data.kind === "webhook" ? (
-                    <>
-                      <label className="grid gap-1.5 text-muted-foreground text-xs">
-                        {messages.richNodes.method}
-                        <select
-                          className="h-9 border border-input bg-card px-3 text-foreground text-sm"
-                          onChange={(event) =>
-                            updateSelected({
-                              method: event.target.value as WorkflowNodeFields["method"],
-                            })
-                          }
-                          value={String(selectedNode.data.method)}
-                        >
-                          {(["GET", "POST", "PUT", "PATCH", "DELETE"] as const).map((method) => (
-                            <option key={method} value={method}>
-                              {method}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label
-                        className="grid gap-1.5 text-muted-foreground text-xs"
-                        htmlFor="rich-node-webhook-url"
-                      >
-                        {messages.richNodes.url}
-                        <Input
-                          id="rich-node-webhook-url"
-                          onChange={(event) => updateSelected({ url: event.target.value })}
-                          placeholder="https://example.com/webhook"
-                          type="url"
-                          value={String(selectedNode.data.url)}
-                        />
-                      </label>
-                      <WorkflowWebhookHeaders
-                        onChange={(headers) => updateSelected({ headers })}
-                        value={selectedNode.data.headers}
-                      />
-                      <WorkflowWebhookSigning
-                        onChange={(signingSecret) => updateSelected({ signingSecret })}
-                        value={selectedNode.data.signingSecret}
-                      />
-                      <p
-                        className="text-[11px] leading-snug text-muted-foreground/80"
-                        data-workflow-webhook-hint=""
-                      >
-                        {messages.richNodes.webhookHint}
-                      </p>
-                    </>
-                  ) : null}
-                  {selectedNode.data.kind === "trigger" ? (
-                    <>
-                      <label
-                        className="grid gap-1.5 text-muted-foreground text-xs"
-                        htmlFor="rich-node-event-name"
-                      >
-                        {messages.richNodes.eventName}
-                        <select
-                          aria-describedby="rich-node-event-hint"
-                          className="h-9 border border-input bg-card px-3 text-foreground text-sm"
-                          data-workflow-trigger-event=""
-                          id="rich-node-event-name"
-                          onChange={(event) => updateSelected({ eventName: event.target.value })}
-                          value={selectedNode.data.eventName || "manual"}
-                        >
-                          <option value="manual">{messages.richNodes.manual}</option>
-                          <option value="record.created">
-                            {messages.richNodes.eventRecordCreated}
-                          </option>
-                          <option value="record.updated">
-                            {messages.richNodes.eventRecordUpdated}
-                          </option>
-                          <option value={WORKFLOW_SCHEDULE_EVENT}>
-                            {messages.richNodes.eventSchedule}
-                          </option>
-                          <option value={WORKFLOW_WEBHOOK_EVENT}>
-                            {messages.richNodes.eventWebhook}
-                          </option>
-                          {customTriggerEvent ? (
-                            <option value={customTriggerEvent}>
-                              {fmt(messages.richNodes.customEventOption, {
-                                name: customTriggerEvent,
-                              })}
-                            </option>
-                          ) : null}
-                        </select>
-                        <span
-                          className="text-[11px] leading-snug text-muted-foreground/80"
-                          id="rich-node-event-hint"
-                        >
-                          {messages.richNodes.triggerEventHint}
-                        </span>
-                      </label>
-                      {isWorkflowRecordEvent(selectedNode.data.eventName) ? (
-                        <>
-                          <WorkflowTriggerBasePicker
-                            id="rich-node-trigger-base"
-                            // Another Base has other fields: start the filter over.
-                            onChange={(baseId) =>
-                              updateSelected({ baseId, fieldSlug: "", toValue: "" })
-                            }
-                            orpc={orpc}
-                            value={selectedNode.data.baseId}
-                          />
-                          <WorkflowTriggerFieldFilter
-                            baseId={selectedNode.data.baseId}
-                            onChange={(filter) => updateSelected(filter)}
-                            orpc={orpc}
-                            value={{
-                              fieldSlug: selectedNode.data.fieldSlug,
-                              toValue: selectedNode.data.toValue,
-                            }}
-                          />
-                        </>
-                      ) : null}
-                      {selectedNode.data.eventName === WORKFLOW_WEBHOOK_EVENT &&
-                      selectedNode.data.hookToken ? (
-                        <WorkflowHookUrl
-                          armed={workflowSettings.executionMode === "event"}
-                          onRegenerate={() => updateSelected({ hookToken: newWorkflowHookToken() })}
-                          token={selectedNode.data.hookToken}
-                          workflowNodeId={node.id}
-                        />
-                      ) : null}
-                      {selectedNode.data.eventName === WORKFLOW_SCHEDULE_EVENT ? (
-                        <WorkflowScheduleSettings
-                          armed={workflowSettings.executionMode === "event"}
-                          onChange={(schedule) => updateSelected({ schedule })}
-                          value={selectedNode.data.schedule}
-                        />
-                      ) : null}
-                    </>
-                  ) : null}
-                  {selectedNode.data.kind === "function" ? (
-                    <>
-                      <WorkflowFunctionRunIn
-                        onChange={updateSelected}
-                        value={{
-                          runIn: selectedNode.data.runIn,
-                          language: selectedNode.data.language,
-                          packages: selectedNode.data.packages,
-                        }}
-                      />
-                      <label
-                        className="grid gap-1.5 text-muted-foreground text-xs"
-                        htmlFor="rich-node-function-code"
-                      >
-                        {messages.richNodes.functionCode}
-                        <Textarea
-                          className="font-mono text-[12px]"
-                          data-workflow-function-code=""
-                          id="rich-node-function-code"
-                          onChange={(event) => updateSelected({ code: event.target.value })}
-                          placeholder={
-                            selectedNode.data.runIn === "sandbox" &&
-                            selectedNode.data.language === "python"
-                              ? PYTHON_CODE_PLACEHOLDER
-                              : FUNCTION_CODE_PLACEHOLDER
-                          }
-                          rows={10}
-                          spellCheck={false}
-                          value={String(selectedNode.data.code)}
-                        />
-                        <span className="text-[11px] leading-snug text-muted-foreground/80">
-                          {selectedNode.data.runIn === "sandbox"
-                            ? messages.richNodes.sandboxCodeHint
-                            : messages.richNodes.functionCodeHint}
-                        </span>
-                      </label>
-                      {/* Saved rules run in the app's own sandbox only. */}
-                      {selectedNode.data.runIn === "sandbox" ? null : (
-                        <>
-                          <p className="pt-1 font-medium text-foreground text-xs">
-                            {messages.richNodes.savedFunction}
-                          </p>
-                          <label
-                            className="grid gap-1.5 text-muted-foreground text-xs"
-                            htmlFor="rich-node-webhook-rule-id"
-                          >
-                            {messages.richNodes.webhookRuleId}
-                            <Input
-                              id="rich-node-webhook-rule-id"
-                              onChange={(event) =>
-                                updateSelected({ webhookRuleId: event.target.value })
-                              }
-                              placeholder="whr_..."
-                              value={String(selectedNode.data.webhookRuleId)}
-                            />
-                          </label>
-                          <label
-                            className="grid gap-1.5 text-muted-foreground text-xs"
-                            htmlFor="rich-node-function-name"
-                          >
-                            {messages.richNodes.functionName}
-                            <Input
-                              id="rich-node-function-name"
-                              onChange={(event) =>
-                                updateSelected({ functionName: event.target.value })
-                              }
-                              value={String(selectedNode.data.functionName)}
-                            />
-                          </label>
-                          <p
-                            className="text-[11px] leading-snug text-muted-foreground/80"
-                            data-workflow-function-hint=""
-                          >
-                            {messages.richNodes.functionHint}
-                          </p>
-                        </>
-                      )}
-                    </>
-                  ) : null}
-                  {selectedNode.data.kind === "condition" ? (
-                    <label
-                      className="grid gap-1.5 text-muted-foreground text-xs"
-                      htmlFor="rich-node-expression"
-                    >
-                      {messages.richNodes.expression}
-                      <Textarea
-                        id="rich-node-expression"
-                        onChange={(event) => updateSelected({ expression: event.target.value })}
-                        placeholder="input.score >= 80"
-                        rows={3}
-                        value={String(selectedNode.data.expression)}
-                      />
-                    </label>
-                  ) : null}
-                  {selectedNode.data.kind === "wait" ? (
-                    <div className="grid grid-cols-[minmax(0,1fr)_7rem] gap-2">
-                      <label
-                        className="grid gap-1.5 text-muted-foreground text-xs"
-                        htmlFor="rich-node-duration"
-                      >
-                        {messages.richNodes.duration}
-                        <Input
-                          id="rich-node-duration"
-                          min={0}
-                          onChange={(event) =>
-                            updateSelected({ duration: Number(event.target.value) || 0 })
-                          }
-                          type="number"
-                          value={Number(selectedNode.data.duration)}
-                        />
-                      </label>
-                      <label className="grid gap-1.5 text-muted-foreground text-xs">
-                        {messages.richNodes.unit}
-                        <select
-                          className="h-9 border border-input bg-card px-2 text-foreground text-sm"
-                          onChange={(event) =>
-                            updateSelected({
-                              unit: event.target.value as WorkflowNodeFields["unit"],
-                            })
-                          }
-                          value={String(selectedNode.data.unit)}
-                        >
-                          <option value="minutes">{messages.richNodes.minutes}</option>
-                          <option value="hours">{messages.richNodes.hours}</option>
-                          <option value="days">{messages.richNodes.days}</option>
-                        </select>
-                      </label>
-                    </div>
-                  ) : null}
-                  {selectedNode.data.kind === "approval" ? (
-                    <>
-                      <label
-                        className="grid gap-1.5 text-muted-foreground text-xs"
-                        htmlFor="rich-node-approver"
-                      >
-                        {messages.richNodes.approver}
-                        <Input
-                          aria-describedby="rich-node-approver-hint"
-                          id="rich-node-approver"
-                          onChange={(event) => updateSelected({ approver: event.target.value })}
-                          placeholder="lead@example.com"
-                          value={String(selectedNode.data.approver)}
-                        />
-                        <span
-                          className="text-[11px] leading-snug text-muted-foreground/80"
-                          id="rich-node-approver-hint"
-                        >
-                          {messages.richNodes.approverHint}
-                        </span>
-                      </label>
-                      <WorkflowApproverPicker
-                        onChange={(approver) => updateSelected({ approver })}
-                        orpc={orpc}
-                        value={String(selectedNode.data.approver)}
-                      />
-                      <label className="flex items-start gap-2 text-muted-foreground text-xs">
-                        <input
-                          checked={selectedNode.data.allowAgents}
-                          className="mt-0.5"
-                          data-workflow-allow-agents=""
-                          onChange={(event) =>
-                            updateSelected({ allowAgents: event.target.checked })
-                          }
-                          type="checkbox"
-                        />
-                        <span className="grid gap-1">
-                          {messages.richNodes.allowAgents}
-                          <span className="text-[11px] leading-snug text-muted-foreground/80">
-                            {messages.richNodes.allowAgentsHint}
-                          </span>
-                        </span>
-                      </label>
-                    </>
-                  ) : null}
-                  {selectedNode.data.kind === "action" ? (
-                    <WorkflowActionSettings
-                      actionName={selectedNode.data.actionName}
-                      baseId={selectedNode.data.baseId}
-                      fields={selectedNode.data.fields}
-                      find={{
-                        viewId: selectedNode.data.viewId,
-                        limit: selectedNode.data.limit,
-                        forEach: selectedNode.data.forEach,
-                      }}
-                      onChange={updateSelected}
-                      orpc={orpc}
-                      stepId={selectedNode.id}
-                      targetRecordId={selectedNode.data.targetRecordId}
-                    />
-                  ) : null}
-                  {selectedNode.data.kind === "end" ? (
-                    <label
-                      className="grid gap-1.5 text-muted-foreground text-xs"
-                      htmlFor="rich-node-outcome"
-                    >
-                      {messages.richNodes.outcome}
-                      <Input
-                        id="rich-node-outcome"
-                        onChange={(event) =>
-                          updateSelected({ outcome: event.target.value || "completed" })
-                        }
-                        placeholder={messages.richNodes.completed}
-                        value={
-                          selectedNode.data.outcome === "completed"
-                            ? ""
-                            : String(selectedNode.data.outcome)
-                        }
-                      />
-                    </label>
-                  ) : null}
                 </div>
-              ) : (
-                <p className="text-muted-foreground text-xs">
-                  {messages.richNodes.selectStepOrEdge}
-                </p>
-              )}
-              <div className="mt-4 grid gap-3 border-border/60 border-t pt-4">
-                <h3 className="font-medium text-foreground text-xs">
-                  {messages.richNodes.workflowSettings}
-                </h3>
-                <label className="grid gap-1.5 text-muted-foreground text-xs">
-                  {messages.richNodes.executionMode}
-                  <select
-                    aria-describedby="rich-workflow-execution-mode-hint"
-                    className="h-9 border border-input bg-card px-3 text-foreground text-sm"
-                    onChange={(event) =>
-                      updateWorkflowSettings({
-                        executionMode: event.target.value === "event" ? "event" : "manual",
-                      })
-                    }
-                    value={workflowSettings.executionMode}
-                  >
-                    <option value="manual">{messages.richNodes.manual}</option>
-                    <option value="event">{messages.richNodes.event}</option>
-                  </select>
-                  <span
-                    className="text-[11px] leading-snug text-muted-foreground/80"
-                    id="rich-workflow-execution-mode-hint"
-                  >
-                    {messages.richNodes.executionModeHint}
-                  </span>
-                </label>
-                <label className="grid gap-1.5 text-muted-foreground text-xs">
-                  {messages.richNodes.errorPolicy}
-                  <select
-                    className="h-9 border border-input bg-card px-3 text-foreground text-sm"
-                    onChange={(event) =>
-                      updateWorkflowSettings({
-                        errorPolicy: event.target.value === "continue" ? "continue" : "stop",
-                      })
-                    }
-                    value={workflowSettings.errorPolicy}
-                  >
-                    <option value="stop">{messages.richNodes.stop}</option>
-                    <option value="continue">{messages.richNodes.continue}</option>
-                  </select>
-                </label>
-                <label
-                  className="grid gap-1.5 text-muted-foreground text-xs"
-                  htmlFor="rich-workflow-concurrency"
-                >
-                  {messages.richNodes.concurrency}
-                  <Input
-                    aria-describedby="rich-workflow-concurrency-hint"
-                    id="rich-workflow-concurrency"
-                    max={50}
-                    min={1}
-                    onChange={(event) =>
-                      updateWorkflowSettings({
-                        concurrency: Math.max(1, Math.min(50, Number(event.target.value) || 1)),
-                      })
-                    }
-                    type="number"
-                    value={workflowSettings.concurrency}
-                  />
-                  <span
-                    className="text-[11px] leading-snug text-muted-foreground/80"
-                    id="rich-workflow-concurrency-hint"
-                  >
-                    {messages.richNodes.concurrencyHint}
-                  </span>
-                </label>
-                <label
-                  className="grid gap-1.5 text-muted-foreground text-xs"
-                  htmlFor="rich-workflow-timeout"
-                >
-                  {messages.richNodes.timeoutMs}
-                  <Input
-                    id="rich-workflow-timeout"
-                    max={300000}
-                    min={1000}
-                    onChange={(event) =>
-                      updateWorkflowSettings({
-                        timeoutMs: Math.max(
-                          1000,
-                          Math.min(300000, Number(event.target.value) || 30000),
-                        ),
-                      })
-                    }
-                    type="number"
-                    value={workflowSettings.timeoutMs}
-                  />
-                </label>
-              </div>
+              </fieldset>
             </TabsContent>
             {isAnonymous ? null : (
               <TabsContent className="m-0" value="runs">
@@ -1480,7 +1634,13 @@ export function WorkflowDetailView({ orpc, slug, onNodeLoaded }: GraphDetailView
   }
   return (
     <ReactFlowProvider>
-      <GraphEditor document={detail.document} key={detail.node.id} node={detail.node} orpc={orpc} />
+      <GraphEditor
+        document={detail.document}
+        key={detail.node.id}
+        node={detail.node}
+        orpc={orpc}
+        viewerPermissionLevel={detail.viewerPermissionLevel}
+      />
     </ReactFlowProvider>
   );
 }

@@ -1,6 +1,7 @@
 import { pickTemplateMedia } from "busabase-contract/domains/templates/media";
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { iStringParse, type LocaleType } from "openlib/i18n/i-string";
+import type { ReactNode } from "react";
 import { TemplateCardImage } from "./template-card-image";
 
 interface TemplateCardSummaryProps {
@@ -8,6 +9,8 @@ interface TemplateCardSummaryProps {
   screenshotAlt: string;
   density?: "compact" | "comfortable";
   headingLevel?: "h2" | "h3";
+  /** Composed by the caller before crossing a client gallery boundary. */
+  renderScreenshot?: (image: { src: string; alt: string }) => ReactNode;
   /**
    * `description` and `displayName` are both iString; this resolves them to
    * one language — and picks that language's cover from `locales` (via
@@ -39,6 +42,7 @@ export function TemplateCardSummary({
   screenshotAlt,
   density = "compact",
   headingLevel = "h3",
+  renderScreenshot,
   descriptionLocale = "en",
 }: TemplateCardSummaryProps) {
   const [screenshot] = pickTemplateMedia(template, descriptionLocale).screenshots;
@@ -51,7 +55,9 @@ export function TemplateCardSummary({
   return (
     <div className="flex h-full flex-col">
       <div className="flex aspect-[16/10] items-center justify-center overflow-hidden bg-muted">
-        <TemplateCardImage src={screenshot} alt={screenshotAlt} comfortable={comfortable} />
+        {(screenshot ? renderScreenshot?.({ src: screenshot, alt: screenshotAlt }) : null) ?? (
+          <TemplateCardImage src={screenshot} alt={screenshotAlt} comfortable={comfortable} />
+        )}
       </div>
 
       <div

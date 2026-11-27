@@ -10,7 +10,10 @@ import { SubmitPermissionProvider } from "./split-submit-button";
 
 // A month of a very large Base is never read whole: past a few pages the grid
 // asks each day for its first records and its count, and "+N" lists the day.
-vi.mock("wouter", () => ({ useSearch: () => "" }));
+vi.mock("wouter", () => ({
+  useSearch: () => "",
+  useLocation: () => ["/base/tasks/calendar", vi.fn()],
+}));
 vi.mock("openlib/ui/dashboard", () => ({
   SPALink: ({ children, ...props }: { children: ReactNode; href: string }) => (
     <a {...props}>{children}</a>

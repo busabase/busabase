@@ -1,6 +1,6 @@
 /**
- * Storage for converted documents (PDF/HTML output), separate from the host's
- * user-file storage.
+ * Storage for converted documents (PDF/HTML output). A host can opt public
+ * derivatives into shared storage; private outputs and staging stay separate.
  *
  * Shared by the converter (uploads), the convert route (re-signs and validates
  * cached outputs) and the output-file route (serves local outputs), so the
@@ -97,7 +97,8 @@ function localRootOf(storageUrl: string): string | null {
  * Resolution order:
  *   1. PREVIEWFILE_STORAGE_URL — a dedicated storage URL just for conversion output
  *   2. BUDA_DRIVE_URL          — reuse the Buda Drive storage (local or s3://)
- *   3. local://.data/conversions — zero-config local fallback
+ *   3. fallbackStorageUrl       — an optional host-selected public output store
+ *   4. local://.data/conversions — zero-config local fallback
  *
  * Using a separate instance from the global `storage` singleton (which reads STORAGE_URL)
  * prevents converted PDFs from being uploaded to the main R2/S3 user-attachment bucket,
@@ -106,10 +107,11 @@ function localRootOf(storageUrl: string): string | null {
  * When the resolved storage is local://, the presignedUrl becomes a same-origin
  * CONVERSION_FILE_ROUTE path served by the host — no CORS, no expiry.
  */
-export function resolveConversionStorageUrl(): string {
+export function resolveConversionStorageUrl(fallbackStorageUrl?: string): string {
   const storageUrl =
     process.env.PREVIEWFILE_STORAGE_URL ||
     process.env.BUDA_DRIVE_URL ||
+    fallbackStorageUrl ||
     "local://.data/conversions";
 
   const root = localRootOf(storageUrl);
@@ -128,6 +130,30 @@ export function resolveConversionStorageUrl(): string {
 }
 
 let _conversionStorage: IStorage | null = null;
+let _publicConversionStorage: IStorage | null = null;
+let _publicConversionStorageFallbackUrl: string | undefined;
+
+/**
+ * Opt a host's public derivatives into shared storage. Private outputs and
+ * staged source bytes retain their separate storage and privacy checks.
+ * Configure in each host entry point, before conversion or serving an output.
+ */
+export function configurePublicConversionStorage(fallbackStorageUrl?: string): void {
+  _publicConversionStorageFallbackUrl = fallbackStorageUrl;
+  _publicConversionStorage = null;
+}
+
+export function getPublicConversionStorage(): IStorage {
+  if (!_publicConversionStorageFallbackUrl) return getConversionStorage();
+  _publicConversionStorage ??= createStorage(
+    resolveConversionStorageUrl(_publicConversionStorageFallbackUrl),
+  );
+  return _publicConversionStorage;
+}
+
+export function getLocalPublicConversionRootDir(): string | null {
+  return localRootOf(resolveConversionStorageUrl(_publicConversionStorageFallbackUrl));
+}
 
 /** Get (or lazily create) the storage instance used exclusively for converted documents. */
 export function getConversionStorage(): IStorage {
@@ -139,6 +165,7 @@ export function getConversionStorage(): IStorage {
 /** Reset the conversion storage singleton (useful for testing). */
 export function resetConversionStorage(): void {
   _conversionStorage = null;
+  _publicConversionStorage = null;
 }
 
 /**
@@ -176,6 +203,16 @@ function storageKeyFromUri(uri: string): string {
  */
 export async function getConversionFileUrl(uri: string, expiresIn: number): Promise<string> {
   return getConversionStorage().generatePresignedUrl(storageKeyFromUri(uri), expiresIn);
+}
+
+export async function getPublicConversionFileUrl(uri: string, expiresIn: number): Promise<string> {
+  return getPublicConversionStorage().generatePresignedUrl(storageKeyFromUri(uri), expiresIn);
+}
+
+/** Only converter-created public derivatives may cross the generic file route. */
+export function publicConversionOutputKey(uri: string): string | null {
+  const key = storageKeyFromUri(uri);
+  return /^conversions\/[a-f0-9]{64}\.(?:pdf|html)$/.test(key) ? key : null;
 }
 
 /** Match only the configured R2 API object, never a CDN or an arbitrary S3-compatible host. */
@@ -356,4 +393,50 @@ export async function readConversionOutput(uri: string): Promise<Buffer | null> 
   const key = storageKeyFromUri(uri);
   if (!(await store.objectExists(key))) return null;
   return store.getObject(key);
+}
+
+/** Private derivatives are outside the generic local `conversions/` route. */
+export const PRIVATE_CONVERSION_OUTPUT_PREFIX = "private-conversions/";
+
+export function isPrivateConversionOutputUri(uri: string): boolean {
+  return /^private-conversions\/[a-f0-9-]{36}\.(?:pdf|html)$/.test(storageKeyFromUri(uri));
+}
+
+export async function privateConversionOutputExists(uri: string): Promise<boolean> {
+  return (
+    isPrivateConversionOutputUri(uri) && getConversionStorage().objectExists(storageKeyFromUri(uri))
+  );
+}
+
+/** Upload privately from the start, never copying through a public hash address. */
+export async function uploadPrivateConversionOutput(input: {
+  content: Buffer;
+  format: "pdf" | "html";
+}): Promise<{ uri: string; presignedUrl: string }> {
+  const store = getConversionStorage();
+  const key = `${PRIVATE_CONVERSION_OUTPUT_PREFIX}${randomUUID()}.${input.format}`;
+  try {
+    const { uri } = await store.uploadFileToKey(
+      input.content,
+      key,
+      input.format === "pdf" ? "application/pdf" : "text/html",
+    );
+    const presignedUrl = await getConversionFileUrl(uri, 300);
+    // A custom local base_url may point at an unrelated public file server.
+    // Only the known, bounded generic route proves these local keys stay private.
+    if (
+      getLocalConversionRootDir() !== null &&
+      presignedUrl !== `${CONVERSION_FILE_ROUTE}/${key}`
+    ) {
+      throw new Error("Private local outputs require the bounded conversion-file route");
+    }
+    // Local outputs cannot be reached through the generic conversion-file route.
+    // On remote stores both unsigned API and configured public URLs must refuse.
+    await assertStagingIsPrivate(store, key, presignedUrl, "https://conversion.invalid");
+    return { uri, presignedUrl };
+  } catch (error) {
+    await store.deleteObject(key).catch(() => undefined);
+    console.error("[conversion-storage] Could not store private output", stagingDiagnostic(error));
+    throw new Error("Could not store conversion output privately");
+  }
 }

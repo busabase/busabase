@@ -8,7 +8,7 @@ import { Button } from "kui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { Eye, FileCode2 } from "lucide-react";
 import { registerPopstateInterceptor } from "openlib/ui/dashboard";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { NodeAgentPromptsButton } from "../../dashboard/components/node-agent-prompts-button";
@@ -29,11 +29,7 @@ import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-nod
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import type { SidePanelTabProps } from "../../dashboard/side-panel-registry";
 import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
-import { useWorkbenchLinkResolver } from "../../dashboard/workbench-link-context";
-import {
-  buildHtmlPreviewDocument,
-  resolveHtmlPreviewNavigation,
-} from "../utils/html-preview-navigation";
+import { HtmlPreviewFrame } from "./html-preview-frame";
 import {
   RichNodeNotFound,
   RichNodeReviewLink,
@@ -153,46 +149,6 @@ export function HtmlPreviewSurface({
   source: string;
 }) {
   const messages = useCoreI18n();
-  const frameRef = useRef<HTMLIFrameElement>(null);
-  const resolveWorkbenchLink = useWorkbenchLinkResolver();
-  const [preview, setPreview] = useState<{ sessionId: string; document: string } | null>(null);
-  useEffect(() => {
-    const sessionId = crypto.randomUUID();
-    let navigating = false;
-    const onMessage = (event: MessageEvent) => {
-      // Opaque origins all serialize as "null"; origin alone is not identity.
-      if (
-        event.source !== frameRef.current?.contentWindow ||
-        event.origin !== "null" ||
-        navigating ||
-        !navigator.userActivation?.isActive
-      )
-        return;
-      const navigation = resolveHtmlPreviewNavigation({
-        data: event.data,
-        sessionId,
-        currentHref: window.location.href,
-        resolveWorkbenchLink,
-      });
-      if (!navigation) return;
-      if (navigation.inPlace) {
-        navigating = true;
-        // A document navigation loads the destination's permissions and AirApp
-        // runtime on the server, including public/shared entry points.
-        window.location.assign(navigation.href);
-      } else {
-        // The frame's trusted click activates its ancestors too. Do not await:
-        // open during that transient activation to preserve popup permissions.
-        window.open(navigation.href, "_blank", "noopener,noreferrer");
-      }
-    };
-    window.addEventListener("message", onMessage);
-    setPreview({
-      sessionId,
-      document: buildHtmlPreviewDocument(source, { parentHref: window.location.href, sessionId }),
-    });
-    return () => window.removeEventListener("message", onMessage);
-  }, [source, resolveWorkbenchLink]);
   return (
     <FullscreenPreviewSurface
       aria-label={fmt(messages.richNodes.previewFrame, { name: node.name })}
@@ -215,15 +171,8 @@ export function HtmlPreviewSurface({
         ) : null
       }
     >
-      <iframe
-        key={preview?.sessionId ?? "loading"}
-        ref={frameRef}
-        allowFullScreen
-        className="block h-full w-full border-0 bg-card"
-        // New tabs need their own origin/COOP context; this preview remains
-        // opaque and cannot read the workbench's cookies or DOM.
-        sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-scripts"
-        srcDoc={preview?.document}
+      <HtmlPreviewFrame
+        source={source}
         title={fmt(messages.richNodes.previewFrame, { name: node.name })}
       />
     </FullscreenPreviewSurface>

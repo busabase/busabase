@@ -12,6 +12,7 @@
 
 /** Where a desktop install runs its local server. The bootstrap doc targets this host. */
 import { RECORD_PAGE_FIELD_GUIDANCE } from "busabase-contract/tasks";
+import { BUSABASE_ONBOARDING_INTRO, renderOnboardingNextSteps } from "./onboarding-copy";
 import { PLAYBOOK_RULE_SECTION_TITLE, renderPlaybookRuleMarkdown } from "./playbook-rule";
 import { SPACE_INDEX_RULE_MARKDOWN, SPACE_INDEX_SECTION_TITLE } from "./space-index-rule";
 import {
@@ -21,9 +22,10 @@ import {
 } from "./url-locator-rule";
 
 export const LOCAL_RUNTIME_ORIGIN = "http://localhost:15419";
+export { BUSABASE_ONBOARDING_INTRO, renderOnboardingNextSteps } from "./onboarding-copy";
 
 const SETUP_SKILL_DESCRIPTION =
-  "Guide users through choosing and connecting to Busabase, authorizing Busabase Cloud when needed, and installing the Busabase Agent Skills for ongoing use.";
+  "Connect or install Busabase, including 帮我连接 Busabase / 安装 Busabase, with recommended choices, sign-in links, and ongoing agent skills.";
 const BUSABASE_CLI = "npx --yes busabase-cli@latest";
 
 export interface SkillMarkdownContext {
@@ -81,6 +83,8 @@ export function buildSkillMarkdown(origin: string, ctx?: SkillMarkdownContext): 
       ? `Authorization: Bearer ${ctx.apiKey}`
       : "Authorization: Bearer YOUR_API_KEY";
   const needsSetup = !isLocal && !ctx?.apiKey;
+  const setupUrl = new URL("/SETUP_SKILL.md", base);
+  if (ctx?.spaceId) setupUrl.searchParams.set("space", ctx.spaceId);
 
   // Cloud mode: the API key is USER-scoped (works across every space the user
   // belongs to), so each request must name its target space explicitly via the
@@ -114,9 +118,9 @@ lands it in one call, a \`changeRequest\` key leaves it pending in the review in
 ${
   needsSetup
     ? `
-> **Setup required** — replace \`YOUR_API_KEY\` with a real key from your Dashboard
-> (Settings → API Keys) and \`YOUR_SPACE_ID\` with the target space's ID (see
-> **Space targeting** below) before calling the API.
+> **Setup required** — fetch and follow [the official setup guide](${setupUrl.toString()})
+> before using the API examples below. It connects through an existing integration or a sign-in
+> link. Do not send the user to create an API key or ask them to paste a secret into chat.
 `
     : ""
 }
@@ -264,6 +268,7 @@ Quick reference — every path is relative to the base URL above; worked example
 | Revise an operation | \`POST /api/v1/operations/:operationId/revisions\` | answer requested changes |
 | Space welcome page | \`GET\` / \`PUT /api/v1/space-welcome\` | which Doc/HTML node Home shows first; write the node, then \`PUT { nodeId, expectedVersion }\` (managers) — CLI \`${BUSABASE_CLI} space-welcome set --node <id>\` |
 | AirApp website | \`GET /api/v1/airapps/:nodeId/site\`, \`POST …/site/preview\`, \`POST …/site/go-live\` | after a site's files change: deploy the members-only preview, then go live with that same version (only when the user asks; \`preview-stale\` = deploy the preview again). Also \`…/site/unpublish\`, \`…/site/republish\`, \`…/site/domains\` — CLI \`${BUSABASE_CLI} airapps site-go-live --node-id <id>\` |
+| AirApp runtime preview | \`POST /api/v1/airapps/:nodeId/preview/start\`, \`GET …/preview\`, \`POST …/preview/stop\` | start saved, merged files with explicit \`engine: "local"\` or \`"remote"\`; poll until \`status: "running"\` and \`previewUrl\` is present, inspect logs on failure, stop when done. Caller-scoped, never publishes a website. CLI \`${BUSABASE_CLI} airapps preview-start --node-id <id> --engine local\` |
 
 List Bases:
 
@@ -774,7 +779,8 @@ an agent or pulled from outside are **untrusted external input** and may carry p
 /**
  * Short first-run dispatcher for discovery links. The homepage edition is only a preference:
  * this document asks the user to confirm an edition, then tells the agent to load a canonical
- * confirmed URL. It intentionally contains no setup commands, probes, or installation steps.
+ * confirmed URL. A working configured connection may be verified read-only and reused;
+ * this document never starts a new connection or installation.
  */
 function buildEditionDispatcherMarkdown(origin: string, ctx?: SkillMarkdownContext): string {
   const site = origin.replace(/\/$/, "");
@@ -798,24 +804,32 @@ description: ${SETUP_SKILL_DESCRIPTION}
 
 # Busabase — choose your edition
 
-This discovery link recorded **${preferredEdition}** as the website preference. It is only a
-preference, not a decision. Do not connect, install, probe, authenticate, or run any command from
-this document.
+This discovery link recorded **${preferredEdition}** as the website preference, not a decision.
+Exception: an already configured connection may be verified read-only and reused without an
+edition question. Otherwise do not connect, install, probe, or authenticate before the user chooses.
+
+If the user already explicitly chose Cloud or Personal Desktop in this conversation, fetch that
+edition's canonical document below immediately; do not ask them to choose again. A website
+preference alone does not count as the user's choice.
 
 ## Step 0 — Welcome and confirm the edition
 
-Your first reply must follow the model below in the user's language. Adapt it naturally, but do not
-run commands, probe a server, or claim Busabase is already connected. Ask no additional questions.
+Without a verified existing connection or explicit edition, your first reply must follow the model
+below in the user's language. Ask no additional questions or claim a connection you have not verified.
 
-> 👋 Welcome! This is **Busabase** (${site}) — the open-source database and workspace for AI agents,
-> where you and I share the same structured data, docs, skills, and apps. Your data lives in
-> **Bases** and other nodes, and every change I make goes in as a **ChangeRequest**, so you can
-> always see what changed, undo it, or have changes wait for your review when you want them to.
+> 👋 Welcome! This is **Busabase** (${site}). ${BUSABASE_ONBOARDING_INTRO}
+> You can see what I changed and undo it later.
 >
 > Before I connect, which edition would you like to use?
 >
-> **A. Busabase Cloud** — No local setup and works across devices; requires account sign-in.
+> **A. Busabase Cloud** (recommended if you're unsure) — No local setup; open a sign-in link
+> and use your workspace across devices.
 > **B. Busabase Personal Desktop** — Data stays on this computer; requires a local app or server.
+
+Recommend B instead when the user says their data must stay on their computer. Explain that reason
+in one short sentence. A reply such as "use your recommendation" / "按推荐来" accepts the option
+you recommended; an unanswered question is not a choice. Never infer permission to install a local
+app or enable start-on-boot from silence.
 
 After the user answers, always fetch and read the matching canonical document below, even when the
 answer matches the website preference:
@@ -913,7 +927,7 @@ function buildBootstrapMarkdown(origin: string, ctx?: SkillMarkdownContext): str
     ? `  -H "Authorization: Bearer $BUSABASE_API_KEY" \\\n  -H "x-busabase-space: $BUSABASE_SPACE_ID" \\\n`
     : "";
 
-  const ownMachine = isCloud ? "" : " Everything runs and stays on the user's own machine.";
+  const ownMachine = isCloud ? "" : " Run only on the user's actual computer (see Step 0).";
 
   const step0 = isCloud
     ? `## Step 0 — Connect to Busabase Cloud
@@ -927,10 +941,16 @@ ${
   preselectedSpaceId
     ? `Target the Dashboard-selected Space \`${preselectedSpaceId}\` in that first check. If access
 fails, ask the user to switch or reconnect accounts; never choose or create another Space.`
-    : `With no preselected Space, use the only result, ask when there are several, and accept a new
+    : `With no preselected Space, honor a user-named or verified configured target; otherwise use the
+only result or ask when there are several. Accept a new
 personal Space when the identity has no memberships.`
 }
 If verification succeeds, skip **0b** and keep MCP for this run. Otherwise use the CLI fallback.
+
+**No terminal:** use the integration's advertised setup prompt or onboarding guide for its
+shell-free workflow. Without an integration, guide them to their client's connector settings;
+ask which AI app only if unknown. Do not send CLI commands or claim permanent skills were installed
+when the client has no persistent skill store.
 
 ### 0b. CLI fallback
 
@@ -938,10 +958,17 @@ ${
   preselectedSpaceId
     ? `One move: sign in. The dashboard already chose the Space, so there is nothing to confirm
 afterwards.`
-    : `Two moves: sign in, then confirm the Space you landed in.
+    : `Sign in, then confirm the Space.
 
 #### Sign in`
 }
+
+Before signing in, list saved accounts (no key is sent): \`${BUSABASE_CLI} auth status --output json\`.
+Try only a profile whose \`baseUrl\` is exactly \`${site}\` and \`credential\` is not \`none\`:
+\`${BUSABASE_CLI} whoami --output json --profile <profile>${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""}\` — never
+\`--base-url\`, which would send that key to another host. If valid for the target, reuse its summary
+below; skip login.
+Its \`spaces\` is login's \`availableSpaces\`; use \`space.id\` and \`space.name\` for the selected target.
 
 Sign-in is two commands, one per conversational turn. The first returns immediately, so the user
 actually receives the link even if your harness only delivers a turn's final message:
@@ -977,9 +1004,7 @@ ${preselectedSpaceId ? `The dashboard supplied \`--space-id ${preselectedSpaceId
   the persistent version-0 bootstrap marker. Ask the Step 1 scenario question, then initialize this
   Space even when the dashboard preselected it.
 
-Two edge cases fall out of that same rule: an empty *existing* Space has no marker and is therefore
-connect-only, not a trigger to initialize; and a retry after interrupted initialization still has the
-version-0 marker and safely resumes Step 2.
+An interrupted version-0 setup safely resumes Step 2.
 ${
   preselectedSpaceId
     ? ""
@@ -987,20 +1012,19 @@ ${
 ### 0c. Confirm the target Space
 
 Login never asks which Space to use: it takes the server default (the Space the user was most
-recently active in) and lists the rest in \`availableSpaces\`. The user has not seen that choice yet.
+recently active in). Show its name, keep ids in tool calls.
 
-Always tell the user which Space was selected (name + id). Then, by \`availableSpaces\` length:
+Use a named or verified configured target without asking again. Otherwise check \`availableSpaces\`:
 
 - **One** → nothing to choose. Continue with the \`bootstrapRequired\` branch from 0b.
 - **More than one** → ask once, a lettered choice in the user's language: \`A\` keeps the current
-  Space, then one letter per remaining entry. Offer Spaces, never commands — switching is your job,
+  Space (recommended: used most recently), then one per remaining entry.
+  Offer Spaces, never commands — switching is your job,
   so never tell the user to run anything.
 
-  > 📂 You're in **{space.name}** (the Space you used most recently). Keep it, or switch?
-  > **A.** Keep **{space.name}**   **B.** {otherSpace1.name}   **C.** {otherSpace2.name}
+  > **A.** Keep **{space.name}** (recommended: used most recently)   **B.** {otherSpace1.name} …
 
-  On a switch, run both and re-decide the 0b branch from the new \`bootstrapRequired\` — the old one
-  belonged to the previous Space:
+  On a switch, run both; re-decide the 0b branch from the new \`bootstrapRequired\`:
 
   \`\`\`bash
   ${BUSABASE_CLI} space use <id>
@@ -1011,16 +1035,19 @@ Always tell the user which Space was selected (name + id). Then, by \`availableS
 On MCP, resolve the target Space from the verification result: ${
         preselectedSpaceId
           ? `it must match \`${preselectedSpaceId}\`.`
-          : `use one result; ask the user when there are several.`
+          : `honor the named or configured target; otherwise use one result; ask the user when there are several.`
       } Then follow \`bootstrapRequired\`: \`false\` goes to Step 3 with no writes; \`true\` goes to
 Step 1. Before the first write, require write access plus capabilities to inspect, propose, check
 results, and complete bootstrap. If anything is missing, stop before writing; ask the user to reconnect
 with more access or approve CLI fallback. Keep the same transport for the rest of the run.`
     : `## Step 0 — Connect to Busabase Personal Desktop
 
-Everything runs locally — no account, no API key. The user has already confirmed this edition, so
-check whether the
-local app is already running (no authentication is needed locally):
+Before any local probe or install, establish that this runtime is the user's actual computer.
+An SSH session, container, or hosted AI may run elsewhere. If unknown or remote, ask one plain
+question: "Can you open an assistant or the Busabase app on the computer where you want your data?"
+Wait until setup runs on that computer; do not start Busabase on the AI host or promise local privacy.
+
+Once on their computer, check whether the local app is running (no account or API key needed):
 
 \`\`\`bash
 curl -fsS ${local}/api/v1/bases    # the tables in the workspace
@@ -1089,7 +1116,7 @@ until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo 
 \`\`\`
 
 Then **offer start-on-boot — ask first, and only set it up if the user agrees** (this writes a
-system service, so never do it silently). On a yes, use the OS-appropriate snippet:
+system service). Recommend "Not now" for a first try; they can enable it later. On a yes:
 
 \`\`\`bash
 # macOS (launchd, per-user)
@@ -1139,8 +1166,8 @@ question, since some users would rather not install anything:
 > **A.** 🖥️ **Desktop app** (recommended) — a native app, nothing to run in a terminal
 > **B.** ⌨️ **Terminal server** — I start \`npx -y busabase@latest server\` for you, no install
 
-If they have no preference, go with **A (Desktop)**. If they pick **B**, follow **Path A** above
-instead.
+If they say "use your recommendation", go with **A (Desktop)**. Wait for an answer before installing;
+silence is not consent. If they pick **B**, follow **Path A** above instead.
 
 **Desktop:** send the user to \`${site}/download\` — **macOS** \`.dmg\` (Apple Silicon / Intel),
 **Windows** \`.msi\`, **Linux** \`.AppImage\`. In plain words: download, install, and launch
@@ -1152,74 +1179,56 @@ in a few seconds); a fresh install returns \`[]\`, which sends you to Step 2:
 until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo "Busabase is up."
 \`\`\``;
 
-  // Optional, after the Space is verified — it never blocks or undoes initialization, and
-  // existing Spaces never reach it (they jump straight to the skills step).
-  const inviteStep = `
-**3d. Offer to invite teammates — optional, ask once**, only after completion returned version 1:
-"Your Space is ready — want to invite teammates?" **A.** By email **B.** A link to share **C.** Not now.
-
-- **A** → ask for any missing address (never guess one), repeat the exact addresses and roles
-  (\`member\` unless they ask for admin), get a yes, then one call per address:
-  \`${BUSABASE_CLI} members invite --email <address>\` (\`--role admin\` needs a \`manage\` key;
-  device login gives \`write\`).
-- **B** → \`${BUSABASE_CLI} members create-invite-link\`; give them its \`url\`.
-- **C** → skip; never ask again.
-
-On MCP, the integration's member-invitation tools do the same. On either path, 403 = not an
-owner/admin, or the key cannot grant admin: say which and offer \`member\` or the Members page —
-never downgrade silently. 404 = this server cannot invite over the API: point to the Members page,
-${site}/dashboard?settings=space&tab=people (Members settings). Either way, continue to Step 3.
-`;
-
   const spaceNote = isCloud
-    ? "(Every call carries `x-busabase-space: $BUSABASE_SPACE_ID` — the space picked in Step 0. The API key is user-scoped, so do not omit the header.)"
+    ? "(Keep `x-busabase-space: $BUSABASE_SPACE_ID` — the Step 0 space — on every call; the key is user-scoped.)"
     : "(No `spaceId` in local mode.)";
 
   const step4 = `## Step ${isCloud ? 3 : 4} — The last setup step: install the permanent skills
 
 ${
   isCloud
-    ? `Have the Harness install both skills into its persistent skill store. Prefer its native
-installer; otherwise run:
+    ? `Have the Harness install both skills into its persistent skill store when supported. Prefer its
+native installer; otherwise run:
 
 \`\`\`bash
-npx skills add busabase/skills --skill busabase busabase-app-creator
+npx skills add busabase/skills --skill busabase busabase-app-creator --global --agent <current-agent> --yes
 \`\`\`
 
 MCP remains the transport when it connected successfully; installing skills does not require CLI
-credentials. Finish only after both skills are available in future sessions.`
-    : `One step left before everyday use. Install both permanent skills so any agent on this machine can
+credentials. With a persistent store, finish only after both skills are available in future sessions.
+Otherwise use Step 0a's shell-free setup; report connection success, not permanent installation,
+and skip the full installation-success reply below.`
+    : `One step left before everyday use. Install both permanent skills so the current agent can
 drive this workspace with **busabase** and create complete workspace apps with
 **busabase-app-creator** every session — no re-pasting this onboarding doc:
 
 \`\`\`bash
-npx skills add busabase/skills --skill busabase busabase-app-creator
+npx skills add busabase/skills --skill busabase busabase-app-creator --global --agent <current-agent> --yes
 \`\`\`
 
-The skills are self-describing. \`busabase\` reads \`~/.busabase/.env\` (set up above) and becomes
-the reference for the everyday loop and full API; \`busabase-app-creator\` builds on it when the
-user wants a complete workspace app.`
+\`busabase\` reads \`~/.busabase/.env\` for ongoing use; \`busabase-app-creator\` handles workspace apps.`
 }
-This onboarding doc has now done its job.
+
+**Resolve installer choices for the user.** Say "I'll make Busabase available in future chats with
+this assistant." Use this Harness's id for \`<current-agent>\` (e.g. \`codex\`, \`claude-code\`);
+ask only if unknown, and keep a scope the user chose. Keep \`--yes\` or the installer waits on
+prompts you cannot answer. Verify both skills were installed for that agent; explain any reload.
+Reading this document is not installation.
 
 ## 🎉 You're set up — congratulations!
 
-**Now, and only now, is everything done — so this is the moment to congratulate the user, warmly
-and in their language.** Don't claim "you're connected / all set" before this point: it's true only
-once *all* of it has landed —
+Don't claim "you're connected / all set" before this point. Congratulate the user in their
+language only after all three outcomes are true:
 
 - ✅ **connected** — the host responds (you proved it in Step 0)
 - ✅ **workspace ready** — existing Spaces were left untouched; a new Space was initialized once
 - ✅ **skills installed** — \`busabase\` and \`busabase-app-creator\` are permanent, so everyday
   workspace work and app creation are available in future sessions
 
-Tell them so, and close the journey with the tracker fully checked — e.g.:
+> ✅ Connected · ✅ Workspace ready · ✅ Skills installed
+> 🎉 You're all set! I'm connected; you can bring another assistant here.
 
-> ✅ Connect · ✅ Initialize (new Spaces only) · ✅ Verify · ✅ Skills
-> 🎉 *You're all set — Busabase is connected, your first workspace is live, and both skills are
-> installed.
-> From here it's everyday use: you ask, I write, and every change keeps a message, an
-> author and a history you can undo — and I can build a complete workspace app when you need one.*
+${renderOnboardingNextSteps({ mode: isCloud ? "cloud" : "local", transport: "cli", origin: site })}
 ${
   isCloud
     ? `
@@ -1248,43 +1257,34 @@ description: ${SETUP_SKILL_DESCRIPTION}
 
 # Busabase — first-run setup
 
-This document walks you (the agent) — and through you, the user — from nothing to a working,
-populated workspace, then installs the permanent \`busabase\` and \`busabase-app-creator\` skills
-for everyday use and workspace app creation.${ownMachine}
+Connect the user, initialize only a new workspace, then install \`busabase\` and
+\`busabase-app-creator\` for ongoing use.${ownMachine}
 The user already confirmed this edition in the preceding dispatcher (or entered through an
 authoritative Dashboard/local-app link). Work top to bottom, **in the user's language**, starting
-with connection. Do not welcome them again and do not ask them to choose an edition again.
+with connection. If not introduced yet, say: ${BUSABASE_ONBOARDING_INTRO}
+Do not repeat a welcome or ask them to choose an edition again.
 
 ## The journey at a glance — and how to run it
 
-You are guiding the user through ${isCloud ? "five milestones (one optional)" : "four milestones"}. Existing users skip initialization entirely:
+Existing users skip initialization entirely:
 
 | # | Milestone | Covered by | Done when |
 | - | --------- | ---------- | --------- |
 | 1 | 🔌 **Connect** | ${isCloud ? "Step 0" : "Step 0 + Step 1"} | ${isCloud ? "a verified MCP integration, or device login, returns the selected Space" : "the local API responds and the connection is saved"} |
 | 2 | 🏗️ **Initialize if required** | ${isCloud ? "Step 1 + Step 2" : "Step 2 + Step 3"} | version-0 Space gets starter data |
 | 3 | ✅ **Verify** | Step ${isCloud ? 2 : 3} | ${isCloud ? "starter writes confirmed and completion returns version 1" : "starter writes and completion confirmed"} |
-${isCloud ? "| 4 | 👥 **Invite teammates** (optional) | Step 2 (3d) | offered once after a new Space is verified |\n" : ""}| ${isCloud ? 5 : 4} | 🎓 **Skills installed** | Step ${isCloud ? 3 : 4} | both skills available in the agent's persistent skill store, 🎉 |
+| 4 | 🎓 **Skills installed** | Step ${isCloud ? 3 : 4} | both skills persist for this agent |
 
-**Conduct rules — these create the step-by-step feel; follow them at every turn:**
+**Conduct rules:**
 
-- **Show progress at every milestone boundary.** When a milestone completes, open your next
-  message with a one-line tracker (in the user's language), e.g.
-  \`✅ Connect · ▶ Initialize · ○ Verify · ○ Skill\` — so the user always knows
-  where they are and how much is left. Don't spam it mid-milestone; boundaries only.
-- **One question per message, lettered options whenever possible** (A/B/C/D…). Never two open
-  questions at once, and never a question buried under a wall of output. If the user's answer is
-  ambiguous, ask one short follow-up — still with options.
-- **Announce → act → confirm.** Before each action, say in one plain line what you're about to do
-  and why. After it, confirm with a ✅ line what just became true ("✅ Server is up", "✅ Base
-  created — your starter workspace is ready"). Never run several setup actions silently and
-  dump the results.
-- **The user sees outcomes and choices, not commands.** Run the curl / install commands yourself;
-  translate results into plain language. Only show a command when the user must run it (e.g.
-  completing device authorization in the browser).
-- **Small numbered sub-plans for anything multi-part.** When a milestone has several moves (e.g.
-  Step ${isCloud ? 2 : 3}: inspect → create → seed → verify), tell the user the mini-plan first ("three quick
-  things: …"), then tick through it.
+- Show a one-line progress tracker at milestone boundaries, e.g.
+  \`✅ Connect · ▶ Initialize · ○ Verify · ○ Skills\`.
+- Ask one question per message with lettered options. Recommend one with a short reason based on
+  their goal; otherwise favor the simplest start. "按推荐来" accepts it; silence does not.
+  Respect prior answers. Never silently broaden access or enable start-on-boot.
+- Say workspace, table, and sign-in link; keep ids and installer details in tool work.
+- Announce the next action briefly, run it yourself, then confirm the outcome in plain words.
+  Show commands only when the user must run them. Explain a multi-part step as a short plan first.
 
 Here is the first move.
 
@@ -1295,22 +1295,28 @@ ${step1}
 ## Step ${isCloud ? 1 : 2} — Choose a starter only for a new Space
 
 Enter this step when Cloud Step 0 returned \`bootstrapRequired: true\` (including a dashboard-
-preselected Space), or when Personal Desktop Step 0 returned an empty Base list. Ask one low-cost
-question. If the user says "just go ahead", use Knowledge Base. Existing users never see this
-question and receive zero data writes:
+preselected Space), or when Personal Desktop Step 0 returned an empty Base list. Existing users
+never see this question and receive zero data writes.
+
+Use a starter matching their stated goal without asking again. If none is clear, offer this
+question, recommend notes because it is easy to try, and let "按推荐来" accept it:
+
+> What would you like to try first?
+> **A. Save useful notes** (recommended if you're unsure) — an easy way to see how we share information.
+> **B. Track customers** · **C. Plan content** · **D. Track compliance** · **E. Something else**
+
+Map choices to field maps: A → 3, B → 4, C → 1, D → 2, E → 5. "Just go ahead" uses the
+recommendation. Keep the technical field maps in tool work:
 
 | # | Blueprint | Good for |
 | - | --------- | -------- |
-| 1 | **Content Pipeline** (+ CMS Pages) | drafting blog / social / landing-page content reviewed before publish |
-| 2 | **Compliance Checklists** | controlled items where every change needs an audit trail |
-| 3 | **Knowledge Base** | notes, FAQs, and sources an agent can read but only a human can change |
-| 4 | **CRM Contacts** | leads / customers an agent enriches, with a history you can audit |
-| 5 | **Something else** | describe it — design a blueprint on the spot (see *Custom blueprint*) |
+| 1 | **Content Pipeline** (+ CMS Pages) | publishing |
+| 2 | **Compliance Checklists** | audits |
+| 3 | **Knowledge Base** (recommended when unsure) | notes and FAQs |
+| 4 | **CRM Contacts** | customers |
+| 5 | **Something else** | design a custom starter |
 
-A blueprint is just a starting **Base** (a table of typed fields). Available field types:
-\`text\`, \`longtext\`, \`markdown\`, \`html\`, \`number\`, \`date\`, \`checkbox\`, \`select\`,
-\`multiselect\`, \`url\`, \`embed\`, \`email\`, \`phone\`, \`attachment\`, \`code\`, \`json\`, \`yaml\`, \`relation\`, plus system
-types (\`auto_number\`, \`created_time\`, \`ai_summary\`, \`ai_tags\`, …).
+A starter is a **Base** (table) built from the field maps below.
 
 ### Blueprint field maps
 
@@ -1342,8 +1348,7 @@ ${
     ? `**MCP path:** skip the shell examples and have the Harness run the same sequence: inspect,
 create missing structure/views, seed with stable idempotency keys, check the write responses, then
 complete bootstrap. Require merged structure/records and \`materialized: true\` views; otherwise stop for
-approval and resume only after the approval result or a targeted View read confirms materialization. The shell examples
-below are for CLI only.
+approval and resume only after the approval result or a targeted View read confirms materialization.
 
 `
     : ""
@@ -1411,8 +1416,7 @@ ${authLine}  -H 'content-type: application/json' \\
   }'
 \`\`\`
 
-The response carries the new Base's \`id\` (e.g. \`bse_...\`) — use it below. For an HTML CMS,
-create a **Pages** base the same way with an \`html_body\` field of \`"type": "html"\`.
+The response carries the new Base's \`id\` (e.g. \`bse_...\`) — use it below; create the Pages base the same way.
 
 Views are structure too, so they carry \`"autoMerge": true\` like everything above — a starter
 Base whose views are stuck in the review queue looks half-built to the user:
@@ -1436,9 +1440,6 @@ ${authLine}  -H 'content-type: application/json' \\
 > structure: create a containing **folder** node and put the Base inside it, or create a second related Base
 > (e.g. CRM Contacts **+** Companies, or Content Pipeline **+** Pages). Combined with the seeded +
 > merged record in 3c, the user opens a populated tree, never a blank one.
-
-Once created, point the user to the live **Graph View** (open \`${api}/dashboard\` → *Graph View*
-in the sidebar) so they can see the real starter structure.
 
 **3b. Seed 3–5 canonical sample records without review prompts.** Use one record call per sample
 because the single-record endpoint supports both \`autoMerge\` and \`idempotencyKey\`; the bulk
@@ -1478,21 +1479,19 @@ ${
     : `Use the Desktop completion response; fetch completion status only if required information
 is missing.`
 }
-${isCloud ? inviteStep : ""}
 ### Custom blueprint (any scenario — this is what keeps it general)
 
 If the user picks *Something else*, don't hunt for a matching template — **design one**:
 
 1. Ask what they manage and the few attributes that matter.
-2. Build a Base with **4–6 fields**, choosing types from the list above (\`select\` for fixed
+2. Build a Base with **4–6 fields**, using supported types (\`select\` for fixed
    choices, \`markdown\`/\`html\` for bodies, \`attachment\` for files, \`embed\` for YouTube/Google Drive
    previews, \`email\`/\`url\`/\`date\` for
    typed values), following the same shape as the starter blueprints.
 3. Run the same idempotent **structure → sample records → check responses → mark complete** sequence.
 
-The starter blueprints are only calibrated examples — the real capability is that you can model
-*whatever the user actually has*. Later changes work exactly the same way: submit them, let the
-user's permissions decide whether they land or wait, and never approve something that is waiting.
+Starters are examples. Later writes follow the user's permissions; never approve a pending change
+unless asked.
 
 ${step4}
 `;

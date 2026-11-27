@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, notInArray } from "drizzle-orm";
+import { ORPCError } from "@orpc/server";
+import { and, eq, inArray } from "drizzle-orm";
 import type { BusabaseDatabase } from "../../../context";
 import { busabaseVaultItems } from "../schema/vault-items";
 import {
@@ -16,7 +17,16 @@ import {
 } from "../types/vault";
 import { decodeVaultValue, encodeVaultValue } from "./vault-crypto";
 
+// Server-only consumers may resolve a selected payload without loading the entire Vault.
+export { decodeVaultValue, encodeVaultValue } from "./vault-crypto";
+
 type VaultItemRow = typeof busabaseVaultItems.$inferSelect;
+
+type VaultMutationOptions = {
+  // Server callers must authorize the owner's scope before bypassing item policy.
+  // This option is deliberately absent from the public input schema.
+  bypassItemEditPolicy?: boolean;
+};
 
 const normalizeOwnerId = (userId: string | null | undefined) => userId?.trim() ?? "";
 
@@ -29,15 +39,33 @@ const defaultVaultAccess = {
   share: false,
 };
 
-const HIDDEN_VAULT_KEYS = [PREVIEWFILE_API_KEY] as const;
+const INTERNAL_VAULT_KEYS = [
+  PREVIEWFILE_API_KEY,
+  "BUDA_ACP_CONNECTION",
+  "ACPROUTER_ROUTER_GRANT_TOKEN",
+  "ACPROUTER_ROUTER_CONNECTION_SECRET",
+] as const;
 
-const isHiddenVaultKey = (key: string): boolean =>
-  HIDDEN_VAULT_KEYS.includes(key as (typeof HIDDEN_VAULT_KEYS)[number]);
+export function isUserManageableVaultKey(key: string): boolean {
+  // The schema currently rejects ":"; keep the reserved-prefix guard if that
+  // format is ever relaxed, so internal connection keys remain protected.
+  return (
+    VaultItemKeySchema.safeParse(key).success &&
+    !INTERNAL_VAULT_KEYS.some((reserved) => key === reserved || key.startsWith(`${reserved}:`))
+  );
+}
+
+const itemIdentity = (item: {
+  environment: string;
+  scopeType: string;
+  scopeId?: string | null;
+  key: string;
+}) => JSON.stringify([item.environment, item.scopeType, item.scopeId ?? null, item.key]);
 
 function normalizeItem(input: VaultItemInput): VaultItemInput {
   return VaultItemInputSchema.parse({
     ...input,
-    id: input.id?.trim() || createVaultItemId(),
+    id: input.id?.trim() || undefined,
     key: input.key.trim().toUpperCase(),
     scopeId: input.scopeId?.trim() || null,
     description: input.description?.trim() ?? "",
@@ -47,16 +75,21 @@ function normalizeItem(input: VaultItemInput): VaultItemInput {
 
 function normalizeItems(rawItems: unknown): VaultItemInput[] {
   const { items } = UpdateVaultSettingsInputSchema.parse({ items: rawItems });
-  const deduped = new Map<string, VaultItemInput>();
-  for (const item of items.map(normalizeItem)) {
-    const key = [item.environment, item.scopeType, item.scopeId ?? "", item.key].join(":");
-    const previous = deduped.get(key);
-    deduped.set(key, {
-      ...item,
-      kind: previous?.kind === "secret" || item.kind === "secret" ? "secret" : item.kind,
-    });
+  const identities = new Set<string>();
+  const ids = new Set<string>();
+  const normalized = items.map(normalizeItem);
+  for (const item of normalized) {
+    if (!isUserManageableVaultKey(item.key)) {
+      throw new ORPCError("BAD_REQUEST", { message: "This Vault key is managed by the system." });
+    }
+    const identity = itemIdentity(item);
+    if (identities.has(identity) || (item.id && ids.has(item.id))) {
+      throw new ORPCError("BAD_REQUEST", { message: "Duplicate Vault items are not allowed." });
+    }
+    identities.add(identity);
+    if (item.id) ids.add(item.id);
   }
-  return [...deduped.values()];
+  return normalized;
 }
 
 function rowToVO(row: VaultItemRow): VaultItemVO {
@@ -95,43 +128,6 @@ async function readVaultRows(db: BusabaseDatabase, ownerId: string): Promise<Vau
   return db.select().from(busabaseVaultItems).where(eq(busabaseVaultItems.userId, ownerId));
 }
 
-async function replaceVaultItems(
-  db: BusabaseDatabase,
-  ownerId: string,
-  items: VaultItemInput[],
-  options: { requireEncryption?: boolean; preserveHidden?: boolean } = {},
-) {
-  const now = new Date();
-  await db
-    .delete(busabaseVaultItems)
-    .where(
-      options.preserveHidden
-        ? and(
-            eq(busabaseVaultItems.userId, ownerId),
-            notInArray(busabaseVaultItems.key, [...HIDDEN_VAULT_KEYS]),
-          )
-        : eq(busabaseVaultItems.userId, ownerId),
-    );
-  if (items.length === 0) return;
-
-  await db.insert(busabaseVaultItems).values(
-    items.map((item) => ({
-      id: item.id ?? createVaultItemId(),
-      userId: ownerId,
-      kind: item.kind,
-      key: item.key,
-      valuePayload: encodeVaultValue(item.value, options),
-      scopeType: item.scopeType,
-      scopeId: item.scopeId ?? null,
-      environment: item.environment,
-      description: item.description ?? "",
-      access: VaultAccessPolicySchema.parse(item.access ?? defaultVaultAccess),
-      createdAt: now,
-      updatedAt: now,
-    })),
-  );
-}
-
 export async function getVaultSettings(
   db: BusabaseDatabase,
   userId: string | null | undefined,
@@ -140,7 +136,7 @@ export async function getVaultSettings(
   const rows = await readVaultRows(db, ownerId);
   return toSettingsVO(
     ownerId,
-    rows.filter((row) => !isHiddenVaultKey(row.key)),
+    rows.filter((row) => isUserManageableVaultKey(row.key)),
   );
 }
 
@@ -148,12 +144,119 @@ export async function updateVaultSettings(
   db: BusabaseDatabase,
   userId: string | null | undefined,
   input: { items: unknown[] },
-  options: { requireEncryption?: boolean } = {},
+  options: VaultMutationOptions & { requireEncryption?: boolean } = {},
 ): Promise<VaultSettingsVO> {
   const ownerId = normalizeOwnerId(userId);
-  const items = normalizeItems(input.items).filter((item) => !isHiddenVaultKey(item.key));
-  await replaceVaultItems(db, ownerId, items, { ...options, preserveHidden: true });
-  return getVaultSettings(db, ownerId);
+  const items = normalizeItems(input.items);
+  return db.transaction(async (tx) => {
+    const current = (await readVaultRows(tx, ownerId)).filter((row) =>
+      isUserManageableVaultKey(row.key),
+    );
+    const byId = new Map(current.map((row) => [row.id, row]));
+    const byIdentity = new Map(current.map((row) => [itemIdentity(row), row]));
+    const now = new Date();
+    const prepared = items.map((item) => {
+      const existing = item.id ? byId.get(item.id) : byIdentity.get(itemIdentity(item));
+      if (
+        item.id &&
+        (!existing ||
+          existing.environment !== item.environment ||
+          existing.scopeType !== item.scopeType ||
+          (existing.scopeId ?? null) !== (item.scopeId ?? null))
+      ) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "The Vault item does not belong to this scope. Reload before saving.",
+        });
+      }
+      const occupied = byIdentity.get(itemIdentity(item));
+      if (existing && occupied && occupied.id !== existing.id) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: "Another Vault item already uses this key in this scope.",
+        });
+      }
+      if (existing) {
+        const unchanged =
+          item.key === existing.key &&
+          item.kind === existing.kind &&
+          item.value === decodeVaultValue(existing.valuePayload) &&
+          item.description === existing.description &&
+          Object.entries(existing.access).every(
+            ([capability, allowed]) =>
+              item.access[capability as keyof typeof item.access] === allowed,
+          );
+        if (unchanged) {
+          // Full-snapshot saves must preserve ciphertext and updatedAt: Site revisions use it.
+          return { existing, row: existing, skipWrite: true };
+        }
+        if (!existing.access.edit && !options.bypassItemEditPolicy) {
+          throw new ORPCError("FORBIDDEN", {
+            message: "Edit access is disabled for this Vault item.",
+          });
+        }
+      }
+      return {
+        existing,
+        skipWrite: false,
+        row: {
+          id: existing?.id ?? createVaultItemId(),
+          userId: ownerId,
+          kind: item.kind,
+          key: item.key,
+          valuePayload:
+            existing &&
+            (existing.valuePayload.encoding === "encrypted" || !options.requireEncryption) &&
+            item.value === decodeVaultValue(existing.valuePayload)
+              ? existing.valuePayload
+              : encodeVaultValue(item.value, options),
+          scopeType: item.scopeType,
+          scopeId: item.scopeId ?? null,
+          environment: item.environment,
+          description: item.description,
+          access: item.access,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+          lastUsedAt: existing?.lastUsedAt ?? null,
+        },
+      };
+    });
+    const keptIds = new Set(prepared.map(({ row }) => row.id));
+    if (keptIds.size !== prepared.length) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "Multiple inputs cannot update the same Vault item.",
+      });
+    }
+    // Unless the server authorized a scope-level bypass, an omitted locked row
+    // is preserved even when a client never received that row.
+    const removedIds = current
+      .filter((row) => (options.bypassItemEditPolicy || row.access.edit) && !keptIds.has(row.id))
+      .map((row) => row.id);
+    if (removedIds.length > 0) {
+      await tx
+        .delete(busabaseVaultItems)
+        .where(
+          and(eq(busabaseVaultItems.userId, ownerId), inArray(busabaseVaultItems.id, removedIds)),
+        );
+    }
+    for (const { existing, skipWrite, row } of prepared) {
+      if (skipWrite) continue;
+      if (existing) {
+        const {
+          id,
+          userId: _userId,
+          createdAt: _createdAt,
+          lastUsedAt: _lastUsedAt,
+          ...patch
+        } = row;
+        await tx
+          .update(busabaseVaultItems)
+          .set(patch)
+          .where(and(eq(busabaseVaultItems.userId, ownerId), eq(busabaseVaultItems.id, id)));
+      } else {
+        await tx.insert(busabaseVaultItems).values(row);
+      }
+    }
+    return getVaultSettings(tx, ownerId);
+  });
 }
 
 /**
@@ -167,59 +270,66 @@ export async function updatePreviewFileCredential(
   apiKey: string | null,
 ): Promise<{ success: boolean }> {
   const ownerId = normalizeOwnerId(userId);
-  await db
-    .delete(busabaseVaultItems)
-    .where(
-      and(eq(busabaseVaultItems.userId, ownerId), eq(busabaseVaultItems.key, PREVIEWFILE_API_KEY)),
+  const valuePayload = apiKey === null ? null : encodeVaultValue(apiKey);
+  return db.transaction(async (tx) => {
+    const predicate = and(
+      eq(busabaseVaultItems.userId, ownerId),
+      eq(busabaseVaultItems.key, PREVIEWFILE_API_KEY),
     );
-  if (apiKey !== null) {
-    const item = normalizeItem({
-      kind: "secret",
-      key: PREVIEWFILE_API_KEY,
-      value: apiKey,
-      scopeType: "personal",
-      scopeId: null,
-      environment: "local",
-      description: "PreviewFile API key for Drive file previews",
-      access: { runtime: true, reveal: false, edit: true, share: false },
-    });
-    await db.insert(busabaseVaultItems).values({
-      id: item.id ?? createVaultItemId(),
-      userId: ownerId,
-      kind: item.kind,
-      key: item.key,
-      valuePayload: encodeVaultValue(item.value),
-      scopeType: item.scopeType,
-      scopeId: item.scopeId ?? null,
-      environment: item.environment,
-      description: item.description ?? "",
-      access: VaultAccessPolicySchema.parse(item.access ?? defaultVaultAccess),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-  }
-  return { success: true };
+    const [existing] = await tx.select().from(busabaseVaultItems).where(predicate);
+    if (valuePayload === null) {
+      await tx.delete(busabaseVaultItems).where(predicate);
+    } else if (existing) {
+      await tx
+        .update(busabaseVaultItems)
+        .set({ valuePayload, updatedAt: new Date() })
+        .where(predicate);
+    } else {
+      await tx.insert(busabaseVaultItems).values({
+        id: createVaultItemId(),
+        userId: ownerId,
+        kind: "secret",
+        key: PREVIEWFILE_API_KEY,
+        valuePayload,
+        scopeType: "personal",
+        scopeId: null,
+        environment: "local",
+        description: "PreviewFile API key for Drive file previews",
+        access: { runtime: true, reveal: false, edit: true, share: false },
+      });
+    }
+    return { success: true };
+  });
 }
 
 export async function clearVaultSettings(
   db: BusabaseDatabase,
   userId: string | null | undefined,
+  options: VaultMutationOptions = {},
 ): Promise<{ success: boolean }> {
   const ownerId = normalizeOwnerId(userId);
-  // Clearing the Vault clears what the Vault screen showed. Hidden items are
-  // not in that list and have their own management surface (Settings > File
-  // Preview), so wiping them here would silently delete a credential the user
-  // never saw in the thing they just cleared. Same `preserveHidden` rule as
-  // `updateVaultSettings`.
-  await db
-    .delete(busabaseVaultItems)
-    .where(
-      and(
-        eq(busabaseVaultItems.userId, ownerId),
-        notInArray(busabaseVaultItems.key, [...HIDDEN_VAULT_KEYS]),
-      ),
+  return db.transaction(async (tx) => {
+    const items = (await readVaultRows(tx, ownerId)).filter((row) =>
+      isUserManageableVaultKey(row.key),
     );
-  return { success: true };
+    if (!options.bypassItemEditPolicy && items.some((row) => !row.access.edit)) {
+      throw new ORPCError("FORBIDDEN", {
+        message: "The Vault contains items with edit access disabled. Clear was cancelled.",
+      });
+    }
+    if (items.length > 0) {
+      await tx.delete(busabaseVaultItems).where(
+        and(
+          eq(busabaseVaultItems.userId, ownerId),
+          inArray(
+            busabaseVaultItems.id,
+            items.map((row) => row.id),
+          ),
+        ),
+      );
+    }
+    return { success: true };
+  });
 }
 
 export async function getVaultRuntimeEnv(
@@ -227,12 +337,12 @@ export async function getVaultRuntimeEnv(
   userId: string | null | undefined,
 ): Promise<VaultRuntimeEnv> {
   const ownerId = normalizeOwnerId(userId);
-  const settings = toSettingsVO(ownerId, await readVaultRows(db, ownerId));
+  const rows = (await readVaultRows(db, ownerId)).filter(
+    (row) =>
+      row.access.runtime && (isUserManageableVaultKey(row.key) || row.key === PREVIEWFILE_API_KEY),
+  );
+  const settings = toSettingsVO(ownerId, rows);
   return VaultRuntimeEnvSchema.parse(
-    Object.fromEntries(
-      settings.items
-        .filter((item) => item.access.runtime && VaultItemKeySchema.safeParse(item.key).success)
-        .map((item) => [item.key, item.value] as const),
-    ),
+    Object.fromEntries(settings.items.map((item) => [item.key, item.value] as const)),
   );
 }

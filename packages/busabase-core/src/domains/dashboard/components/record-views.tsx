@@ -1,6 +1,10 @@
 import type { NonDeletedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import type { AppState, ExcalidrawInitialDataState } from "@excalidraw/excalidraw/types";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type ApiKeyPermissionLevel,
+  hasApiKeyLevel,
+} from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { WhiteboardDocument } from "busabase-contract/domains/rich-node/types";
 import type {
@@ -27,10 +31,12 @@ import {
   Maximize2,
   MoreHorizontal,
   Paperclip,
+  Pencil,
   RotateCcw,
   Share2,
   Sparkles,
   Trash2,
+  Undo2,
   X,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
@@ -39,6 +45,7 @@ import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { localizeCoreErrorMessage, presentCoreError } from "../../../i18n/localize-error";
+import { recordRevertMessages } from "../../../i18n/record-revert";
 import { validateRecordFields } from "../../base/field-rules";
 import {
   fieldDisplayKind,
@@ -52,6 +59,7 @@ import {
 import { buildFieldGraph } from "../../base/formula/dependency";
 import { applyRollup, isRollupCompatible } from "../../base/lookup/rollup";
 import { getDateFieldOptions } from "../../base/utils/date-value";
+import { isRecordCreation } from "../../base/utils/record-revert-plan";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import {
   getChangeRequestTitle,
@@ -81,6 +89,7 @@ import {
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import { fetchRecordsByIds } from "../helpers/linked-records";
 import { emptyLookupValues } from "../helpers/lookup";
+import { recordHistoryQueryOptions } from "../helpers/record-history-query";
 import { useSourceViewSlug } from "../helpers/source-view-context";
 import { baseCrumbHref, readSourceViewSlug, withSourceView } from "../helpers/source-view-url";
 import type { RecordSubmitOptions } from "../helpers/view-types";
@@ -121,12 +130,18 @@ import {
   SidebarRow,
   StatusBadge,
 } from "./primitives";
+import { RecordCollectionValue } from "./record-collection-value";
 import { RecordCopyLinkButton } from "./record-copy-link-button";
+import {
+  canRevertChangeRequest,
+  isRevertChangeRequest,
+  RecordRevertDialog,
+} from "./record-revert-dialog";
 import { RelationFieldEditor } from "./relation-field";
 import { ShareLinkActions } from "./share-link-actions";
 import { ShimmerSkeleton as Skeleton } from "./shimmer-skeleton";
 import { WhiteboardContentSkeleton } from "./skeletons";
-import { SplitSubmitButton } from "./split-submit-button";
+import { SplitSubmitButton, useWorkspacePermissionLevel } from "./split-submit-button";
 
 // Record view/edit mode switch — lives in the titlebar (far right), mirroring the
 // base detail's Records/Design switch.
@@ -178,9 +193,10 @@ export function RecordTopbarActions({
           title={getRecordTitle(record, messages)}
         />
       ) : null}
+      {/* Icons only on a phone, as on the Base's Records / Design switch. */}
       <nav className="flex rounded-md bg-muted/60 p-0.5 text-xs">
         <Link
-          className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
+          className={`rounded px-2.5 py-1.5 font-medium transition-colors max-sm:px-2 ${
             activeTab === "view"
               ? "bg-card text-foreground"
               : "text-muted-foreground hover:text-foreground"
@@ -189,11 +205,13 @@ export function RecordTopbarActions({
             withSourceView(`/base/${base.slug}/${recordId}`, sourceViewSlug),
             currentSearch,
           )}
+          title={messages.recordView.view}
         >
-          {messages.recordView.view}
+          <Eye aria-hidden className="size-3.5 sm:hidden" />
+          <span className="max-sm:sr-only">{messages.recordView.view}</span>
         </Link>
         <Link
-          className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
+          className={`rounded px-2.5 py-1.5 font-medium transition-colors max-sm:px-2 ${
             activeTab === "edit"
               ? "bg-card text-foreground"
               : "text-muted-foreground hover:text-foreground"
@@ -202,8 +220,10 @@ export function RecordTopbarActions({
             withSourceView(`/base/${base.slug}/${recordId}/edit`, sourceViewSlug),
             currentSearch,
           )}
+          title={messages.recordView.edit}
         >
-          {messages.recordView.edit}
+          <Pencil aria-hidden className="size-3.5 sm:hidden" />
+          <span className="max-sm:sr-only">{messages.recordView.edit}</span>
         </Link>
       </nav>
     </div>
@@ -318,18 +338,28 @@ function findNodeById(nodes: NodeVO[], nodeId: string): NodeVO | undefined {
 }
 
 export function RecordDetailView({
+  basePermissionLevel,
   baseSlug,
   client,
   onDeleteChangeRequest,
+  onReverted,
   records,
   record,
 }: {
+  /**
+   * The viewer's effective level on the owning Base (`bases.get` →
+   * `viewerPermissionLevel`). A record's embedded Base does not carry it, and
+   * the workspace baseline alone misses a node-level read grant.
+   */
+  basePermissionLevel?: ApiKeyPermissionLevel;
   /** The owning Base's route slug (or nodeId/id fallback) — needed to build
    *  the `/base/:slug/:recordId/activity` link for the "•••" menu's Activity
    *  item, mirroring how `NodeActionsMenu` builds its own activity href. */
   baseSlug: string;
   client: BusabaseDashboardApiClient;
   onDeleteChangeRequest: (record: RecordVO, options?: RecordSubmitOptions) => Promise<void>;
+  /** Refreshes the record after a revert from its History landed or was queued. */
+  onReverted?: () => Promise<void>;
   records: RecordVO[];
   record: RecordVO | null;
 }) {
@@ -337,6 +367,8 @@ export function RecordDetailView({
   const locale = useCoreLocale();
   const currentSearch = useSearch();
   const sourceViewSlug = useSourceViewSlug();
+  const workspacePermissionLevel = useWorkspacePermissionLevel();
+  const [revertTarget, setRevertTarget] = useState<ChangeRequestVO | null>(null);
   const isAnon = useIsAnonymousVisitor();
   const orpc = useDashboardOrpc();
   const [, setLocation] = useLocation();
@@ -363,8 +395,7 @@ export function RecordDetailView({
   // its own and exposes data/error/loading directly.
   const historyQuery = useQuery({
     enabled: Boolean(record) && !isAnon,
-    queryFn: () => client.listRecordChangeRequests(record?.id ?? "", { limit: 5 }),
-    queryKey: ["busabase", "record-change-requests", record?.id, { limit: 5 }],
+    ...recordHistoryQueryOptions(client, record?.id ?? "", orpc),
   });
   const historyChangeRequests = historyQuery.data ?? [];
   const recordTitle = record ? getRecordTitle(record, messages) : undefined;
@@ -396,6 +427,15 @@ export function RecordDetailView({
     );
   }
 
+  // Proposing a change to this record — reverting it from History, or a delete
+  // from the menu — needs changeRequest on the Base. The server refuses a
+  // read-only viewer, so neither is offered where it would only fail. The open
+  // Base's level wins: the record's embedded Base does not carry one, and the
+  // workspace baseline misses a node-level read grant.
+  const canProposeChanges = hasApiKeyLevel(
+    basePermissionLevel ?? record.base.viewerPermissionLevel ?? workspacePermissionLevel,
+    "changeRequest",
+  );
   const recordUrl =
     typeof window === "undefined"
       ? null
@@ -450,34 +490,38 @@ export function RecordDetailView({
                 <History size={13} />
                 {messages.nodeDetail.activity}
               </button>
-              <button
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-sm transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={deleteAction !== null}
-                onClick={(event) => {
-                  setConfirmDeleteAction("change_request");
-                  event.currentTarget.closest("details")?.removeAttribute("open");
-                }}
-                type="button"
-              >
-                <Trash2 size={13} />
-                {deleteAction === "change_request"
-                  ? messages.recordView.creating
-                  : messages.recordView.deleteChangeRequest}
-              </button>
-              <button
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-sm transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={deleteAction !== null}
-                onClick={(event) => {
-                  setConfirmDeleteAction("merge");
-                  event.currentTarget.closest("details")?.removeAttribute("open");
-                }}
-                type="button"
-              >
-                <GitMerge size={13} />
-                {deleteAction === "merge"
-                  ? messages.recordView.merging
-                  : messages.recordView.deleteAndMerge}
-              </button>
+              {canProposeChanges ? (
+                <>
+                  <button
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-sm transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={deleteAction !== null}
+                    onClick={(event) => {
+                      setConfirmDeleteAction("change_request");
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}
+                    type="button"
+                  >
+                    <Trash2 size={13} />
+                    {deleteAction === "change_request"
+                      ? messages.recordView.creating
+                      : messages.recordView.deleteChangeRequest}
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-sm transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={deleteAction !== null}
+                    onClick={(event) => {
+                      setConfirmDeleteAction("merge");
+                      event.currentTarget.closest("details")?.removeAttribute("open");
+                    }}
+                    type="button"
+                  >
+                    <GitMerge size={13} />
+                    {deleteAction === "merge"
+                      ? messages.recordView.merging
+                      : messages.recordView.deleteAndMerge}
+                  </button>
+                </>
+              ) : null}
             </div>
           </details>
           <RailToggleButton onToggle={() => setPanelOpen((current) => !current)} open={panelOpen} />
@@ -522,14 +566,12 @@ export function RecordDetailView({
         </DialogContent>
       </Dialog>
       <section
-        className={`grid w-full min-w-0 gap-6 px-6 pt-2 pb-4 ${
+        className={`grid w-full min-w-0 grid-cols-1 gap-6 px-6 pt-2 pb-4 ${
           isAnon ? "" : "lg:grid-cols-[minmax(0,1fr)_auto]"
         }`}
       >
         <main
-          className={
-            isAnon ? "min-w-0 w-full" : "min-w-0 max-w-[860px] justify-self-center lg:w-full"
-          }
+          className={isAnon ? "min-w-0 w-full" : "min-w-0 w-full max-w-[860px] justify-self-center"}
         >
           <RecordHero record={record} />
           <RecordFieldPanel record={record} records={records} />
@@ -658,10 +700,15 @@ export function RecordDetailView({
                 </div>
               ) : historyChangeRequests.length > 0 ? (
                 <div className="-mx-3 divide-y divide-border/40">
-                  {historyChangeRequests.map((changeRequest) => (
+                  {historyChangeRequests.slice(0, 5).map((changeRequest) => (
                     <RecordChangeRequestHistoryRow
                       changeRequest={changeRequest}
                       key={changeRequest.id}
+                      onRevert={
+                        canProposeChanges && canRevertChangeRequest(changeRequest, record.id)
+                          ? () => setRevertTarget(changeRequest)
+                          : undefined
+                      }
                       recordId={record.id}
                     />
                   ))}
@@ -681,6 +728,15 @@ export function RecordDetailView({
           </BusabaseSidePanel>
         ) : null}
       </section>
+      <RecordRevertDialog
+        client={client}
+        onOpenChange={(open) => {
+          if (!open) setRevertTarget(null);
+        }}
+        onReverted={onReverted}
+        record={record}
+        target={revertTarget}
+      />
       <ConfirmActionDialog
         body={
           confirmDeleteAction === "merge"
@@ -706,6 +762,17 @@ export function RecordDetailView({
               mergeImmediately: nextAction === "merge",
             });
             setConfirmDeleteAction(null);
+          } catch (error) {
+            // A refusal (e.g. access narrowed since the page loaded) must say
+            // so, not leave the dialog open with nothing happening.
+            toast.error(
+              presentCoreError(
+                messages,
+                locale,
+                error,
+                messages.recordView.failedSaveChangeRequest,
+              ),
+            );
           } finally {
             setDeleteAction(null);
           }
@@ -757,6 +824,7 @@ export function RecordEditorView({
   const messages = useCoreI18n();
   const resolveIString = useIString();
   const currentSearch = useSearch();
+  const isAnonymous = useIsAnonymousVisitor();
   const [fields, setFields] = useState<Record<string, unknown>>(() =>
     Object.fromEntries(
       (base?.fields ?? record?.base.fields ?? []).map((field) => [
@@ -909,6 +977,20 @@ export function RecordEditorView({
               : messages.recordView.editRecord}
           </div>
         </div>
+
+        {mode === "new" && !isAnonymous ? (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/50 bg-muted/30 p-3">
+            <p className="min-w-0 flex-1 text-muted-foreground text-sm">
+              {messages.recordView.newRecordHelp}
+            </p>
+            <NodeAgentPromptsButton
+              nodeId={editorBase.nodeId}
+              nodeName={editorBase.name}
+              nodeType="base"
+              orpc={null}
+            />
+          </div>
+        ) : null}
 
         <div className="mt-5">
           <div className="border-border/50 border-t">
@@ -1841,26 +1923,26 @@ function AttachmentFieldEditor({
   return (
     <div className="grid gap-2">
       <label
-        className="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-md border border-border/70 border-dashed bg-card px-3 py-1.5 text-sm transition-colors hover:bg-accent"
+        className="relative inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-md border border-border/70 border-dashed bg-card px-3 py-1.5 text-sm transition-colors hover:bg-accent"
         htmlFor={inputId}
       >
         <Paperclip size={14} />
         {upload.label}
+        <input
+          accept={upload.accept}
+          aria-describedby={ariaDescribedBy}
+          aria-label={fieldName}
+          className="sr-only"
+          disabled={upload.isUploading || !upload.canUpload}
+          id={inputId}
+          multiple={upload.multiple}
+          onChange={(event) => {
+            void handleFiles(event.currentTarget.files);
+            event.currentTarget.value = "";
+          }}
+          type="file"
+        />
       </label>
-      <input
-        accept={upload.accept}
-        aria-describedby={ariaDescribedBy}
-        aria-label={fieldName}
-        className="sr-only"
-        disabled={upload.isUploading || !upload.canUpload}
-        id={inputId}
-        multiple={upload.multiple}
-        onChange={(event) => {
-          void handleFiles(event.currentTarget.files);
-          event.currentTarget.value = "";
-        }}
-        type="file"
-      />
       {upload.uploadError ? <p className="text-destructive text-xs">{upload.uploadError}</p> : null}
       {attachments.length > 0 ? (
         <ul className="grid gap-1">
@@ -2118,7 +2200,7 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
   return (
     <section className="mt-5">
       {fieldEntries.length > 0 ? (
-        <div className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm md:grid-cols-2">
           <div className="font-medium text-muted-foreground md:col-span-2">
             {messages.recordView.properties}
           </div>
@@ -2250,6 +2332,7 @@ function RecordPropertyItem({
   const resolveIString = useIString();
   const fieldName = resolveIString(field.name);
   const attachment = fieldDisplayKind(field.type) === "attachment";
+  const relation = fieldDisplayKind(field.type) === "relation";
   if (fieldDisplayKind(field.type) === "checkbox") {
     const checked = value === true || value === "true";
     return (
@@ -2299,16 +2382,24 @@ function RecordPropertyItem({
         <span className="truncate text-muted-foreground">{fieldName}</span>
         <CellAgentPromptsButton field={field} record={record} />
       </span>
-      <div className={attachment ? "min-w-0" : "min-w-0 truncate"}>
-        <FieldValuePreview
-          className={attachment ? "text-sm leading-5" : "inline text-sm leading-5"}
-          field={field}
-          computed={record.computedFields?.[field.slug]}
-          fieldUsers={record.fieldUsers}
-          record={record}
-          records={records}
-          value={value}
-        />
+      <div
+        className={
+          attachment || relation || field.type === "lookup" ? "min-w-0" : "min-w-0 truncate"
+        }
+      >
+        {relation || field.type === "lookup" ? (
+          <RecordCollectionValue field={field} record={record} records={records} value={value} />
+        ) : (
+          <FieldValuePreview
+            className={attachment || relation ? "text-sm leading-5" : "inline text-sm leading-5"}
+            field={field}
+            computed={record.computedFields?.[field.slug]}
+            fieldUsers={record.fieldUsers}
+            record={record}
+            records={records}
+            value={value}
+          />
+        )}
       </div>
     </div>
   );
@@ -2328,13 +2419,17 @@ function RecordHero({ record }: { record: RecordVO }) {
 
 function RecordChangeRequestHistoryRow({
   changeRequest,
+  onRevert,
   recordId,
 }: {
   changeRequest: ChangeRequestVO;
+  /** Present when the viewer may roll the record back to before this change. */
+  onRevert?: () => void;
   recordId: string;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
+  const revertCopy = recordRevertMessages[locale];
   const href = useHrefWithCurrentSearch(`/inbox/${changeRequest.id}`);
   const relatedOperations = changeRequest.operations.filter(
     (operation) =>
@@ -2342,36 +2437,66 @@ function RecordChangeRequestHistoryRow({
       operation.targetRecordId === recordId ||
       operation.sourceRecordId === recordId,
   );
+  const createsRecord = isRecordCreation(changeRequest, recordId);
+  const actionLabel = createsRecord ? revertCopy.undoCreation : revertCopy.action;
 
+  // The revert action sits beside the row's link, not inside it: a button
+  // nested in an anchor is invalid and its click would also navigate.
   return (
-    <Link
-      className="block rounded-md border-border/40 border-b px-2 py-2.5 transition-colors hover:bg-muted/35"
-      href={href}
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate font-medium text-sm">
-            {getChangeRequestTitle(changeRequest, messages)}
+    <div className="relative border-border/40 border-b" data-testid="record-history-row">
+      <Link
+        className={`block rounded-md px-2 py-2.5 transition-colors hover:bg-muted/35 ${
+          onRevert ? "pb-9" : ""
+        }`}
+        href={href}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate font-medium text-sm">
+              {getChangeRequestTitle(changeRequest, messages)}
+            </div>
+            <div className="mt-1 text-muted-foreground text-xs">
+              {formatUserRefLabel(
+                changeRequest.submittedByUser,
+                changeRequest.submittedBy,
+                messages,
+              )}
+              {" · "}
+              {formatFullTime(changeRequest.updatedAt, locale)}
+            </div>
           </div>
-          <div className="mt-1 text-muted-foreground text-xs">
-            {formatUserRefLabel(changeRequest.submittedByUser, changeRequest.submittedBy, messages)}
-            {" · "}
-            {formatFullTime(changeRequest.updatedAt, locale)}
-          </div>
+          <StatusBadge status={changeRequest.status} />
         </div>
-        <StatusBadge status={changeRequest.status} />
-      </div>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {relatedOperations.map((operation) => (
-          <span
-            className={`rounded-md px-2 py-0.5 text-xs ${operationMeta[operation.operation].tone}`}
-            key={operation.id}
-          >
-            {getOperationLabel(operation, messages)} · {shortIdentifier(operation.headCommitId)}
-          </span>
-        ))}
-      </div>
-    </Link>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {isRevertChangeRequest(changeRequest) ? (
+            <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-muted-foreground text-xs">
+              <Undo2 aria-hidden size={11} />
+              {revertCopy.badge}
+            </span>
+          ) : null}
+          {relatedOperations.map((operation) => (
+            <span
+              className={`rounded-md px-2 py-0.5 text-xs ${operationMeta[operation.operation].tone}`}
+              key={operation.id}
+            >
+              {getOperationLabel(operation, messages)} · {shortIdentifier(operation.headCommitId)}
+            </span>
+          ))}
+        </div>
+      </Link>
+      {onRevert ? (
+        <button
+          className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground"
+          data-testid="record-history-revert"
+          onClick={onRevert}
+          title={actionLabel}
+          type="button"
+        >
+          <Undo2 aria-hidden size={12} />
+          {actionLabel}
+        </button>
+      ) : null}
+    </div>
   );
 }
 

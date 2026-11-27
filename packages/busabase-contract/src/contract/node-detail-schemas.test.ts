@@ -89,7 +89,7 @@ describe("NodeDetailVO", () => {
     // Content moved out of `node.metadata` into object storage (spec D2), so
     // the detail response carries it explicitly instead of leaving it to a
     // bare `{ node }` the client has no way to read.
-    for (const type of ["whiteboard", "workflow", "html"] as const) {
+    for (const type of ["whiteboard", "html"] as const) {
       expect(Object.keys(NODE_DETAIL_VARIANTS[type].shape).sort()).toEqual([
         "attribution",
         "document",
@@ -97,6 +97,13 @@ describe("NodeDetailVO", () => {
         "type",
       ]);
     }
+    expect(Object.keys(NODE_DETAIL_VARIANTS.workflow.shape).sort()).toEqual([
+      "attribution",
+      "document",
+      "node",
+      "type",
+      "viewerPermissionLevel",
+    ]);
   });
 
   it("parses and discriminates a folder detail", () => {

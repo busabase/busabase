@@ -9,10 +9,10 @@
 
 <p>中文近似读音：布萨贝斯</p>
 
-<h3>面向 AI Agent 的记录系统</h3>
+<h3>AI Agent 的底座</h3>
 
 <p>不同 Agent，同一个共享底座。<br/>
-一个开源的数据库与工作区：Claude Code、Codex、Cursor 和你自研的 Agent，把记录、文档、Skill 和应用都存在这里，下一个任务直接接着用。</p>
+一个开源的上下文数据库与工作区：Claude Code、Codex、Cursor 和你自研的 Agent，把记录、文档、Skill 和应用都存在这里，下一个任务直接接着用。</p>
 
 <p>
 <a href="../README.md">English</a> &nbsp;·&nbsp; <b>中文</b> &nbsp;·&nbsp; <a href="./README_ja.md">日本語</a> &nbsp;·&nbsp; <a href="./README_ko.md">한국어</a>
@@ -46,7 +46,7 @@
 
 <br/>
 
-> Busabase 是面向 AI Agent 的开源数据库与工作区——agent 和人共用同一份结构化数据、文档、技能与应用，重要写入经审核成为可信记录。
+> Busabase 是面向 AI Agent 的开源上下文数据库与工作区——agent 和人共用同一份结构化数据、文档、技能与应用，重要写入经审核成为可信记录。
 
 每个 Agent session 都从零开始。你的 `CLAUDE.md` 锁在一个仓库里，最好的产出死在聊天记录里，换个工具就得把项目从头再讲一遍。
 

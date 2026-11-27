@@ -3,6 +3,7 @@ import {
   getGridRowHeight,
   isGridRowHeight,
   isViewFilterGroup,
+  isViewSummaryFunction,
   type ViewFilterConditionVO,
 } from "busabase-contract/types";
 // ============================================================================
@@ -16,6 +17,7 @@ import type {
   BaseFieldVO,
   ChangeRequestVO,
   OperationVO,
+  RecordVO,
   UserRefVO,
   ViewConfigVO,
 } from "busabase-contract/types";
@@ -23,59 +25,35 @@ import { ArrowRight, Minus, Plus } from "lucide-react";
 import { iStringParse } from "openlib/i18n/i-string";
 import { type CoreI18nMessages, fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { fieldVisibilityMessages } from "../../../i18n/field-visibility";
+import { gridGroupSummaryMessages, summaryMenuLabel } from "../../../i18n/grid-group-summary";
 import { gridRowHeightMessages } from "../../../i18n/grid-row-height";
 import { getFieldName } from "../helpers/field";
 import { fieldValueToString } from "../helpers/format";
-import { getFieldOrderDiffModel, isFieldReorderOperation } from "../helpers/operation-diff";
+import {
+  extractOperationFieldChanges,
+  type FieldChangeStatus,
+  getFieldOrderDiffModel,
+  isFieldReorderOperation,
+  isViewOperation,
+  type OperationFieldValueChange,
+  stableStringify,
+} from "../helpers/operation-diff";
 import { DriveFieldPathList } from "./drive-field-tree";
 import { FieldValuePreview } from "./field-preview";
 
-export { getFieldOrderDiffModel, isFieldReorderOperation } from "../helpers/operation-diff";
+export {
+  type FieldChangeStatus,
+  getFieldOrderDiffModel,
+  isFieldReorderOperation,
+  isInternalFormulaMetadata,
+  isViewOperation,
+  stableStringify,
+  valuesEqual,
+} from "../helpers/operation-diff";
 
-export const stableStringify = (value: unknown): string => {
-  if (value === null || value === undefined) {
-    return "null";
-  }
-  if (typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
-    .join(",")}}`;
-};
-
-export const valuesEqual = (left: unknown, right: unknown) =>
-  stableStringify(left) === stableStringify(right);
-
-export type FieldChangeStatus = "added" | "changed";
-
-export interface OperationFieldChange {
-  slug: string;
+export interface OperationFieldChange extends OperationFieldValueChange {
   label: string;
-  beforeValue: unknown;
-  afterValue: unknown;
-  status: FieldChangeStatus;
 }
-
-export const isViewOperation = (operation: OperationVO) => operation.operation.startsWith("view_");
-
-/** Merge guards belong to the commit, not to the author's editable field settings. */
-export const isInternalFormulaMetadata = (operation: OperationVO, slug: string) =>
-  (operation.operation === "base_add_field" || operation.operation === "base_update_field") &&
-  (slug === "formulaDependencies" || slug === "formulaBaseExpression");
-
-/** The source-view identity is routing intent, not an editable field setting. */
-const isInternalFieldOrigin = (operation: OperationVO, slug: string) =>
-  operation.operation === "base_add_field" && slug === "originViewId";
-
-/** Review the resulting configuration, not the bookkeeping used to merge it safely. */
-const isInternalViewConfigMetadata = (operation: OperationVO, slug: string) =>
-  operation.operation === "view_update" && (slug === "configPatch" || slug === "configBase");
 
 export const getOperationFieldLabel = (
   changeRequest: ChangeRequestVO,
@@ -97,33 +75,20 @@ export const getOperationFieldChanges = (
   operation: OperationVO,
   messages?: CoreI18nMessages,
 ): OperationFieldChange[] => {
-  const before = operation.baseFields;
   // A view's tab position is stored 0-based; people count tabs from 1.
   const display = (slug: string, value: unknown) =>
     isViewOperation(operation) && slug === "position" && typeof value === "number"
       ? value + 1
       : value;
-  return Object.entries(operation.headCommit.payload)
-    .filter(
-      ([slug, value]) =>
-        value !== undefined &&
-        !isInternalFormulaMetadata(operation, slug) &&
-        !isInternalFieldOrigin(operation, slug) &&
-        !isInternalViewConfigMetadata(operation, slug),
-    )
-    .map(([slug, afterValue]): OperationFieldChange => {
-      const hasBefore = before != null && slug in before && before[slug] !== undefined;
-      return {
-        slug,
-        label: getOperationFieldLabel(changeRequest, operation, slug, messages),
-        beforeValue: hasBefore ? display(slug, before[slug]) : undefined,
-        afterValue: display(slug, afterValue),
-        status: hasBefore ? "changed" : "added",
-      };
-    })
-    .filter(
-      (change) => change.status === "added" || !valuesEqual(change.beforeValue, change.afterValue),
-    );
+  return extractOperationFieldChanges(operation).map(
+    (change): OperationFieldChange => ({
+      ...change,
+      label: getOperationFieldLabel(changeRequest, operation, change.slug, messages),
+      beforeValue:
+        change.beforeValue === undefined ? undefined : display(change.slug, change.beforeValue),
+      afterValue: display(change.slug, change.afterValue),
+    }),
+  );
 };
 
 export const isLongTextValue = (value: unknown) =>
@@ -143,7 +108,16 @@ export const getFilterOperatorLabel = (messages: CoreI18nMessages, operator: str
 
 export interface ViewConfigRule {
   key: string;
-  kind: "sort" | "filter" | "field" | "order" | "width" | "policy" | "density";
+  kind:
+    | "sort"
+    | "filter"
+    | "field"
+    | "order"
+    | "width"
+    | "policy"
+    | "density"
+    | "group"
+    | "summary";
   label: string;
 }
 
@@ -154,6 +128,7 @@ export const describeViewConfig = (
   automaticLabel = fieldVisibilityMessages.en.automatic,
   rowHeightLabels = gridRowHeightMessages.en,
   showDefaultRowHeight = false,
+  groupSummaryLabels = gridGroupSummaryMessages.en,
 ): ViewConfigRule[] => {
   const value = (config ?? {}) as ViewConfigVO;
   const rules: ViewConfigRule[] = [];
@@ -238,6 +213,36 @@ export const describeViewConfig = (
       label: `${rowHeightLabels.title} · ${rowHeightLabels[preset]} (${getGridRowHeight(preset)}px)`,
     });
   }
+  for (const level of Array.isArray(value.groupBy) ? value.groupBy : []) {
+    if (!level || typeof level.fieldSlug !== "string") continue;
+    const direction = level.direction === "desc" ? "desc" : "asc";
+    const isCheckbox =
+      changeRequest.base?.fields.find((field) =>
+        level.fieldId ? field.id === level.fieldId : field.slug === level.fieldSlug,
+      )?.type === "checkbox";
+    const order = isCheckbox
+      ? direction === "desc"
+        ? groupSummaryLabels.orderCheckboxDesc
+        : groupSummaryLabels.orderCheckboxAsc
+      : direction === "desc"
+        ? groupSummaryLabels.orderSelectDesc
+        : groupSummaryLabels.orderSelectAsc;
+    rules.push({
+      key: `group:${level.fieldSlug}:${direction}`,
+      kind: "group",
+      label: `${groupSummaryLabels.groupBy} · ${getFieldName(changeRequest, level.fieldSlug)} · ${order}`,
+    });
+  }
+  for (const [slug, fn] of Object.entries(value.fieldSummaries ?? {}).sort(([a], [b]) =>
+    a.localeCompare(b),
+  )) {
+    if (!isViewSummaryFunction(fn)) continue;
+    rules.push({
+      key: `summary:${slug}:${fn}`,
+      kind: "summary",
+      label: `${groupSummaryLabels.summaryRule} · ${getFieldName(changeRequest, slug)} · ${summaryMenuLabel(groupSummaryLabels, fn)}`,
+    });
+  }
   return rules;
 };
 
@@ -259,7 +264,10 @@ export function ViewConfigRuleLine({
           ? messages.operationDiff.width
           : rule.kind === "order"
             ? messages.operationDiff.order
-            : rule.kind === "policy" || rule.kind === "density"
+            : rule.kind === "policy" ||
+                rule.kind === "density" ||
+                rule.kind === "group" ||
+                rule.kind === "summary"
               ? messages.operationDiff.configuration
               : messages.operationDiff.field;
   const marker =
@@ -301,6 +309,8 @@ export function ViewConfigRules({
     messages,
     fieldVisibilityMessages[locale].automatic,
     gridRowHeightMessages[locale],
+    false,
+    gridGroupSummaryMessages[locale],
   );
   return (
     <div className="flex flex-col gap-1.5">
@@ -335,6 +345,7 @@ export function ViewConfigDiff({
       automaticLabel,
       gridRowHeightMessages[locale],
       showRowHeight,
+      gridGroupSummaryMessages[locale],
     );
   const beforeRules = describeConfig(before);
   const afterRules = describeConfig(after);
@@ -388,6 +399,7 @@ export function FieldValueDiff({
   change,
   field,
   fieldUsers,
+  records,
   messages,
 }: {
   change: OperationFieldChange;
@@ -399,6 +411,7 @@ export function FieldValueDiff({
    * an id-based label rather than a name.
    */
   fieldUsers?: Record<string, UserRefVO>;
+  records?: RecordVO[];
   messages: CoreI18nMessages;
 }) {
   // A drive value is reviewed as the PATHS of its files: a file that only
@@ -408,7 +421,7 @@ export function FieldValueDiff({
     drive ? (
       <DriveFieldPathList value={value} />
     ) : (
-      <FieldValuePreview field={field} fieldUsers={fieldUsers} value={value} />
+      <FieldValuePreview field={field} fieldUsers={fieldUsers} records={records} value={value} />
     );
   if (change.status === "added") {
     return <div className="text-sm">{preview(change.afterValue)}</div>;
@@ -450,6 +463,7 @@ export function OperationFieldChangeRow({
   change,
   changeRequest,
   fieldUsers,
+  records,
   operation,
 }: {
   change: OperationFieldChange;
@@ -461,6 +475,7 @@ export function OperationFieldChangeRow({
    * an id-based label rather than a name.
    */
   fieldUsers?: Record<string, UserRefVO>;
+  records?: RecordVO[];
   operation: OperationVO;
 }) {
   const messages = useCoreI18n();
@@ -499,6 +514,7 @@ export function OperationFieldChangeRow({
             change={change}
             field={baseField}
             fieldUsers={fieldUsers}
+            records={records}
             messages={messages}
           />
         )}
@@ -639,6 +655,7 @@ export function FieldOrderDiff({
 export function OperationFieldChanges({
   changeRequest,
   fieldUsers,
+  records,
   operation,
 }: {
   changeRequest: ChangeRequestVO;
@@ -649,6 +666,7 @@ export function OperationFieldChanges({
    * an id-based label rather than a name.
    */
   fieldUsers?: Record<string, UserRefVO>;
+  records?: RecordVO[];
   operation: OperationVO;
 }) {
   const messages = useCoreI18n();
@@ -671,6 +689,7 @@ export function OperationFieldChanges({
           change={change}
           changeRequest={changeRequest}
           fieldUsers={fieldUsers}
+          records={records}
           key={change.slug}
           operation={operation}
         />

@@ -3,16 +3,11 @@ import "server-only";
 import {
   EMBED_SECURITY_HEADERS,
   embedSecurityHeaders,
-  encodeEmbedCapability,
   isValidEmbedPublicId,
   parseEmbedIframeCapability,
   readEmbedCapabilityCookie,
 } from "./capability";
-import {
-  renderEmbedDocument,
-  renderExpiredEmbedDocument,
-  renderUnavailableEmbedDocument,
-} from "./embed-document";
+import { renderExpiredEmbedDocument, renderUnavailableEmbedDocument } from "./embed-document";
 import { resolveEmbedLink, resolveExpiredEmbedLink } from "./logic";
 
 const htmlResponse = (markup: string, status: number, headers: Record<string, string>) =>
@@ -40,8 +35,6 @@ export interface EmbedRouteOptions {
    * request's own origin.
    */
   redirectBase?: (request: Request) => string;
-  /** Host RPC prefix. Cloud mounts open-core under `/api/rpc/core`; Desktop uses `/api/rpc`. */
-  rpcBasePath?: string;
 }
 
 /**
@@ -50,13 +43,12 @@ export interface EmbedRouteOptions {
  *
  * Resolves the capability (an iframe passes `?token=` directly; a top-level
  * visit arrives with the HttpOnly cookie the proxy exchanged it for), then
- * either renders the node document inline or hands off to the typed subroute
- * that owns richer rendering.
+ * hands off to the typed subroute that renders the target. Only the neutral
+ * "unavailable" and "expired" states are answered here.
  */
 export const createEmbedRouteHandler = ({
   withHostContext = (fn) => fn(),
   redirectBase = (request) => new URL(request.url).origin,
-  rpcBasePath = "/api/rpc",
 }: EmbedRouteOptions = {}) => {
   return async (
     request: Request,
@@ -86,8 +78,10 @@ export const createEmbedRouteHandler = ({
       });
     }
 
-    // Change Requests, record details and AirApps each have a subroute that
-    // renders them properly; only plain node documents are served inline.
+    // Every target renders on a typed subroute: Change Requests and record
+    // details, AirApps in their runtime, and every other node type on `node`,
+    // which mounts the workbench's own Node Detail components — so an embed
+    // shows exactly what the node looks like inside Busabase.
     const handOffTo = (subroute: string) => {
       const target = new URL(
         `/embed/${encodeURIComponent(publicId)}/${subroute}`,
@@ -106,18 +100,6 @@ export const createEmbedRouteHandler = ({
     };
 
     if (embed.type !== "node") return handOffTo(embed.type);
-    if (embed.detail.type === "airapp") return handOffTo("airapp");
-
-    return htmlResponse(
-      renderEmbedDocument(embed.detail, embed.targetName, {
-        embedCapability: encodeEmbedCapability(publicId, capability.secret),
-        rpcBasePath,
-      }),
-      200,
-      {
-        ...embedSecurityHeaders(embed.framePolicy),
-        "x-robots-tag": "noindex, nofollow",
-      },
-    );
+    return handOffTo(embed.node.type === "airapp" ? "airapp" : "node");
   };
 };

@@ -305,7 +305,11 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
       mainPreviewFrame(page).getByRole("button", { name: "Clicked 2 times" }),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: "Enter fullscreen" }).click();
+    await page
+      .locator("[data-airapp-preview-controls]")
+      .getByRole("button", { name: "More actions", exact: true })
+      .click();
+    await page.getByRole("menuitem", { name: "Enter fullscreen", exact: true }).click();
     const fullscreen = fullscreenPreview(page);
     await expect(fullscreen).toBeVisible();
     await expect(page).toHaveURL(
@@ -337,7 +341,11 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await expect(fullscreen).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
 
-    await page.getByRole("button", { name: "Enter fullscreen" }).click();
+    await page
+      .locator("[data-airapp-preview-controls]")
+      .getByRole("button", { name: "More actions", exact: true })
+      .click();
+    await page.getByRole("menuitem", { name: "Enter fullscreen", exact: true }).click();
     await expect(fullscreen).toBeVisible();
 
     // The app stays interactive while fullscreen, and the Exit button still
@@ -410,7 +418,11 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await expect(panel).toHaveAttribute("data-layout", "maximized");
     await expect(panel).toHaveCSS("position", "fixed");
 
-    await panel.getByRole("button", { name: "Enter fullscreen" }).click();
+    await panel
+      .locator("[data-airapp-preview-controls]")
+      .getByRole("button", { name: "More actions", exact: true })
+      .click();
+    await page.getByRole("menuitem", { name: "Enter fullscreen", exact: true }).click();
     const fullscreen = fullscreenPreview(page);
     await expect(fullscreen).toBeVisible();
     // Fullscreen is `position: fixed`, and this is the nastiest nesting for

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createPageMetadataHelpers,
   ENGLISH_ONLY_LOCALES,
@@ -534,6 +534,148 @@ describe("absoluteTitle", () => {
 
     expect(metadata.openGraph.title).toBe("GPT-6 Astra for Agent Workflows | Buda");
     expect(metadata.twitter.title).toBe("GPT-6 Astra for Agent Workflows | Buda");
+  });
+});
+
+describe("optional locale-aware document title identity", () => {
+  const config = {
+    baseUrl: "https://example.com",
+    defaultLocale: "en",
+    supportedLocales: LOCALES,
+    defaultImageUrl: "https://example.com/og.png",
+    siteName: "Site",
+    openGraphLocales: { en: "en_US", "zh-CN": "zh_CN", "zh-TW": "zh_TW", ja: "ja_JP" },
+  } as const;
+  const localized = createPageMetadataHelpers({
+    ...config,
+    titleBrandNames: (locale) => ["Acme", locale === "zh-CN" ? "Acme 艾克米" : "Acme"],
+  });
+  const page = (title: string, lang = "en") =>
+    localized.generatePageMetadata({ title, description: "D", path: "/guide", lang }).title;
+
+  it.each([
+    ["Guide", "en", "Guide | Acme"],
+    ["Acme guide", "en", "Acme guide"],
+    ["ACME guide", "en", "ACME guide"],
+    ["Guide | Acme", "en", "Guide | Acme"],
+    ["说明", "zh-CN", "说明 | Acme 艾克米"],
+    ["Acme说明", "zh-CN", "Acme说明 | 艾克米"],
+    ["艾克米说明", "zh-CN", "艾克米说明 | Acme"],
+    ["Acme 艾克米说明", "zh-CN", "Acme 艾克米说明"],
+    ["Acme艾克米说明", "zh-CN", "Acme艾克米说明"],
+    ["Acme說明", "zh-TW", "Acme說明"],
+    ["說明", "zh-TW", "說明 | Acme"],
+  ])("completes only missing identity parts: %s (%s)", (title, lang, expected) =>
+    expect(page(title, lang)).toEqual({ absolute: expected }),
+  );
+
+  it("uses requested-locale identity while preserving every non-title metadata field", () => {
+    const legacy = createPageMetadataHelpers(config);
+    const base = {
+      title: "Acme reference",
+      description: "Original description",
+      path: "/guide",
+      lang: "zh-CN",
+      type: "article" as const,
+      imageUrl: "https://example.com/cover.png",
+      modifiedTime: "2026-11-25T01:00:00.000Z",
+      keywords: ["original"],
+    };
+    const content = { ...base, canonicalLang: "en", contentLang: "en", availableLocales: ["en"] };
+    const translated = { ...base, translatedLocales: ["en"] };
+    for (const [actual, before] of [
+      [localized.generatePageMetadata(base), legacy.generatePageMetadata(base)],
+      [localized.generateContentPageMetadata(content), legacy.generateContentPageMetadata(content)],
+      [
+        localized.generateTranslatedPageMetadata(translated),
+        legacy.generateTranslatedPageMetadata(translated),
+      ],
+    ]) {
+      expect(actual.title).toEqual({ absolute: "Acme reference | 艾克米" });
+      expect({ ...actual, title: undefined }).toEqual({ ...before, title: undefined });
+      expect(actual.openGraph.title).toBe(base.title);
+      expect(actual.twitter.title).toBe(base.title);
+      expect(actual.openGraph.images[0].alt).toBe(base.title);
+    }
+    expect(localized.generateContentPageMetadata(content).alternates.canonical).toBe(
+      "https://example.com/guide",
+    );
+    expect(localized.generateContentPageMetadata(content).openGraph.locale).toBe("en_US");
+  });
+
+  it("honors an explicit complete title without reading brand callbacks", () => {
+    const names = vi.fn(() => ["Acme", "Acme 艾克米"]),
+      complete = createPageMetadataHelpers({ ...config, titleBrandNames: names });
+    const base = {
+      title: "Editorial title",
+      description: "D",
+      path: "/x",
+      lang: "zh-CN",
+      absoluteTitle: true,
+    };
+    for (const metadata of [
+      complete.generatePageMetadata(base),
+      complete.generateContentPageMetadata({ ...base, availableLocales: ["en", "zh-CN"] }),
+      complete.generateTranslatedPageMetadata({ ...base, translatedLocales: ["en"] }),
+    ])
+      expect(metadata.title).toEqual({ absolute: base.title });
+    expect(names).not.toHaveBeenCalled();
+  });
+
+  it("preserves legacy template and brandedTitle behavior for omitted or empty lists", () => {
+    const withLegacyBrand = { ...config, brandName: "Buda" },
+      before = createPageMetadataHelpers(withLegacyBrand);
+    for (const titleBrandNames of [() => [], () => [" ", ""]]) {
+      const empty = createPageMetadataHelpers({ ...withLegacyBrand, titleBrandNames });
+      for (const title of ["Pricing", "Buda guide", "buda guide", "Budapest"]) {
+        const input = { title, description: "D", path: "/x", lang: "en" };
+        expect(empty.generatePageMetadata(input)).toEqual(before.generatePageMetadata(input));
+        expect(empty.brandedTitle(title)).toBe(before.brandedTitle(title));
+      }
+    }
+    expect(
+      createPageMetadataHelpers({
+        ...withLegacyBrand,
+        titleBrandNames: () => ["Buda", "Buda 布达"],
+      }).brandedTitle("Pricing"),
+    ).toBe("Pricing | Buda");
+  });
+
+  it("trims and deduplicates primary, full labels and repeated aliases", () => {
+    const repeated = createPageMetadataHelpers({
+      ...config,
+      titleBrandNames: () => [" Acme ", "ACME", " Acme 艾克米 ", " 艾克米 ", ""],
+    });
+    expect(
+      repeated.generatePageMetadata({ title: "Guide", description: "D", path: "/x", lang: "en" })
+        .title,
+    ).toEqual({ absolute: "Guide | Acme 艾克米" });
+  });
+
+  it("matches Latin boundaries and literal punctuation without deleting topic text", () => {
+    const bounded = createPageMetadataHelpers({ ...config, titleBrandNames: () => ["Buda"] });
+    for (const title of ["Budapest", "myBuda", "Buda2"])
+      expect(
+        bounded.generatePageMetadata({ title, description: "D", path: "/x", lang: "en" }).title,
+      ).toEqual({ absolute: `${title} | Buda` });
+    const punctuated = createPageMetadataHelpers({
+      ...config,
+      titleBrandNames: () => ["Atlas+.ai", "Atlas+.ai 星图"],
+    });
+    const title = (value: string) =>
+      punctuated.generatePageMetadata({ title: value, description: "D", path: "/x", lang: "en" })
+        .title;
+    expect(title("ATLAS+.AI中文")).toEqual({ absolute: "ATLAS+.AI中文 | 星图" });
+    expect(title("Atlasxxai中文")).toEqual({ absolute: "Atlasxxai中文 | Atlas+.ai 星图" });
+    expect(title("Atlas+.ai星图中文")).toEqual({ absolute: "Atlas+.ai星图中文" });
+    const unrelated = createPageMetadataHelpers({
+      ...config,
+      titleBrandNames: () => ["Buda", "Budapest"],
+    });
+    expect(
+      unrelated.generatePageMetadata({ title: "Buda", description: "D", path: "/x", lang: "en" })
+        .title,
+    ).toEqual({ absolute: "Buda | Budapest" });
   });
 });
 

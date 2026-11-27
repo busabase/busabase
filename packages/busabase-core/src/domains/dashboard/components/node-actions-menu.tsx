@@ -75,6 +75,8 @@ import {
   BellOff,
   Globe,
   History,
+  Info,
+  MapPin,
   MoreHorizontal,
   Pencil,
   Settings,
@@ -85,6 +87,7 @@ import { type ReactNode, useContext, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
+import { useCopyLocator, useNodeLocator } from "../hooks/use-copy-locator";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { useCanManageEmbedLinks } from "./embed-link-section";
 import { NodeDeleteDialog } from "./file-tree-browser";
@@ -172,6 +175,11 @@ export function NodeActionsMenu({
   // so the level here is the host's real one — a Cloud viewer/editor correctly
   // gets `false` and never sees Share on an embed-only type.
   const canEmbedLink = useCanManageEmbedLinks({ type: "node", typeId: nodeId, nodeType });
+  // Below `sm` the topbar drops the Info and locator markers beside the node's
+  // name (see `topbar.tsx`) so the name keeps its room; these two phone-only
+  // items are where they went.
+  const locator = useNodeLocator({ nodeId, nodeName, nodeType });
+  const { copyLocator } = useCopyLocator();
   if (isAnon) {
     return null;
   }
@@ -247,6 +255,14 @@ export function NodeActionsMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem className="sm:hidden" onSelect={() => setSettings({ tab: "info" })}>
+            <Info className="mr-2 size-3.5" />
+            {messages.nodeDetail.details}
+          </DropdownMenuItem>
+          <DropdownMenuItem className="sm:hidden" onSelect={() => void copyLocator(locator)}>
+            <MapPin className="mr-2 size-3.5" />
+            {messages.agentPrompts.copyLocator}
+          </DropdownMenuItem>
           {canOpenSettings && (
             <DropdownMenuItem onSelect={() => setSettings({ tab: "general" })}>
               <Settings className="mr-2 size-3.5" />

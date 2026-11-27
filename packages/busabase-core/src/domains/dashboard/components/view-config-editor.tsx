@@ -228,7 +228,7 @@ export function ViewConfigToolbar({
   return (
     <div
       aria-label={messages.base.viewControlsTitle}
-      className="@container/view-controls mb-3 flex h-7 min-w-0 items-center gap-1.5 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:gap-0"
+      className="@container/view-controls relative mb-3 flex h-7 min-w-0 items-center gap-1.5 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:gap-0"
       data-testid="view-control-toolbar"
       role="toolbar"
     >

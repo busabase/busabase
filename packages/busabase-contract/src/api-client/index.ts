@@ -53,6 +53,7 @@ import type {
   DriveVO,
   ListAgentTasksDTO,
   NodeVO,
+  RecordRevertPreviewVO,
   RecordVO,
   SearchResponseVO,
   SkillReadFileVO,
@@ -228,6 +229,8 @@ export interface BusabaseDashboardApiClient {
     pageSize?: number;
     /** Count `total` only this far; a Kanban column needs just `page * pageSize + 1`. */
     totalLimit?: number;
+    /** `table` replaces oversized values with omission markers, as the grid's page read does. */
+    listMode?: "full" | "table";
   }) => Promise<{
     records: RecordVO[];
     total: number;
@@ -449,6 +452,7 @@ export interface BusabaseDashboardApiClient {
     baseId: string,
     payload: {
       fieldId: string;
+      name?: BaseVO["fields"][number]["name"];
       newType: BaseVO["fields"][number]["type"];
       /**
        * Only meaningful when converting INTO select/multiselect. `auto_create`
@@ -612,6 +616,30 @@ export interface BusabaseDashboardApiClient {
   createRestoreRecordChangeRequest: (
     recordId: string,
     payload: { submittedBy?: string; message?: string; autoMerge?: boolean },
+  ) => Promise<RecordUpdateChangeRequestResult>;
+  /**
+   * What rolling a record back to before one of its change requests would do —
+   * the undone change requests, each field set back, and pending ones left
+   * alone. Read-only; throws (409, naming the field) when it is not possible.
+   */
+  previewRecordRevert: (
+    recordId: string,
+    toBeforeChangeRequestId: string,
+  ) => Promise<RecordRevertPreviewVO>;
+  /**
+   * Submit that revert as one new change request. Same review gate as any
+   * record edit: it lands immediately with write access, otherwise it waits.
+   */
+  createRevertRecordChangeRequest: (
+    recordId: string,
+    payload: {
+      toBeforeChangeRequestId: string;
+      /** From the preview; a changed record is then refused (409 `plan_changed`). */
+      expectedPlanFingerprint?: string;
+      submittedBy?: string;
+      message?: string;
+      autoMerge?: boolean;
+    },
   ) => Promise<RecordUpdateChangeRequestResult>;
   /**
    * Dry-run "Install from GitHub" — the server fetches the repo, validates the
@@ -902,6 +930,10 @@ export const createBusabaseRestApiClient = (
     // the endpoint restored the record and the facade then threw on the way back.
     createRestoreRecordChangeRequest: (recordId, payload) =>
       client.records.changeRequest({ recordId, operation: "restore", ...payload }),
+    previewRecordRevert: (recordId, toBeforeChangeRequestId) =>
+      client.records.revertPreview({ recordId, toBeforeChangeRequestId }),
+    createRevertRecordChangeRequest: (recordId, payload) =>
+      client.records.changeRequest({ recordId, operation: "revert", ...payload }),
     planInstallFromGithub: (input) => client.install.planFromGithub(input),
     installFromGithub: (input) => client.install.fromGithub(input),
     installFromGithubStream: (input) => client.install.fromGithubStream(input),

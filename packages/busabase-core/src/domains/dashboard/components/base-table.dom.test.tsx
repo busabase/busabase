@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { BaseFieldVO, BaseVO, RecordVO, ViewVO } from "busabase-contract/types";
-import type { ComponentProps, ReactNode } from "react";
+import { type ComponentProps, type ReactNode, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 import { EMPTY_WHITEBOARD_FIELD_VALUE } from "../../base/utils/whiteboard-value";
@@ -87,6 +87,13 @@ const record: RecordVO = {
   },
 };
 
+// The dashboard always renders the table under a QueryClient; the summary
+// footer reads through it even before any summary is set.
+function QueryWrapper({ children }: { children: ReactNode }) {
+  const [client] = useState(() => new QueryClient());
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
 function renderTable(props: Partial<ComponentProps<typeof BusaBaseTable>> = {}) {
   return render(
     <CoreI18nProvider locale="en">
@@ -103,7 +110,15 @@ function renderTable(props: Partial<ComponentProps<typeof BusaBaseTable>> = {}) 
         {...props}
       />
     </CoreI18nProvider>,
+    { wrapper: QueryWrapper },
   );
+}
+
+// Native record-link behavior is exercised on a secondary preview. The primary
+// field is plain text, with record opening provided by its expand button.
+function renderSecondaryPreview(onOpenRecord?: (record: RecordVO) => void) {
+  const previewBase = { ...base, fields: [field("name"), field("title")] };
+  return renderTable({ base: previewBase, onOpenRecord });
 }
 
 afterEach(() => {
@@ -375,9 +390,28 @@ describe("table record previews", () => {
     expect(result.container.querySelector('[data-new-field="true"]')).not.toBeNull();
   });
 
+  it("keeps navigation available for long primary values without a preview callback", () => {
+    const { container } = renderTable({
+      records: [
+        {
+          ...record,
+          headCommit: {
+            ...record.headCommit,
+            payload: { title: "x".repeat(TABLE_CELL_PREVIEW_MAX_CHARS + 100) },
+          },
+        },
+      ],
+    });
+    const primary = container.querySelector<HTMLElement>('[data-cell-field="title"]');
+    expect(primary?.querySelector("[data-grid-cell-text]")?.closest("a")).toBeNull();
+    const link = within(primary as HTMLElement).getByRole("link", { name: "View full content" });
+    expect(link.getAttribute("href")).toBe("/base/tasks/rec_task?space=connected");
+    expect(fireEvent.click(link)).toBe(true);
+  });
+
   it("opens the existing record link without navigating, including keyboard-generated clicks", () => {
     const onOpenRecord = vi.fn();
-    renderTable({ onOpenRecord });
+    renderSecondaryPreview(onOpenRecord);
     const link = screen.getByRole("link", { name: "Read the task" });
     expect(link.getAttribute("href")).toBe("/base/tasks/rec_task?space=connected");
     expect(fireEvent.click(link)).toBe(false);
@@ -393,7 +427,7 @@ describe("table record previews", () => {
     { button: 1 },
   ])("preserves native link activation for %j", (modifiers) => {
     const onOpenRecord = vi.fn();
-    renderTable({ onOpenRecord });
+    renderSecondaryPreview(onOpenRecord);
     expect(fireEvent.click(screen.getByRole("link", { name: "Read the task" }), modifiers)).toBe(
       true,
     );
@@ -401,13 +435,13 @@ describe("table record previews", () => {
   });
 
   it("keeps ordinary navigation when no preview callback is supplied", () => {
-    renderTable();
+    renderSecondaryPreview();
     expect(fireEvent.click(screen.getByRole("link", { name: "Read the task" }))).toBe(true);
   });
 
   it("does not override an already handled event or an explicit new-tab target", () => {
     const onOpenRecord = vi.fn();
-    renderTable({ onOpenRecord });
+    renderSecondaryPreview(onOpenRecord);
     const link = screen.getByRole("link", { name: "Read the task" });
     const handled = new MouseEvent("click", { bubbles: true, cancelable: true });
     handled.preventDefault();
@@ -448,9 +482,9 @@ describe("table record previews", () => {
     const row = container.querySelector('[data-record-id="rec_task"]');
     expect(row).not.toBeNull();
     const links = within(row as HTMLElement).getAllByRole("link");
-    expect(links).toHaveLength(values.length);
+    expect(links).toHaveLength(values.length - 1);
     for (const link of links) expect(fireEvent.click(link)).toBe(false);
-    expect(onOpenRecord).toHaveBeenCalledTimes(values.length);
+    expect(onOpenRecord).toHaveBeenCalledTimes(values.length - 1);
     expect(onOpenRecord).toHaveBeenLastCalledWith(richRecord);
   });
 
@@ -845,10 +879,10 @@ describe("table record previews", () => {
       archivedRecords: [archived],
       onOpenRecord,
     });
-    fireEvent.click(screen.getByRole("link", { name: "Read the task" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open: Read the task" }));
     expect(onOpenRecord).toHaveBeenLastCalledWith(expect.objectContaining({ id: "rec_0" }));
     fireEvent.click(screen.getByTestId("archived-records-menu-item"));
-    fireEvent.click(screen.getByRole("link", { name: "Archived task" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open: Archived task" }));
     expect(onOpenRecord).toHaveBeenLastCalledWith(archived);
   });
 });

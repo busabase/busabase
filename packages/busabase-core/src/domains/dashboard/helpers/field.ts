@@ -12,11 +12,11 @@ import {
 } from "../../base/utils/date-value";
 import { withDrivePaths } from "../../base/utils/drive-field-value";
 import { resolveEmbedPreview } from "../../base/utils/embed";
+import { getRelationRecordIds } from "../../base/utils/relation-record-ids";
 import {
   EMPTY_WHITEBOARD_FIELD_VALUE,
   parseWhiteboardFieldValue,
 } from "../../base/utils/whiteboard-value";
-import { isListPayloadOmitted } from "../utils/list-payload-preview";
 import { fieldValueToString, formatNumberField, formatOpaqueUserId } from "./format";
 import { safeFetchableUrl, stripHtmlTags } from "./html";
 import type { FieldChip } from "./view-types";
@@ -222,16 +222,7 @@ export const fieldPreviewText = (
   return type === "html" ? stripHtmlTags(text) : text;
 };
 
-export const getRelationRecordIds = (value: unknown) => {
-  if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === "string" && item.length > 0);
-  }
-  // A list-omission marker stands in for the ids; it is never an id itself.
-  if (typeof value === "string" && value.length > 0 && !isListPayloadOmitted(value)) {
-    return [value];
-  }
-  return [];
-};
+export { getRelationRecordIds };
 
 export const getFetchableRelationRecordIds = (records: RecordVO[], visibleBaseIds: Set<string>) => [
   ...new Set(

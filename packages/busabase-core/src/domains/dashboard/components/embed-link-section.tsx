@@ -500,9 +500,9 @@ export function EmbedLinkSection({
             label={t.linkLabel}
             onCopied={() => markCreatedValueCopied("link")}
             testId="embed-link-created-url"
-            value={created.url}
+            value={created.iframeUrl}
           />
-          <ShareLinkActions title={created.targetName} url={created.url} />
+          <ShareLinkActions title={created.targetName} url={created.iframeUrl} />
           <CopyableValue
             copyLabel={t.copyIframe}
             label={t.iframeLabel}

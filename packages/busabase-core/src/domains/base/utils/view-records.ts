@@ -7,7 +7,7 @@ import type {
   ViewFilterConjunction,
   ViewFilterVO,
 } from "busabase-contract/types";
-import { isViewFilterGroup } from "busabase-contract/types";
+import { GROUPABLE_FIELD_TYPES, isViewFilterGroup } from "busabase-contract/types";
 import { getDateFieldOptions, getDateFieldSortKey } from "./date-value";
 import { resolveEmbedPreview } from "./embed";
 
@@ -198,8 +198,28 @@ export const getViewFieldPreviewText = (field: BaseFieldVO | undefined, value: u
  * two distinct long values can collide into one bucket), and so is date
  * (bucketing by day depends on the VIEWER's timezone, which the server doesn't
  * have — the same reasoning that keeps date out of the exact filter pushdown).
+ *
+ * Owned by the contract so the dashboard's group picker offers exactly these.
  */
-export const GROUPABLE_FIELD_TYPES: ReadonlySet<string> = new Set(["select", "checkbox"]);
+export { GROUPABLE_FIELD_TYPES };
+
+/**
+ * Whether a field's value counts as present — THE test behind the `not_empty`
+ * (and, negated, `is_empty`) view filter operator, and behind the `filled`
+ * aggregate of `records.groupBy`. One function so "3 filled" in a grid footer
+ * can never disagree with what a `not_empty` filter on the same field shows.
+ */
+export const isViewValueFilled = (field: BaseFieldVO, value: unknown): boolean => {
+  const text = getViewFieldPreviewText(field, value);
+  return text.length > 0 && text !== "-";
+};
+
+/**
+ * Whether a checkbox value is checked — THE test behind the `is_true` view
+ * filter and the `checked` aggregate of `records.groupBy`, so a grid footer's
+ * "3 checked" always equals what an `is_true` filter on the field shows.
+ */
+export const isViewValueChecked = (value: unknown): boolean => value === true || value === "true";
 
 /**
  * Field types that project into the `valueDate` column (mirrors
@@ -272,9 +292,9 @@ const recordMatchesViewFilter = (
     }
     return text === expected;
   }
-  if (filter.operator === "not_empty") return text.length > 0 && text !== "-";
-  if (filter.operator === "is_empty") return text.length === 0 || text === "-";
-  if (filter.operator === "is_true") return value === true || value === "true";
+  if (filter.operator === "not_empty") return isViewValueFilled(field, value);
+  if (filter.operator === "is_empty") return !isViewValueFilled(field, value);
+  if (filter.operator === "is_true") return isViewValueChecked(value);
   if (filter.operator === "is_false") {
     return value === false || value === "false" || value === null || value === undefined;
   }

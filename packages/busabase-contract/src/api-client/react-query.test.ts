@@ -66,4 +66,32 @@ describe("createBusabaseORPCClient batching", () => {
     expect(batchRequest).toBeDefined();
     expect(batchRequest?.body).not.toContain("agents/sessions/subscribe");
   });
+
+  it("sends a Base record page on its own so the response can be compressed", async () => {
+    const requests: Array<{ body: string; path: string }> = [];
+    const client = createBusabaseORPCClient("http://localhost/api/rpc", {
+      fetch: async (request) => {
+        requests.push({
+          body: await request.clone().text(),
+          path: new URL(request.url).pathname,
+        });
+        return new Response("", { status: 500 });
+      },
+    });
+
+    await Promise.allSettled([
+      client.records.listPage({ baseId: "bse_batch_regression", page: 1, pageSize: 1000 }),
+      client.nodes.list({}),
+      client.bases.list({}),
+    ]);
+
+    expect(requests).toHaveLength(2);
+
+    const pageRequest = requests.find((request) => request.path.includes("records/listPage"));
+    expect(pageRequest?.path).toBe("/api/rpc/records/listPage");
+
+    const batchRequest = requests.find((request) => request.path.endsWith("/__batch__"));
+    expect(batchRequest).toBeDefined();
+    expect(batchRequest?.body).not.toContain("records/listPage");
+  });
 });

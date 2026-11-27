@@ -109,6 +109,31 @@ describe("records.listPage dateRanges (real PGLite)", () => {
     expect(titles(combined)).toEqual(["crosses the end"]);
   });
 
+  it("intersects find with overlapping dates before sorting, counting and paging", async () => {
+    const input = {
+      baseId,
+      find: { query: "CROSSES" },
+      dateRanges: [
+        { fieldSlug: "start", lt: TO },
+        { fieldSlug: "end", gte: FROM },
+      ],
+      sort: { fieldSlug: "start", fieldType: "date" as const, direction: "asc" as const },
+      pageSize: 1,
+    };
+    const first = await client.records.listPage(input);
+    const second = await client.records.listPage({ ...input, page: 2 });
+    expect(first.total).toBe(2);
+    expect(first.totalPages).toBe(2);
+    expect(titles(first)).toEqual(["crosses the start"]);
+    expect(titles(second)).toEqual(["crosses the end"]);
+    const narrowed = await client.records.listPage({
+      ...input,
+      filters: [{ fieldSlug: "title", operator: "equals", value: "crosses the end" }],
+    });
+    expect(narrowed.total).toBe(1);
+    expect(titles(narrowed)).toEqual(["crosses the end"]);
+  });
+
   it("refuses a range with no bound, an unknown field or a field that is not a date", async () => {
     await expect(
       client.records.listPage({ baseId, dateRanges: [{ fieldSlug: "start" }] }),

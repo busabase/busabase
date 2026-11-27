@@ -23,11 +23,13 @@ import {
   categoryVOSchema,
   type PageSummaryVO,
   type PageVO,
+  type PostSummaryVO,
   type PostVO,
   pageFieldsDTOSchema,
   pageSummaryVOSchema,
   pageVOSchema,
   postFieldsDTOSchema,
+  postSummaryVOSchema,
   postVOSchema,
   type TagVO,
   tagFieldsDTOSchema,
@@ -87,13 +89,18 @@ export interface BusabaseCmsPageCollection extends BusabaseCmsPathCollection<Pag
   listSummaries: () => Promise<PageSummaryVO[]>;
 }
 
+export interface BusabaseCmsPostCollection extends BusabaseCmsPathCollection<PostVO> {
+  /** Index-only Posts without bodies or media; not suitable for rendering Blog cards. */
+  listSummaries: () => Promise<PostSummaryVO[]>;
+}
+
 export interface BusabaseCmsTaxonomyCollection<T> {
   list: () => Promise<T[]>;
   getBySlug: (slug: string) => Promise<T | null>;
 }
 
 export interface BusabaseCms {
-  posts: BusabaseCmsPathCollection<PostVO>;
+  posts: BusabaseCmsPostCollection;
   pages: BusabaseCmsPageCollection;
   categories: BusabaseCmsTaxonomyCollection<CategoryVO>;
   tags: BusabaseCmsTaxonomyCollection<TagVO>;
@@ -219,6 +226,19 @@ export const mapPublishedPostRecord = (record: BusabaseCmsRecord): PostVO | null
     updatedAt: fields["updated-at"] ?? record.updatedAt,
     rawFields: record.headCommit.payload,
   });
+};
+
+const POST_SUMMARY_OMITTED_RAW_FIELDS = new Set(["body", "attachments", "cover-image"]);
+
+export const mapPublishedPostSummaryRecord = (record: BusabaseCmsRecord): PostSummaryVO | null => {
+  // Validate through the same mapper so index membership never relaxes the Post contract.
+  const post = mapPublishedPostRecord(record);
+  if (!post) return null;
+  const { body: _body, attachments: _attachments, coverImage: _coverImage, ...summary } = post;
+  const rawFields = Object.fromEntries(
+    Object.entries(post.rawFields).filter(([key]) => !POST_SUMMARY_OMITTED_RAW_FIELDS.has(key)),
+  );
+  return postSummaryVOSchema.parse({ ...summary, rawFields });
 };
 
 export const mapPublishedPageRecord = (record: BusabaseCmsRecord): PageVO | null => {
@@ -476,6 +496,13 @@ export const createBusabaseCms = (options: BusabaseCmsOptions = {}): BusabaseCms
       "post",
       mapPublishedPostRecord,
     );
+  const listPostSummaries = async () =>
+    mapValidRecords(
+      resolved,
+      await listAllRecords(resolved, "posts"),
+      "post",
+      mapPublishedPostSummaryRecord,
+    );
   const listPages = async () =>
     mapValidRecords(
       resolved,
@@ -503,6 +530,7 @@ export const createBusabaseCms = (options: BusabaseCmsOptions = {}): BusabaseCms
   return {
     posts: {
       list: listPosts,
+      listSummaries: listPostSummaries,
       getByPath: (path) =>
         getSingleByField(
           resolved,

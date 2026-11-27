@@ -226,8 +226,12 @@ test.describe("mobile", () => {
         contentType: "image/png",
       });
 
+      // On a phone, fullscreen lives in the topbar's "•••" menu so the node's
+      // name keeps its room; the topbar button is desktop-only.
       const surface = mainSurface(page, type);
-      await page.getByRole("button", { name: "Enter fullscreen" }).click();
+      await expect(topbar.getByRole("button", { name: "Enter fullscreen" })).toBeHidden();
+      await topbar.getByRole("button", { name: "More actions" }).last().click();
+      await page.getByRole("menuitem", { name: "Enter fullscreen" }).click();
       await expect(surface).toHaveAttribute("data-preview-fullscreen", "true");
       await expectFullscreenCoverage(page, surface);
       await surface.getByRole("button", { name: "Exit fullscreen" }).click();

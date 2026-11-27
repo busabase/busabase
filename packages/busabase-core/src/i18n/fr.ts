@@ -1,4 +1,5 @@
 import type { CoreI18nMessages } from "./messages";
+import { siteEnvironmentMessages } from "./site-environment";
 
 export const dashboardFr: CoreI18nMessages = {
   lookup: lookupFr,
@@ -503,11 +504,17 @@ export const dashboardFr: CoreI18nMessages = {
     requireSignInHint:
       "Toute personne disposant du lien peut toujours ouvrir le formulaire ; seuls les visiteurs connectés peuvent l'envoyer.",
     passwordLabel: "Mot de passe",
-    passwordHint: "Laissez vide pour ne pas définir de mot de passe",
-    passwordPlaceholder: "Définir un mot de passe",
-    passwordSet:
-      "Un mot de passe est défini — saisissez-en un nouveau pour le changer, ou effacez-le",
-    passwordClear: "Supprimer le mot de passe",
+    passwordProtectionLabel: "Protection par mot de passe",
+    passwordProtectionHint: "Les visiteurs doivent saisir le mot de passe pour ouvrir ce lien.",
+    passwordChange: "Modifier",
+    passwordSave: "Enregistrer",
+    passwordCancel: "Annuler",
+    passwordLengthHint: "Utilisez entre 4 et 64 caractères.",
+    passwordLegacy:
+      "Un mot de passe est défini, mais il ne peut pas être affiché ici. Remplacez-le par un nouveau pour le voir et le copier.",
+    copyLinkAndPassword: "Copier le lien et le mot de passe",
+    linkAndPasswordCopied: "Lien et mot de passe copiés",
+    linkAndPasswordClipboard: "Lien : {url}\nMot de passe : {password}",
     expiryLabel: "Expire",
     expiryHint: "Le lien cesse automatiquement de fonctionner à l'heure sélectionnée.",
     expiryNever: "Jamais",
@@ -788,6 +795,8 @@ export const dashboardFr: CoreI18nMessages = {
       phone: "Aperçu sur votre téléphone",
       signIn:
         "Scannez cet aperçu privé et connectez-vous avec le même compte sur votre téléphone. Il ne s’agit pas du Site publié.",
+      sharedLink:
+        "Toute personne disposant de ce lien peut prévisualiser cette version pendant 24 heures au maximum. Gardez ce lien privé. Il s’agit d’un aperçu, pas du Site publié.",
       browserOnly:
         "Cet aperçu fonctionne dans ce navigateur. Préparez un aperçu Site avec « Publier le Site » pour l’ouvrir sur votre téléphone.",
       loopback:
@@ -798,7 +807,38 @@ export const dashboardFr: CoreI18nMessages = {
       openLink: "Ouvrir l’aperçu",
     },
     site: {
+      environment: siteEnvironmentMessages.fr,
       publishUpdate: "Publier la mise à jour",
+      logs: {
+        contentHiddenTitle: "Contenu des journaux masqué",
+        contentHiddenDescription:
+          "La configuration des secrets utilisée pour certains journaux ne peut pas être confirmée. Leurs messages et chemins sont masqués pour protéger les données sensibles. Les heures, méthodes et codes de statut restent visibles.",
+
+        button: "Journaux",
+        versionButton: "Voir les journaux de {version}",
+        title: "Journaux · {version}",
+        description:
+          "Journaux de production des périodes de déploiement de cette version sur les dernières 24 heures. Les requêtes pendant un changement de version peuvent se chevaucher.",
+        collectionHint:
+          "Les nouveaux déploiements collectent des journaux. Les anciennes versions peuvent ne pas en avoir ; publiez une mise à jour et attendez leur apparition.",
+        loading: "Chargement des journaux de production…",
+        loadFailed: "Impossible de charger les journaux. Réessayez.",
+        unavailable: "Les journaux de production ne sont pas disponibles sur ce déploiement.",
+        empty:
+          "Aucun journal pour les périodes de déploiement de cette version sur les dernières 24 heures.",
+        refresh: "Actualiser les journaux",
+        close: "Fermer les journaux",
+        checkedAt: "Consulté à {time}",
+        truncated:
+          "Les derniers journaux disponibles sont affichés. D’autres événements ou périodes de déploiement peuvent être omis.",
+        levels: {
+          debug: "Débogage",
+          info: "Information",
+          log: "Journal",
+          warn: "Avertissement",
+          error: "Erreur",
+        },
+      },
       releases: {
         busy: "Une publication est en cours. La liste sera actualisée automatiquement.",
         manage: "Gérer les publications",
@@ -830,6 +870,9 @@ export const dashboardFr: CoreI18nMessages = {
           "Scannez pour ouvrir le Site publié. Les modifications du brouillon non publiées ne sont pas incluses.",
       },
       publish: {
+        alreadyLive:
+          "Cette version est déjà en ligne. Modifiez l’application, puis préparez un nouvel aperçu pour publier une mise à jour.",
+        readyToPublish: "Aperçu vérifié. Cette version peut être publiée.",
         previewStale:
           "Les fichiers ont changé depuis cet aperçu. Créez ou actualisez l’aperçu du site avant de publier.",
         noPreview: "Créez un aperçu du site avant de publier.",
@@ -841,10 +884,10 @@ export const dashboardFr: CoreI18nMessages = {
           "L’aperçu dans le navigateur continue de fonctionner pendant la préparation du site.",
         checking: "Vérification du site…",
         checkFailed: "Impossible de vérifier le site. Réessayez.",
-        planRequired: "L’hébergement de sites est inclus à partir de {plan}.",
-        paidPlanRequired: "Cet espace a besoin d’un forfait payant pour héberger un site.",
+        planRequired: "La publication de sites web est incluse à partir de {plan}.",
+        paidPlanRequired: "Cet espace a besoin d’un forfait payant pour publier un site web.",
         upgradeHint:
-          "Préparez l’app, puis passez cet espace à un forfait supérieur pour la prévisualiser et la publier. Un lien d’aperçu du navigateur n’est pas un site toujours disponible.",
+          "Vous pouvez consulter un aperçu privé dès maintenant. Passez cet espace à un forfait supérieur pour publier un site web toujours disponible.",
         prepareTitle: "Préparer la version web",
         prepareHint:
           "Demandez à votre agent de préparer une version web. Des modifications du code peuvent être nécessaires avant publication.",
@@ -858,7 +901,7 @@ export const dashboardFr: CoreI18nMessages = {
         refreshPreview: "Actualiser l’aperçu du site",
         previewTitle: "Aperçu privé du site",
         publishConsent:
-          "La version vérifiée sera publiée. Toute personne disposant de l’adresse pourra utiliser le site, y compris les données et les actions exposées par son code.",
+          "Toute personne disposant de l’adresse du Site peut accéder à cette version et aux données et actions exposées.",
       },
       statusNotLive: "Hors ligne",
       statusLive: "En ligne",
@@ -895,7 +938,7 @@ export const dashboardFr: CoreI18nMessages = {
         guideNameHint:
           "Indiquez la partie avant votre domaine racine, par exemple shop pour shop.company.com. Certains fournisseurs demandent le nom complet.",
         guideStepCheck:
-          "Revenez ici et cliquez sur « {check} ». La propagation DNS peut prendre de quelques minutes à quelques heures ; le HTTPS est ensuite configuré automatiquement. Si un enregistrement TXT de vérification est aussi nécessaire, il s’affichera ici après l’ajout du domaine.",
+          "Une fois le CNAME de routage résolu, Cloudflare vérifie automatiquement le nom d’hôte et prépare HTTPS. Cliquez sur « {check} » pour voir le statut ; les changements DNS peuvent prendre du temps.",
         guideRootDomain:
           "Vous voulez utiliser un domaine racine comme company.com ? Cela ne fonctionne que si votre fournisseur DNS accepte un CNAME à la racine (aplatissement CNAME, ALIAS ou ANAME ; Cloudflare le permet). Sinon, utilisez un sous-domaine comme www ou shop.",
         guideLink: "Voir le guide de configuration",
@@ -912,7 +955,7 @@ export const dashboardFr: CoreI18nMessages = {
         adding: "Ajout…",
         pending: "Configuration en attente",
         pendingDnsHint:
-          "Ajoutez les enregistrements ci-dessous chez votre fournisseur DNS, puis vérifiez à nouveau. Les changements DNS peuvent prendre du temps.",
+          "Ajoutez le CNAME de routage chez votre fournisseur DNS, puis vérifiez à nouveau. Les changements DNS peuvent prendre du temps.",
         pendingHttpsHint:
           "La propriété du domaine est vérifiée. HTTPS est en préparation ; vérifiez à nouveau bientôt.",
         active: "Connecté",
@@ -928,8 +971,11 @@ export const dashboardFr: CoreI18nMessages = {
           "check-failed": "Impossible de vérifier ce domaine pour le moment. Vérifiez à nouveau.",
         },
         offlineHint: "Le site est hors ligne. Toutes ses adresses affichent une page introuvable.",
+        advancedVerification: "Vérification avancée",
+        advancedHint:
+          "Ces vérifications facultatives de propriété et de certificat servent aux migrations ou avant de basculer le trafic. Pour un sous-domaine normal, commencez par le CNAME de routage ci-dessus.",
         dnsInstructions:
-          "Ajoutez ces enregistrements chez votre fournisseur DNS. Conservez les autres enregistrements nécessaires à votre domaine. Le proxy Cloudflare est pris en charge une fois le routage vers le site vérifié.",
+          "Ajoutez ce CNAME chez votre fournisseur DNS, puis vérifiez à nouveau. Le proxy Cloudflare est pris en charge une fois la route du site vérifiée.",
         dnsName: "Nom",
         dnsValue: "Valeur / cible",
         httpInstructions:
@@ -1744,6 +1790,7 @@ export const dashboardFr: CoreI18nMessages = {
       "Saisissez quelques caractères pour rechercher dans le contenu des enregistrements et des fichiers sur cet onglet.",
   },
   trash: {
+    deletedAt: "Supprimé",
     title: "Corbeille",
     body: "Les éléments archivés sont masqués de la barre latérale. Restaurez-les pour les réactiver.",
     bases: "Bases",
@@ -1795,6 +1842,8 @@ export const dashboardFr: CoreI18nMessages = {
     changeIcon: "Changer l'icône",
     iconUploadLabel: "Téléverser une image",
     iconUploadFormatHint: "PNG, JPG, GIF ou WebP, jusqu'à 2 Mo",
+    restoreDefaultIcon: "Rétablir l'icône par défaut",
+    restoreDefaultIconHint: "Retire l'image ou l'emoji personnalisé",
     cropDialogTitle: "Modifier l'icône",
     confirmCrop: "Appliquer",
     iconFileMustBeImage: "Veuillez sélectionner un fichier image",
@@ -2442,6 +2491,8 @@ export const dashboardFr: CoreI18nMessages = {
       "Cette action ouvre une demande de modification de suppression pour « {title} ». L'enregistrement canonique reste visible jusqu'à ce que la demande soit relue et fusionnée.",
     editRecord: "Modifier l'enregistrement",
     newRecordTitle: "Nouvel enregistrement {base}",
+    newRecordHelp:
+      "Besoin d’un exemple ? Ouvrez Invites pour l’agent → Créer un enregistrement d’exercice. Vérifiez l’exemple indiqué comme fictif avant de l’enregistrer. Pour des données réelles, fournissez vos informations et fichiers.",
     failedSaveChangeRequest: "Échec de l'enregistrement de la demande de modification",
     invalidFields: "Vérifiez les champs suivants : {fields}.",
     submitRequest: "Soumettre la demande",
@@ -2887,6 +2938,8 @@ export const dashboardFr: CoreI18nMessages = {
     untitledStep: "Étape sans titre",
     completed: "Terminé",
     previewFrame: "Aperçu de {name}",
+    htmlSourcePlainText:
+      "Le code source volumineux est affiché en texte brut pour garder un aperçu fluide. Le contenu est intégral.",
     save: "Enregistrer",
     saved: "Enregistré",
     unsaved: "Modifications non enregistrées",

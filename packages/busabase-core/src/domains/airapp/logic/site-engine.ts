@@ -3,7 +3,11 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import type {
   AirAppSiteActionVO,
+  AirAppSiteDirectValueInput,
   AirAppSiteDomainsVO,
+  AirAppSiteEnvironmentBinding,
+  AirAppSiteEnvironmentVO,
+  AirAppSiteLogsVO,
   AirAppSitePublication,
   AirAppSiteReleasesVO,
   AirAppSiteStateVO,
@@ -16,7 +20,7 @@ import {
 } from "../../../context";
 import { getDb } from "../../../db";
 import { busabaseNodes } from "../../../db/schema";
-import { assertNodePermission } from "../../../logic/node-acl";
+import { assertNodePermission, assertWorkspacePermission } from "../../../logic/node-acl";
 import { getFileTreeKind, listFileTreeFiles, readFileTreeFileBytes } from "../../filetree/handlers";
 import { AIRAPP_MANIFEST_PATH } from "../utils/airapp-runtime-descriptor";
 import {
@@ -120,24 +124,45 @@ const readAppName = async (nodeId: string): Promise<string> => {
 
 const publicationOf = (record: AirAppSiteRecord, version: string | null): AirAppSitePublication => {
   if (!record.isPublic || record.liveVersion === null) return "not-live";
-  return record.liveVersion === version ? "live" : "live-with-changes";
+  return record.liveVersion === version && !environmentStale(record, "live")
+    ? "live"
+    : "live-with-changes";
 };
+
+const environmentStale = (record: AirAppSiteRecord, kind: "preview" | "live"): boolean =>
+  record[`${kind}Version`] !== null &&
+  (record[`${kind}EnvironmentRevision`] ?? null) !== (record.environmentRevision ?? null);
+
+const assertEnvironmentDeploymentAccess = (record: AirAppSiteRecord): void => {
+  if (record.environmentDeploymentLock)
+    throw new ORPCError("FORBIDDEN", {
+      message:
+        "Deploying a website with Space Vault bindings requires a Space owner or admin and a manage-level credential.",
+      data: record.environmentDeploymentLock,
+    });
+};
+
+type SiteAccess = Pick<AirAppSiteStateVO, "engine" | "publicationLock">;
 
 const toState = (
   nodeId: string,
-  engine: AirAppSiteStateVO["engine"],
+  access: SiteAccess,
   record: AirAppSiteRecord,
   loaded: LoadedSite,
 ): AirAppSiteStateVO => ({
-  engine,
+  ...access,
+  environmentDeploymentLock: record.environmentDeploymentLock ?? null,
   address: record.address,
   publication: publicationOf(record, loaded.version),
   isPublic: record.isPublic && record.liveVersion !== null,
   previewUrl: record.previewVersion ? previewUrlFor(nodeId) : null,
+  previewShareUrl: record.previewShareUrl ?? null,
   previewVersion: record.previewVersion,
   liveVersion: record.liveVersion,
   currentVersion: loaded.version,
   previewStale: record.previewVersion !== null && record.previewVersion !== loaded.version,
+  previewEnvironmentStale: environmentStale(record, "preview"),
+  liveEnvironmentStale: environmentStale(record, "live"),
   previewDeployedAt: record.previewDeployedAt?.toISOString() ?? null,
   liveDeployedAt: record.liveDeployedAt?.toISOString() ?? null,
   blockers: loaded.blockers,
@@ -149,19 +174,25 @@ const NOT_OFFERED: AirAppSiteStateVO = {
   publication: "not-live",
   isPublic: false,
   previewUrl: null,
+  previewShareUrl: null,
   previewVersion: null,
   liveVersion: null,
   currentVersion: null,
   previewStale: false,
+  previewEnvironmentStale: false,
+  liveEnvironmentStale: false,
   previewDeployedAt: null,
   liveDeployedAt: null,
   blockers: [],
 };
 
-const resolveEngineStatus = async (host: AirAppSiteHost): Promise<AirAppSiteStateVO["engine"]> => {
-  if (!host.isConfigured()) return "not-configured";
+const resolveSiteAccess = async (host: AirAppSiteHost): Promise<SiteAccess> => {
+  if (!host.isConfigured()) return { engine: "not-configured", publicationLock: null };
   const lock = await resolveContextAirAppEngineLock();
-  return lock?.lockedEngines.includes("site") ? "locked" : "available";
+  return {
+    engine: lock?.lockedEngines.includes("site") ? "locked" : "available",
+    publicationLock: lock?.sitePublishingLocked ? { planLabel: lock.planLabel } : null,
+  };
 };
 
 /** Refuses what this deployment cannot do at all. Comes before any plan question. */
@@ -180,10 +211,20 @@ const requireConfiguredHost = (): AirAppSiteHost => {
   return host;
 };
 
-const requireUsableHost = async (): Promise<AirAppSiteHost> => {
+const requireUsableHost = async (publishing = false) => {
   const host = requireConfiguredHost();
   await assertEngineIncludedInPlan("site");
-  return host;
+  const access = await resolveSiteAccess(host);
+  if (publishing && access.publicationLock) {
+    throw new ORPCError("FORBIDDEN", {
+      message: `Website previews are included in this space's plan. Upgrade to ${access.publicationLock.planLabel} to publish a public website.`,
+      data: {
+        reason: "AIRAPP_SITE_PUBLISH_PLAN_REQUIRED",
+        planLabel: access.publicationLock.planLabel,
+      },
+    });
+  }
+  return { host, access };
 };
 
 /** Not a refusal when locked: a lapsed plan still has to see the site it may need to take down. */
@@ -191,8 +232,59 @@ export const getSiteState = async (nodeId: string): Promise<AirAppSiteStateVO> =
   await assertNodePermission(nodeId, "write");
   const host = getContextAirAppSiteHost();
   if (!host) return NOT_OFFERED;
-  const engine = await resolveEngineStatus(host);
-  return toState(nodeId, engine, await host.readSite(nodeId), await loadSite(nodeId));
+  const access = await resolveSiteAccess(host);
+  return toState(nodeId, access, await host.readSite(nodeId), await loadSite(nodeId));
+};
+
+const NO_ENVIRONMENT: AirAppSiteEnvironmentVO = { available: false, sources: [], bindings: [] };
+
+/** Check after ACLs so Site settings cannot create host state for another node type. */
+const requireAirAppEnvironmentNode = async (nodeId: string): Promise<void> => {
+  const db = await getDb();
+  const [node] = await db
+    .select({ type: busabaseNodes.type })
+    .from(busabaseNodes)
+    .where(and(eq(busabaseNodes.spaceId, getContextSpaceId()), eq(busabaseNodes.id, nodeId)))
+    .limit(1);
+  if (!node) throw new ORPCError("NOT_FOUND", { message: "AirApp not found." });
+  if (node.type !== "airapp")
+    throw new ORPCError("BAD_REQUEST", {
+      message: "Website environment settings are only available for AirApps.",
+    });
+};
+
+/** A node-level grant never grants use of the workspace's credentials by itself. */
+export const getSiteEnvironment = async (nodeId: string): Promise<AirAppSiteEnvironmentVO> => {
+  await assertNodePermission(nodeId, "write");
+  assertWorkspacePermission("write");
+  await requireAirAppEnvironmentNode(nodeId);
+  return getContextAirAppSiteHost()?.readEnvironment?.(nodeId) ?? NO_ENVIRONMENT;
+};
+
+export const saveSiteEnvironment = async (
+  nodeId: string,
+  bindings: AirAppSiteEnvironmentBinding[],
+  directValues?: AirAppSiteDirectValueInput[],
+): Promise<AirAppSiteEnvironmentVO> => {
+  await assertNodePermission(nodeId, "write");
+  assertWorkspacePermission("write");
+  await requireAirAppEnvironmentNode(nodeId);
+  const host = requireConfiguredHost();
+  if (host.saveEnvironmentWithValues)
+    return host.saveEnvironmentWithValues(nodeId, {
+      bindings,
+      ...(directValues === undefined ? {} : { directValues }),
+    });
+  if (directValues?.length)
+    throw new ORPCError("PRECONDITION_FAILED", {
+      message: "Direct website environment values are not supported on this deployment.",
+    });
+  if (!host.saveEnvironment) {
+    throw new ORPCError("PRECONDITION_FAILED", {
+      message: "Website Vault bindings are not supported on this deployment.",
+    });
+  }
+  return host.saveEnvironment(nodeId, bindings);
 };
 
 const NO_DOMAINS: AirAppSiteDomainsVO = {
@@ -214,7 +306,7 @@ export const bindSiteDomain = async (
   hostname: string,
 ): Promise<AirAppSiteDomainsVO> => {
   await assertNodePermission(nodeId, "write");
-  const host = await requireUsableHost();
+  const { host } = await requireUsableHost(true);
   if (!host.bindDomain) {
     throw new ORPCError("PRECONDITION_FAILED", {
       message: "Custom website domains are not configured on this deployment.",
@@ -251,7 +343,7 @@ export const setSitePrimaryDomain = async (
   hostname: string | null,
 ): Promise<AirAppSiteDomainsVO> => {
   await assertNodePermission(nodeId, "write");
-  const host = await requireUsableHost();
+  const { host } = await requireUsableHost(true);
   if (!host.setPrimaryDomain) {
     throw new ORPCError("PRECONDITION_FAILED", {
       message: "Primary website domains are not supported on this deployment.",
@@ -267,14 +359,19 @@ export const setSitePrimaryDomain = async (
 
 export const deploySitePreview = async (nodeId: string): Promise<AirAppSiteActionVO> => {
   await assertNodePermission(nodeId, "write");
-  const host = await requireUsableHost();
+  const { host, access } = await requireUsableHost();
   const loaded = await loadSite(nodeId);
   let record = await host.readSite(nodeId);
   if (!loaded.bundle) {
-    return { outcome: "blocked", state: toState(nodeId, "available", record, loaded) };
+    return { outcome: "blocked", state: toState(nodeId, access, record, loaded) };
   }
   // Each member's own run still registers below: that is what lets them see it.
-  if (record.previewVersion !== loaded.version || !record.previewUpstream) {
+  if (
+    record.previewVersion !== loaded.version ||
+    !record.previewUpstream ||
+    environmentStale(record, "preview")
+  ) {
+    assertEnvironmentDeploymentAccess(record);
     record = await host.deployPreview({
       nodeId,
       appName: await readAppName(nodeId),
@@ -294,23 +391,26 @@ export const deploySitePreview = async (nodeId: string): Promise<AirAppSiteActio
     record.previewUpstream.target,
     record.previewUpstream.headers,
   );
-  return { outcome: "ok", state: toState(nodeId, "available", record, loaded) };
+  return { outcome: "ok", state: toState(nodeId, access, record, loaded) };
 };
 
 /**
- * Publishes the previewed version and nothing else.
+ * Publishes the previewed files with the latest saved environment.
  *
  * The check is a content hash of what the files would deploy as now. If it equals
  * the preview, the bytes about to go up are byte-for-byte what the person looked
  * at. If it differs, nothing is uploaded and the caller is told, because quietly
  * previewing and publishing the new files would put something live unseen.
+ * Vault bindings deliberately resolve again at publication, so a rotation does
+ * not require previewing the same files again.
  */
 export const goLiveWithSite = async (nodeId: string): Promise<AirAppSiteActionVO> => {
   await assertNodePermission(nodeId, "write");
-  const host = await requireUsableHost();
+  const { host, access } = await requireUsableHost(true);
   const record = await host.readSite(nodeId);
+  assertEnvironmentDeploymentAccess(record);
   const loaded = await loadSite(nodeId);
-  const state = (next: AirAppSiteRecord) => toState(nodeId, "available", next, loaded);
+  const state = (next: AirAppSiteRecord) => toState(nodeId, access, next, loaded);
   if (!record.previewVersion) return { outcome: "no-preview", state: state(record) };
   if (!loaded.bundle) return { outcome: "blocked", state: state(record) };
   if (loaded.version !== record.previewVersion) {
@@ -333,14 +433,15 @@ export const goLiveWithSite = async (nodeId: string): Promise<AirAppSiteActionVO
 /** Back on for the version that was already live. Publishes nothing new. */
 export const republishSite = async (nodeId: string): Promise<AirAppSiteActionVO> => {
   await assertNodePermission(nodeId, "write");
-  const host = await requireUsableHost();
+  const { host, access } = await requireUsableHost(true);
   const record = await host.readSite(nodeId);
+  assertEnvironmentDeploymentAccess(record);
   const loaded = await loadSite(nodeId);
   if (!record.liveVersion) {
-    return { outcome: "no-preview", state: toState(nodeId, "available", record, loaded) };
+    return { outcome: "no-preview", state: toState(nodeId, access, record, loaded) };
   }
   const next = await host.setPublic(nodeId, true);
-  return { outcome: "ok", state: toState(nodeId, "available", next, loaded) };
+  return { outcome: "ok", state: toState(nodeId, access, next, loaded) };
 };
 
 /**
@@ -350,9 +451,9 @@ export const republishSite = async (nodeId: string): Promise<AirAppSiteActionVO>
 export const unpublishSite = async (nodeId: string): Promise<AirAppSiteActionVO> => {
   await assertNodePermission(nodeId, "write");
   const host = requireConfiguredHost();
-  const engine = await resolveEngineStatus(host);
+  const access = await resolveSiteAccess(host);
   const next = await host.setPublic(nodeId, false);
-  return { outcome: "ok", state: toState(nodeId, engine, next, await loadSite(nodeId)) };
+  return { outcome: "ok", state: toState(nodeId, access, next, await loadSite(nodeId)) };
 };
 
 /** History remains inspectable after a plan lapses; mutations still require entitlement. */
@@ -363,7 +464,11 @@ export const getSiteReleases = async (nodeId: string): Promise<AirAppSiteRelease
     return { available: false, versions: [], history: [], status: "idle", lastError: null };
   }
   const releases = await host.readReleases(nodeId);
-  const usable = (await resolveEngineStatus(host)) === "available";
+  const access = await resolveSiteAccess(host);
+  const usable =
+    access.engine === "available" &&
+    !access.publicationLock &&
+    !(await host.readSite(nodeId)).environmentDeploymentLock;
   return {
     ...releases,
     versions: releases.versions.map((release) => ({
@@ -373,13 +478,34 @@ export const getSiteReleases = async (nodeId: string): Promise<AirAppSiteRelease
   };
 };
 
+/** Diagnostic reads use release-history access, even when a plan has lapsed. */
+export const getSiteLogs = async (
+  nodeId: string,
+  version: string,
+  signal?: AbortSignal,
+): Promise<AirAppSiteLogsVO> => {
+  await assertNodePermission(nodeId, "write");
+  const host = getContextAirAppSiteHost();
+  if (host?.readLogs) return host.readLogs(nodeId, version, signal);
+  const now = Date.now();
+  return {
+    available: false,
+    version,
+    from: new Date(now - 24 * 60 * 60 * 1_000).toISOString(),
+    to: new Date(now).toISOString(),
+    entries: [],
+    truncated: false,
+  };
+};
+
 /** Restores saved production bytes. Current files may be invalid and are never rebuilt. */
 export const rollbackSite = async (
   nodeId: string,
   version: string,
 ): Promise<AirAppSiteActionVO> => {
   await assertNodePermission(nodeId, "write");
-  const host = await requireUsableHost();
+  const { host, access } = await requireUsableHost(true);
+  assertEnvironmentDeploymentAccess(await host.readSite(nodeId));
   if (!host.rollback) {
     throw new ORPCError("PRECONDITION_FAILED", {
       message: "Release rollback is not available on this deployment.",
@@ -392,5 +518,5 @@ export const rollbackSite = async (
   } catch (error) {
     console.error("[busabase] Could not read the draft after successful Site rollback", error);
   }
-  return { outcome: "ok", state: toState(nodeId, "available", next, loaded) };
+  return { outcome: "ok", state: toState(nodeId, access, next, loaded) };
 };

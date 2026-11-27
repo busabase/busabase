@@ -1,7 +1,7 @@
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fmt } from "../../../i18n/fmt";
 import { dashboardZhCN } from "../../../i18n/zh-CN";
 import { TemplateCardSummary } from "./template-card-summary";
@@ -37,6 +37,36 @@ const getHeading = (markup: string, title: string) =>
   [...markup.matchAll(/<h2([^>]*)>([\s\S]*?)<\/h2>/g)].find((match) => match[2]?.includes(title));
 
 describe("TemplateDetailContent", () => {
+  it("composes optional thumbnails with the chosen locale and original accessible labels", () => {
+    const calls: Array<{ src: string; alt: string; index: number }> = [];
+    const localized: TemplateCardVO = {
+      ...template,
+      displayName: { en: "Email workspace", "zh-CN": "邮件工作台" },
+      screenshots: ["https://cdn.example/english.webp"],
+      locales: { "zh-CN": { screenshots: ["https://cdn.example/chinese.webp"] } },
+    };
+    const markup = renderToStaticMarkup(
+      <TemplateDetailContent
+        template={localized}
+        descriptionLocale="zh-CN"
+        renderScreenshot={(image, index) => {
+          calls.push({ ...image, index });
+          return <span key={image.src} data-thumbnail={image.src} />;
+        }}
+      />,
+    );
+    expect(calls).toEqual([
+      {
+        src: "https://cdn.example/chinese.webp",
+        alt: "邮件工作台 Template screenshot 1",
+        index: 0,
+      },
+    ]);
+    expect(markup).toContain('data-thumbnail="https://cdn.example/chinese.webp"');
+    expect(markup).not.toContain("english.webp");
+    expect(markup).toContain('aria-label="邮件工作台 Template screenshot 1"');
+  });
+
   it("keeps the title and action compact before the gallery", () => {
     const markup = renderToStaticMarkup(
       <TemplateDetailContent
@@ -232,6 +262,45 @@ describe("TemplateDetailContent", () => {
 });
 
 describe("TemplateDetailContent — demo clip", () => {
+  it("composes only the resolved tile posters, with the original template alt text", () => {
+    const renderVideoPoster = vi.fn((image: { src: string; alt: string }, index: number) => (
+      <span key={index} role="img" data-poster={image.src} aria-label={image.alt} />
+    ));
+    const markup = renderToStaticMarkup(
+      <TemplateDetailContent
+        template={{
+          ...template,
+          screenshots: ["https://cdn.example/cover.webp", "https://cdn.example/overview.webp"],
+          videos: [
+            { src: "https://cdn.example/one.mp4", poster: "https://cdn.example/poster.webp" },
+            { src: "https://cdn.example/two.mp4" },
+          ],
+        }}
+        renderVideoPoster={renderVideoPoster}
+      />,
+    );
+    expect(renderVideoPoster.mock.calls).toEqual([
+      [{ src: "https://cdn.example/poster.webp", alt: "busa-email" }, 0],
+      [{ src: "https://cdn.example/overview.webp", alt: "busa-email" }, 1],
+    ]);
+    expect(markup).toContain('data-poster="https://cdn.example/poster.webp"');
+    expect(markup).toContain('data-poster="https://cdn.example/overview.webp"');
+    expect(markup).not.toContain("<video");
+  });
+
+  it("keeps the empty poster tile when no poster or screenshot exists", () => {
+    const renderVideoPoster = vi.fn(() => <span>Unexpected poster</span>);
+    const markup = renderToStaticMarkup(
+      <TemplateDetailContent
+        template={{ ...template, videos: [{ src: "https://cdn.example/one.mp4" }] }}
+        renderVideoPoster={renderVideoPoster}
+      />,
+    );
+    expect(renderVideoPoster).not.toHaveBeenCalled();
+    expect(markup).not.toContain("Unexpected poster");
+    expect(markup).toContain("Play the demo");
+  });
+
   it("offers a play control, and does not mount the video until it is opened", () => {
     const withVideo: TemplateCardVO = {
       ...template,
@@ -251,6 +320,66 @@ describe("TemplateDetailContent — demo clip", () => {
   it("renders no play control when the template declares no clip", () => {
     const markup = renderToStaticMarkup(<TemplateDetailContent template={template} />);
     expect(markup).not.toContain("Play the demo");
+  });
+});
+
+describe("TemplateCardSummary thumbnail composition", () => {
+  it("uses the selected locale's cover without changing the card's title or copy", () => {
+    const renderScreenshot = vi.fn((image: { src: string; alt: string }) => (
+      <span role="img" data-cover={image.src} aria-label={image.alt} />
+    ));
+    const localized: TemplateCardVO = {
+      ...template,
+      displayName: { en: "Email workspace", "zh-CN": "邮件工作台" },
+      description: { en: "Email operations workspace", "zh-CN": "处理客户邮件" },
+      screenshots: ["https://cdn.example/english.webp"],
+      locales: { "zh-CN": { screenshots: ["https://cdn.example/chinese.webp"] } },
+    };
+    const markup = renderToStaticMarkup(
+      <TemplateCardSummary
+        template={localized}
+        descriptionLocale="zh-CN"
+        screenshotAlt="工作空间预览"
+        density="comfortable"
+        renderScreenshot={renderScreenshot}
+      />,
+    );
+    expect(renderScreenshot).toHaveBeenCalledWith({
+      src: "https://cdn.example/chinese.webp",
+      alt: "工作空间预览",
+    });
+    expect(markup).toContain('data-cover="https://cdn.example/chinese.webp"');
+    expect(markup).toContain(">邮件工作台</h3>");
+    expect(markup).toContain("处理客户邮件");
+    expect(markup).not.toContain("english.webp");
+  });
+
+  it("does not call an image renderer when the card has no cover", () => {
+    const renderScreenshot = vi.fn(() => <span>Unexpected cover</span>);
+    const markup = renderToStaticMarkup(
+      <TemplateCardSummary
+        template={template}
+        screenshotAlt="Preview"
+        density="comfortable"
+        renderScreenshot={renderScreenshot}
+      />,
+    );
+    expect(renderScreenshot).not.toHaveBeenCalled();
+    expect(markup).not.toContain("Unexpected cover");
+    expect(markup).not.toContain("<img");
+    expect(markup).toContain("lucide-sparkles");
+  });
+
+  it("keeps the original card image when an optional renderer declines the cover", () => {
+    const markup = renderToStaticMarkup(
+      <TemplateCardSummary
+        template={{ ...template, screenshots: ["https://cdn.example/cover.webp"] }}
+        screenshotAlt="Preview"
+        renderScreenshot={() => null}
+      />,
+    );
+    expect(markup).toContain('<img src="https://cdn.example/cover.webp" alt="Preview"');
+    expect(markup).toContain("h-full w-full object-cover object-top");
   });
 });
 

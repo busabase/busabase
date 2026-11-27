@@ -25,15 +25,12 @@
 // transient "Copied" state) so the two agent-facing dialogs feel like one feature.
 
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
-import { useCoreI18n } from "../../../i18n";
 import type { NodePromptScope } from "../helpers/node-agent-prompts";
 import { useNodeLocator } from "../hooks/use-copy-locator";
 import { useNodeAgentPrompts } from "../hooks/use-node-agent-prompts";
 import { useDashboardOrpc } from "../orpc-context";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
-import { AgentPromptsView } from "./agent-prompts-view";
-import { DialogContent } from "./localized-dialog-content";
+import { AgentPromptsDialog } from "./agent-prompts-dialog";
 
 /** What the dialog header names: the node, or the column/record/cell inside it. */
 const scopeSubject = (nodeName: string, scope?: NodePromptScope): string => {
@@ -89,7 +86,6 @@ export function NodeAgentPromptsDialog({
    */
   orpc: BusabaseQueryUtils | null;
 }) {
-  const messages = useCoreI18n();
   // Node-detail toolbars use the dashboard context; the shell's sidebar dialog
   // passes the client explicitly. Hosts with neither keep both Agent actions
   // and custom-prompt loading unavailable without breaking the prompt viewer.
@@ -134,46 +130,27 @@ export function NodeAgentPromptsDialog({
     spaceName,
   });
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* Match Workspace Settings' roomy modal density: 80vh on mobile and a
-          1020x640 desktop target. The desktop height is capped by the live
-          viewport so short screens still keep the entire shell reachable. */}
-      <DialogContent className="grid h-[80vh] max-h-[calc(100dvh-2rem)] w-[min(96vw,1020px)] min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 overflow-hidden p-4 sm:h-[min(640px,calc(100dvh-2rem))] sm:max-w-[1020px] sm:p-5">
-        <DialogHeader className="space-y-1">
-          <DialogTitle>
-            {messages.agentPrompts.title}
-            <span className="ml-2 text-sm font-normal text-muted-foreground">
-              {scopeSubject(nodeName, scope)}
-            </span>
-          </DialogTitle>
-        </DialogHeader>
-        <DialogDescription>{messages.agentPrompts.intro}</DialogDescription>
-
-        {/* Mobile stacks both panes and scrolls this row; desktop gives the
-            expanded panel the remaining height and lets each pane own overflow. */}
-        <div className="min-h-0 overflow-y-auto sm:overflow-hidden">
-          <AgentPromptsView
-            agentIntegration={explicitAgentIntegration}
-            askAgent={orpc ? { orpc, sessionScopeId: nodeId } : null}
-            capabilities={capabilities}
-            loading={promptsLoading}
-            locator={locator}
-            recents={{ kind: "node", nodeType, scopeKind: scope?.kind ?? "node" }}
-            management={
-              orpc && (!scope || scope.kind === "node")
-                ? {
-                    customPrompts,
-                    canSave: canSaveCustomPrompts,
-                    saving,
-                    save: saveCustomPrompts,
-                  }
-                : null
+    <AgentPromptsDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      subject={scopeSubject(nodeName, scope)}
+      agentIntegration={explicitAgentIntegration}
+      askAgent={orpc ? { orpc, sessionScopeId: nodeId } : null}
+      capabilities={capabilities}
+      loading={promptsLoading}
+      locator={locator}
+      recents={{ kind: "node", nodeType, scopeKind: scope?.kind ?? "node" }}
+      management={
+        orpc && (!scope || scope.kind === "node")
+          ? {
+              customPrompts,
+              canSave: canSaveCustomPrompts,
+              saving,
+              save: saveCustomPrompts,
             }
-            onHandedOff={() => onOpenChange(false)}
-            scenarios={scenarios}
-          />
-        </div>
-      </DialogContent>
-    </Dialog>
+          : null
+      }
+      scenarios={scenarios}
+    />
   );
 }

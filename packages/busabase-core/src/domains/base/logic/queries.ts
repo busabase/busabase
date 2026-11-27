@@ -12,6 +12,7 @@ import {
   type BaseFieldVO,
   combineViewFilters,
   flattenViewFilters,
+  NUMERIC_AGGREGATE_FIELD_TYPES,
   type ViewConfigVO,
   type ViewFilterVO,
 } from "busabase-contract/types";
@@ -78,6 +79,8 @@ import {
   filterRecordsByViewFilters,
   GROUPABLE_FIELD_TYPES,
   groupKeyForValue,
+  isViewValueChecked,
+  isViewValueFilled,
 } from "../utils/view-records";
 import { commitPayloadWithFields } from "./commit-payload-projection";
 import { isLatestProjectedField, selectDateOrderedPageRows } from "./date-window-page";
@@ -319,7 +322,9 @@ const PUSHABLE_TEXT_TYPES = new Set([
   // relies on this to be an exact `eq` on `value_text`.
   "appUser",
 ]);
-const PUSHABLE_NUMBER_TYPES = new Set(["number", "auto_number"]);
+// The types with a numeric value column. Owned by the contract so the
+// dashboard's summary menu offers sum/avg/min/max on exactly these.
+const PUSHABLE_NUMBER_TYPES = NUMERIC_AGGREGATE_FIELD_TYPES;
 
 // Translate one view filter to a SUPERSET-safe SQL predicate (an EXISTS over the
 // record's projected field values), or null when it can't be pushed (the client
@@ -1075,8 +1080,6 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
   if (!base) {
     throw new ORPCError("NOT_FOUND", { message: `Base not found: ${parsed.baseId}` });
   }
-  const findFields = parsed.find ? resolveRecordFindFields(base.fields, parsed.find) : [];
-  const findSlugs = findFields.map((field) => field.slug);
   // An omitted `fieldType` is read from the Base's schema; an unknown slug is a 400.
   const sort = parsed.sort ? resolveRecordSort(parsed.sort, base.fields) : undefined;
 
@@ -1099,6 +1102,11 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
     }
     viewConfig = normalizeViewConfig(view.config);
   }
+  // The default find scope is the View's shown fields, so it needs the View first.
+  const findFields = parsed.find
+    ? resolveRecordFindFields(base.fields, parsed.find, viewConfig)
+    : [];
+  const findSlugs = findFields.map((field) => field.slug);
 
   const recordFilters: SQL[] = [
     eq(busabaseRecords.spaceId, getContextSpaceId()),
@@ -1846,6 +1854,8 @@ const resolveAggregateFilterScope = async (
 
   return {
     base,
+    // The View's own config, for callers whose defaults read it (find's scope).
+    viewConfig,
     allFilters,
     plan,
     // Lookups and their transitive formula dependents need hydration before
@@ -1990,6 +2000,10 @@ export const countRecords = async (input?: z.input<typeof countRecordsInputSchem
  *
  * Groups with zero records are omitted — the Base's field definition already
  * lists every choice, so the client knows which buckets to render empty.
+ *
+ * A `find` (the grid's record search) or a `filled` aggregate always takes the
+ * evaluating path: neither has a SQL form proven identical to the matcher the
+ * grid's rows come from (`filterRecordsForFind`, the `not_empty` view filter).
  */
 export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema>) => {
   await ensureReady();
@@ -1997,13 +2011,8 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
   const budgeted = createStatementBudget();
   const parsed = groupRecordsInputSchema.parse(input);
 
-  const { base, plan, dependsOnLookup, residualSlugs } = await resolveAggregateFilterScope(
-    db,
-    parsed.baseId,
-    parsed.viewId,
-    parsed.filters,
-    budgeted,
-  );
+  const { base, viewConfig, plan, dependsOnLookup, residualSlugs } =
+    await resolveAggregateFilterScope(db, parsed.baseId, parsed.viewId, parsed.filters, budgeted);
 
   // No `fieldSlug` means one bucket over the whole filtered set — the shape a
   // summary tile wants, and the reason `aggregates` is worth having at all.
@@ -2081,10 +2090,11 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     baseFilters.push(...(await buildValueFilterPredicates(db, parsed.baseId, parsed.valueFilters)));
   }
 
-  // Aggregates read `value_number`, so they are exact for the same reason
-  // `valueFilters` are — the column holds the value itself. A field with no such
-  // column is refused rather than summed as zero, which would be a confident
-  // wrong total.
+  // Numeric aggregates read `value_number`, so they are exact for the same
+  // reason `valueFilters` are — the column holds the value itself. A field with
+  // no such column is refused rather than summed as zero, which would be a
+  // confident wrong total. `filled` reads no column: it is the `not_empty` view
+  // filter's own test, so it applies to every (forward) field type.
   const aggregates = parsed.aggregates ?? [];
   for (const aggregate of aggregates) {
     const target = base.fields.find((entry) => entry.slug === aggregate.fieldSlug);
@@ -2093,7 +2103,16 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
         message: `Field not found in Base ${parsed.baseId}: ${aggregate.fieldSlug}`,
       });
     }
-    if (!PUSHABLE_NUMBER_TYPES.has(target.type)) {
+    if (aggregate.fn === "checked") {
+      // The `is_true` filter's own test, and only meaningful on a checkbox.
+      if (target.type !== "checkbox") {
+        throw new ORPCError("BAD_REQUEST", {
+          message: `Cannot count checked values of a ${target.type} field: ${aggregate.fieldSlug}. The checked aggregate needs a checkbox field.`,
+        });
+      }
+      continue;
+    }
+    if (aggregate.fn !== "filled" && !PUSHABLE_NUMBER_TYPES.has(target.type)) {
       throw new ORPCError("BAD_REQUEST", {
         message:
           `Cannot ${aggregate.fn} a ${target.type} field: ${aggregate.fieldSlug}. ` +
@@ -2105,14 +2124,45 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     `${aggregate.fn}:${aggregate.fieldSlug}`;
   /** Aggregate slug → the index of its projected column in the keyed subquery. */
   const aggregateFieldSlugs = [...new Set(aggregates.map((entry) => entry.fieldSlug))];
+  // The grid's record search: same field resolution as `records.listPage`, so a
+  // stale or unsupported find field is the same 400 there and here.
+  // Scoped by the View exactly as `records.listPage` scopes it (by default the
+  // fields the View shows), or a hidden-field match would count here while the
+  // grid leaves its row out.
+  const findFields = parsed.find
+    ? resolveRecordFindFields(base.fields, parsed.find, viewConfig)
+    : [];
+  const findSlugs = findFields.map((entry) => entry.slug);
+  const filledFields = aggregates.flatMap((aggregate) => {
+    if (aggregate.fn !== "filled") return [];
+    const target = base.fields.find((entry) => entry.slug === aggregate.fieldSlug);
+    return target ? [target] : [];
+  });
+  const checkedSlugs = [
+    ...new Set(
+      aggregates.flatMap((aggregate) => (aggregate.fn === "checked" ? [aggregate.fieldSlug] : [])),
+    ),
+  ];
+  // None of a find, `filled` or `checked` has a SQL form proven identical to
+  // the view matcher, so any of them routes the whole request to the evaluating
+  // fallback below — exact, bounded by EVALUATION_READ_LIMIT and the statement
+  // budget.
+  const mustEvaluate = Boolean(parsed.find) || filledFields.length > 0 || checkedSlugs.length > 0;
 
   /** Compute the aggregates for one group's raw numeric values, in memory. */
   const aggregateOver = (
     valuesBySlug: Map<string, number[]>,
+    tallies: Map<string, number>,
   ): Record<string, number | null> | undefined => {
     if (aggregates.length === 0) return undefined;
     const result: Record<string, number | null> = {};
     for (const aggregate of aggregates) {
+      if (aggregate.fn === "filled" || aggregate.fn === "checked") {
+        // Tallied per fn and slug, so a checkbox may ask for both.
+        result[aggregateKey(aggregate)] =
+          tallies.get(`${aggregate.fn}:${aggregate.fieldSlug}`) ?? 0;
+        continue;
+      }
       const values = valuesBySlug.get(aggregate.fieldSlug) ?? [];
       if (aggregate.fn === "count") {
         result[aggregateKey(aggregate)] = values.length;
@@ -2163,6 +2213,7 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
   };
 
   if (
+    !mustEvaluate &&
     plan.residual.length === 0 &&
     groupSlug &&
     aggregates.length === 0 &&
@@ -2211,7 +2262,7 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     }
   }
 
-  if (plan.residual.length === 0) {
+  if (!mustEvaluate && plan.residual.length === 0) {
     // The group key is read as a scalar SUBQUERY rather than a JOIN on
     // busabase_field_values: that table has no unique index on
     // (record_id, field_slug) — uniqueness is maintained by the projection's
@@ -2315,10 +2366,30 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     // a filter could not be proven exact, which reads as "no data" rather than
     // as "this query took the slow path".
     const values = new Map<BucketKey, Map<string, number[]>>();
+    const filled = new Map<BucketKey, Map<string, number>>();
     for (const record of records) {
       const key = groupSlug ? bucketKeyFor(record.fields[groupSlug]) : null;
       counts.set(key, (counts.get(key) ?? 0) + 1);
       if (!aggregates.length) continue;
+      if (filledFields.length || checkedSlugs.length) {
+        let tallies = filled.get(key);
+        if (!tallies) {
+          tallies = new Map<string, number>();
+          filled.set(key, tallies);
+        }
+        for (const target of filledFields) {
+          if (isViewValueFilled(target, record.fields[target.slug])) {
+            const tally = `filled:${target.slug}`;
+            tallies.set(tally, (tallies.get(tally) ?? 0) + 1);
+          }
+        }
+        for (const slug of checkedSlugs) {
+          if (isViewValueChecked(record.fields[slug])) {
+            const tally = `checked:${slug}`;
+            tallies.set(tally, (tallies.get(tally) ?? 0) + 1);
+          }
+        }
+      }
       let bucket = values.get(key);
       if (!bucket) {
         bucket = new Map<string, number[]>();
@@ -2338,19 +2409,26 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     }
     const perGroup = new Map<BucketKey, Record<string, number | null> | undefined>();
     for (const key of counts.keys()) {
-      perGroup.set(key, aggregateOver(values.get(key) ?? new Map()));
+      perGroup.set(key, aggregateOver(values.get(key) ?? new Map(), filled.get(key) ?? new Map()));
     }
     return { counts, perGroup };
   };
 
   const narrowedFilters = [...baseFilters, ...plan.pushed];
-  // Only what grouping, the aggregates and the undecided conditions read.
+  // Only what grouping, the aggregates, the find and the undecided conditions read.
   const evaluatedSlugs = [
     ...residualSlugs,
     ...(groupSlug ? [groupSlug] : []),
     ...aggregateFieldSlugs,
+    ...findSlugs,
   ];
-  if (!dependsOnLookup) {
+  // A lookup (or a formula reading one) is a read-time value: its committed
+  // projection does not track source-record edits, so counting it as filled
+  // needs the same hydration a `not_empty` filter on it gets.
+  const dynamicSlugs = lookupDependentFieldSlugs(base.fields);
+  const needsHydration =
+    dependsOnLookup || filledFields.some((target) => dynamicSlugs.has(target.slug));
+  if (!needsHydration) {
     const candidateRows = await budgeted(db, (tx) =>
       tx
         .select({
@@ -2364,7 +2442,7 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
         .limit(EVALUATION_READ_LIMIT),
     );
     assertEvaluable(candidateRows);
-    const matched = filterEvaluableRecordsByViewFilters(
+    const filtered = filterEvaluableRecordsByViewFilters(
       candidateRows.map((row) => ({
         id: row.id,
         updatedAt: row.updatedAt.toISOString(),
@@ -2373,6 +2451,7 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
       base.fields,
       plan.residual,
     );
+    const matched = await filterRecordsForFind(db, filtered, findFields, parsed.find);
     const built = countsFromRecords(matched);
     return toResponse(built.counts, aggregates.length ? built.perGroup : undefined);
   }
@@ -2388,8 +2467,17 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
   const candidates = await hydrateRecords(candidateRecordRows, {
     payloadFields: [...evaluatedSlugs, ...lookupFormulaInputSlugs(base.fields)],
   });
-  const matched = filterRecordsByViewFilters(candidates, plan.residual);
-  const built = countsFromRecords(matched.map((record) => ({ fields: record.headCommit.payload })));
+  const matched = await filterRecordsForFind(
+    db,
+    filterRecordsByViewFilters(candidates, plan.residual).map((record) => ({
+      id: record.id,
+      updatedAt: record.updatedAt,
+      fields: record.headCommit.payload,
+    })),
+    findFields,
+    parsed.find,
+  );
+  const built = countsFromRecords(matched);
   return toResponse(built.counts, aggregates.length ? built.perGroup : undefined);
 };
 

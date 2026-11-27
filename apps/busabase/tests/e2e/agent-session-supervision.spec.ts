@@ -37,10 +37,8 @@ async function shot(page: Page, info: TestInfo, name: string) {
   await info.attach(name, { path: file, contentType: "image/png" });
 }
 async function ready(page: Page) {
-  await expect(status(page)).toContainText("Connected");
-  await expect(status(page)).toContainText("Ready");
-  await expect(status(page)).toContainText("Saved");
   await expect(composer(page)).toBeEnabled();
+  await expect(status(page)).toBeHidden();
 }
 
 test("a conversation survives two tabs, a socket handoff and a lost acceptance response without repeating work", async ({

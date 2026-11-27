@@ -309,6 +309,7 @@ export const COMMIT_PAYLOAD_SCHEMAS = {
   }),
   // `mergeBaseConvertField` requires fieldId + fromType + newType.
   base_convert_field: z.looseObject({
+    name: iStringSchema.optional(),
     fieldId: z.string(),
     slug: z.string().optional(),
     fromType: fieldTypeSchema,

@@ -30,3 +30,19 @@ import { canPreview } from "previewfile-core/utils/file-types";
 
 <FileViewer url={url} fileName="deck.pptx" mimeType={mimeType} />;
 ```
+
+For image and PDF previews inside a bounded frame, both `FileViewer` and
+`EmbeddedFileViewer` accept `fitToContainer`. The host must provide a definite
+height and width. Images fit completely without enlarging small originals.
+PDFs initially fit the whole page and offer fit-width and whole-page modes;
+manual zoom and the current page survive frame resizing. The option defaults
+to `false`, preserving existing standalone and embedding-host behavior.
+
+PDF reading also accepts `pdfScrollMode="continuous"` on `FileViewer` and
+`EmbeddedFileViewer`. It keeps the existing toolbar while arranging pages in
+a continuous vertical document. React-PDF renders the pages; react-window
+mounts only the nearby rows. The current page follows scrolling, and toolbar
+navigation scrolls to the selected page. Page dimensions are read with two
+background workers, preserving the reading position as dimensions arrive or
+the frame changes. This option defaults to `"single"`; Busabase opts its
+attachment dialogs into continuous reading.

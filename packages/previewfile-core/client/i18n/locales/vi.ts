@@ -72,6 +72,7 @@ export const vi: Messages = {
   zoomInShortcut: () => "Phóng to (Ctrl/Cmd + +)",
   zoomOutShortcut: () => "Thu nhỏ (Ctrl/Cmd + -)",
   fitWidth: () => "Vừa chiều rộng",
+  fitPage: () => "Vừa trang",
   fitHeight: () => "Vừa chiều cao",
   fitToWidth: () => "Vừa chiều rộng",
   fitToHeight: () => "Vừa chiều cao",

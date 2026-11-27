@@ -16,8 +16,10 @@ import path from "node:path";
 import { ConversionCache } from "../converter/conversion-cache";
 import {
   CONVERSION_FILE_ROUTE,
-  getConversionFileUrl,
-  getLocalConversionRootDir,
+  getLocalPublicConversionRootDir,
+  getPublicConversionFileUrl,
+  isPrivateConversionOutputUri,
+  privateConversionOutputExists,
 } from "../converter/conversion-storage";
 import {
   type ConversionJobData,
@@ -30,6 +32,16 @@ import {
   generateConversionCacheKey,
   type ResolveConversionSource,
 } from "./conversion-source";
+
+/** A host can refuse a source whose authority changed while conversion was running. */
+export class ConversionAccessError extends Error {
+  constructor(
+    readonly status: 403 | 404,
+    message = "File not found",
+  ) {
+    super(message);
+  }
+}
 
 export interface ConvertRouteOptions {
   /** Which files this host converts, and where the worker fetches them. See ./conversion-source. */
@@ -89,10 +101,10 @@ async function refreshPresignedUrl(uri: string): Promise<string | null> {
   if (!uri) return null;
 
   // For local storage, no presigning needed — the URL path is stable.
-  if (getLocalConversionRootDir() !== null) return null;
+  if (getLocalPublicConversionRootDir() !== null) return null;
 
   try {
-    return await getConversionFileUrl(uri, 3600);
+    return await getPublicConversionFileUrl(uri, 3600);
   } catch (err) {
     console.warn("[api/convert] Failed to refresh presigned URL for URI:", uri, err);
     return null;
@@ -114,10 +126,11 @@ async function validateAndRefreshCachedEntry(
   entry: CachedConversionEntry,
 ): Promise<{ valid: boolean; freshUrl?: string }> {
   const { url: outputUrl, uri } = entry;
+  if (isPrivateConversionOutputUri(uri)) return { valid: await privateConversionOutputExists(uri) };
 
   // Local file path served by the output-file route
   if (outputUrl.startsWith(`${CONVERSION_FILE_ROUTE}/`)) {
-    const rootDir = getLocalConversionRootDir();
+    const rootDir = getLocalPublicConversionRootDir();
     // Remote storage — can't check locally, trust the cache
     if (rootDir === null) return { valid: true };
 
@@ -266,7 +279,9 @@ export function createConvertRoute(options: ConvertRouteOptions): {
 
       const cacheKey = fingerprint
         ? generateConversionCacheKey({
-            version: options.cacheVersion,
+            version: source.privateOutput
+              ? `${options.cacheVersion}:private-v1`
+              : options.cacheVersion,
             normalizedFileUrl: cacheUrl,
             fileName: input.fileName,
             outputFormat: input.outputFormat,
@@ -284,7 +299,11 @@ export function createConvertRoute(options: ConvertRouteOptions): {
         if (cachedRaw) {
           const entry = parseCachedEntry(cachedRaw);
           // A host that maps outputs by URI cannot use a legacy url-only entry.
-          if (entry && (entry.uri || !options.presentOutput)) {
+          if (
+            entry &&
+            (entry.uri || !options.presentOutput) &&
+            (!source.privateOutput || isPrivateConversionOutputUri(entry.uri))
+          ) {
             // Validate the cached URL is still reachable before trusting it.
             // If it's an expired presigned URL but we have the stable URI, we
             // regenerate a fresh presigned URL without re-converting the document.
@@ -321,6 +340,7 @@ export function createConvertRoute(options: ConvertRouteOptions): {
         mimeType: input.mimeType,
         outputFormat: input.outputFormat,
         ...(source.sourceFetch ? { sourceFetch: source.sourceFetch } : {}),
+        ...(source.privateOutput ? { privateOutput: true } : {}),
       };
 
       const enqueued = await enqueueConversion(jobData, undefined, options.queueName);
@@ -351,6 +371,7 @@ export function createConvertRoute(options: ConvertRouteOptions): {
         processingTime: result.processingTime || Date.now() - startTime,
       });
     } catch (error) {
+      if (error instanceof ConversionAccessError) return failure(error.status, error.message);
       console.error("[api/convert] error:", error);
       return failure(500, error instanceof Error ? error.message : "Internal server error");
     } finally {

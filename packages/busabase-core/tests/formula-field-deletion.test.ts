@@ -537,8 +537,16 @@ describe("formula field deletion through oRPC and real PGlite", () => {
       .update(busabaseNodes)
       .set({ effectiveVisibility: "private" })
       .where(eq(busabaseNodes.id, consumer.nodeId));
+    // A real member's baseline (`permissionLevelForSpaceRole("member")`):
+    // proposing the delete is allowed, seeing the private consumer is not.
+    // Without a level this context is read-only, which may not propose at all.
     const error = await runWithBusabaseContext(
-      { spaceId: LOCAL_SPACE_ID, actorId: "ordinary-member", isSpaceManager: false },
+      {
+        spaceId: LOCAL_SPACE_ID,
+        actorId: "ordinary-member",
+        isSpaceManager: false,
+        permissionLevel: "write",
+      },
       async () => {
         try {
           await requestDelete(base.id, formula.id);

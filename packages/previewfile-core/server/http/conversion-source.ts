@@ -32,6 +32,8 @@ export interface ConversionSource {
    * refuses private and metadata addresses at every hop.
    */
   sourceFetch?: "public";
+  /** Store the derivative privately; the host must serve it through its own authority checks. */
+  privateOutput?: boolean;
   /**
    * Prepare an authorized source only on cache miss. The host can stage bytes
    * without persisting a caller's Cookie or Authorization header in a job.

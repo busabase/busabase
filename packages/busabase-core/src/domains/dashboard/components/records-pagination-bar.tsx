@@ -7,22 +7,26 @@ import { cn } from "kui/utils";
 import { RotateCcw } from "lucide-react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { clampPaginationPage, getPaginationRange } from "../helpers/pagination";
+import type { RecordPageSize } from "../helpers/record-pagination-url";
 import { PaginationNav } from "./pagination-nav";
 
+/** Inbox page sizes. A Base passes its own, larger list. */
 export const RECORD_PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
-export type RecordPageSize = (typeof RECORD_PAGE_SIZE_OPTIONS)[number];
+export type { RecordPageSize };
 
-export interface RecordsPaginationBarProps {
+export interface RecordsPaginationBarProps<T extends number = RecordPageSize> {
   className?: string;
   error?: string | null;
   getPageHref?: (page: number) => string;
   isFetching?: boolean;
   isLoading?: boolean;
   onPageChange: (page: number) => void;
-  onPageSizeChange: (pageSize: RecordPageSize) => void;
+  onPageSizeChange: (pageSize: T) => void;
   onRetry?: () => void;
   page: number;
-  pageSize: RecordPageSize;
+  pageSize: T;
+  /** Defaults to 25/50/100. A Base table passes the larger record-page list. */
+  pageSizeOptions?: readonly T[];
   total: number;
   totalPages: number;
   /** `total` is a lower bound: shown as "1000000+". */
@@ -31,7 +35,7 @@ export interface RecordsPaginationBarProps {
   pagesCapped?: boolean;
 }
 
-export function RecordsPaginationBar({
+export function RecordsPaginationBar<T extends number>({
   className,
   error,
   getPageHref,
@@ -42,11 +46,13 @@ export function RecordsPaginationBar({
   onRetry,
   page,
   pageSize,
+  pageSizeOptions,
   total,
   totalPages,
   totalCapped = false,
   pagesCapped = false,
-}: RecordsPaginationBarProps) {
+}: RecordsPaginationBarProps<T>) {
+  const options = (pageSizeOptions ?? RECORD_PAGE_SIZE_OPTIONS) as unknown as readonly T[];
   const messages = useCoreI18n();
   const safeTotalPages = Math.max(Math.trunc(totalPages) || 1, 1);
   const safePage = clampPaginationPage(page, safeTotalPages);
@@ -75,14 +81,21 @@ export function RecordsPaginationBar({
           <span>{messages.base.paginationRowsPerPage}</span>
           <Select
             disabled={isBusy}
-            onValueChange={(value) => onPageSizeChange(Number(value) as RecordPageSize)}
+            onValueChange={(value) => {
+              const next = Number(value);
+              if ((options as readonly number[]).includes(next)) onPageSizeChange(next as T);
+            }}
             value={String(pageSize)}
           >
-            <SelectTrigger aria-label={messages.base.paginationRowsPerPage} className="h-8 w-20">
+            <SelectTrigger
+              aria-label={messages.base.paginationRowsPerPage}
+              className="h-8 w-24"
+              data-testid="record-page-size"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {RECORD_PAGE_SIZE_OPTIONS.map((option) => (
+              {options.map((option) => (
                 <SelectItem key={option} value={String(option)}>
                   {option}
                 </SelectItem>

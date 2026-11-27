@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { BaseFieldVO, BaseVO, RecordVO, ViewVO } from "busabase-contract/types";
+import type {
+  BaseFieldVO,
+  BaseVO,
+  LookupComputedVO,
+  RecordVO,
+  ViewVO,
+} from "busabase-contract/types";
 import { type ReactNode, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
@@ -226,6 +232,145 @@ describe("BusaBaseGallery cover motion", () => {
 
     expect(screen.queryByRole("img")).toBeNull();
     expect(container.querySelector(".transition-transform")).toBeNull();
+  });
+});
+
+describe("BusaBaseGallery relation fields", () => {
+  it("renders linked record titles for forward, reverse, and lookup relations", () => {
+    const forwardRelationField: BaseFieldVO = {
+      id: "fld_relation",
+      baseId: base.id,
+      slug: "related_lessons",
+      name: "Related lessons",
+      type: "relation",
+      required: false,
+      position: 2,
+      options: {},
+    };
+    const reverseRelationField: BaseFieldVO = {
+      id: "fld_reverse_relation",
+      baseId: base.id,
+      slug: "referenced_by",
+      name: "Referenced by",
+      type: "relation",
+      required: false,
+      position: 3,
+      options: { reverseOfFieldId: forwardRelationField.id },
+    };
+    const lookupField: BaseFieldVO = {
+      id: "fld_related_lookup",
+      baseId: base.id,
+      slug: "related_lookup",
+      name: "Related lesson lookup",
+      type: "lookup",
+      required: false,
+      position: 4,
+      options: {
+        lookup: { relationFieldSlug: "related_lessons", targetFieldSlug: "related_lessons" },
+      },
+    };
+    const targetBase: BaseVO = {
+      ...base,
+      id: "bas_lessons",
+      slug: "lessons",
+      fields: fields.filter((field) => field.slug === "title"),
+    };
+    const source = {
+      ...record([]),
+      headCommit: {
+        ...record([]).headCommit,
+        payload: {
+          title: "Gallery card",
+          cover: [],
+          related_lessons: [JSON.stringify([JSON.stringify(["rec_forward"])])],
+          referenced_by: ["rec_reverse"],
+        },
+      },
+      computedFields: {
+        related_lookup: {
+          status: "ready",
+          value: ["rec_lookup"],
+          targetField: forwardRelationField,
+          sourceBaseId: targetBase.id,
+          sourceBaseSlug: targetBase.slug,
+          dependencyVersion: "test",
+          sources: [],
+        } satisfies LookupComputedVO,
+      },
+    } satisfies RecordVO;
+    const linked = (id: string, title: string): RecordVO => ({
+      ...record([]),
+      id,
+      baseId: targetBase.id,
+      base: targetBase,
+      headCommit: {
+        ...record([]).headCommit,
+        id: `cmt_${id}`,
+        baseId: targetBase.id,
+        payload: { title },
+      },
+    });
+
+    render(
+      <CoreI18nProvider locale="en">
+        <BusaBaseGallery
+          activeView={view}
+          base={base}
+          fields={[...fields, forwardRelationField, reverseRelationField, lookupField]}
+          records={[source]}
+          relationRecords={[
+            source,
+            linked("rec_forward", "Forward relation"),
+            linked("rec_reverse", "Reverse relation"),
+            linked("rec_lookup", "Lookup relation"),
+          ]}
+        />
+      </CoreI18nProvider>,
+    );
+
+    for (const [name, id] of [
+      ["Forward relation", "rec_forward"],
+      ["Reverse relation", "rec_reverse"],
+      ["Lookup relation", "rec_lookup"],
+    ] as const) {
+      expect(screen.getByRole("link", { name }).getAttribute("href")).toBe(`/base/lessons/${id}`);
+      expect(screen.queryByText(id)).toBeNull();
+    }
+  });
+});
+
+describe("BusaBaseGallery members", () => {
+  it("uses resolved member names instead of the stored user ids", () => {
+    const memberField: BaseFieldVO = {
+      id: "fld_member",
+      baseId: base.id,
+      slug: "members",
+      name: "Members",
+      type: "member",
+      required: false,
+      position: 2,
+      options: {},
+    };
+    const source = record([]);
+    source.headCommit.payload.members = ["opaque-user-id-one", "opaque-user-id-two"];
+    source.fieldUsers = {
+      "opaque-user-id-one": { id: "opaque-user-id-one", name: "张三", email: null, image: null },
+      "opaque-user-id-two": { id: "opaque-user-id-two", name: "李四", email: null, image: null },
+    };
+    render(
+      <CoreI18nProvider locale="en">
+        <BusaBaseGallery
+          activeView={view}
+          base={base}
+          fields={[...fields, memberField]}
+          records={[source]}
+        />
+      </CoreI18nProvider>,
+    );
+    expect(screen.getByText("张三")).toBeTruthy();
+    expect(screen.getByText("李四")).toBeTruthy();
+    expect(screen.queryByText("opaque-user-id-one")).toBeNull();
+    expect(screen.queryByText("opaque-user-id-two")).toBeNull();
   });
 });
 

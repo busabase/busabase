@@ -25,10 +25,29 @@ const cms = createBusabaseCms({
 });
 
 const posts = await cms.posts.list();
+const postIndex = await cms.posts.listSummaries();
 const page = await cms.pages.getByPath("/use-cases/automation");
 const categories = await cms.categories.list();
 const tag = await cms.tags.getBySlug("nextjs");
 ```
+
+`cms.posts.listSummaries()` returns an index-only `PostSummaryVO[]` for sitemaps and AI content
+directories. It validates and paginates the same published Posts as `posts.list()`, then removes
+`body`, `attachments` and `coverImage`, as well as the raw `body`, `attachments` and `cover-image`
+fields. Identity, descriptions, dates, relations, SEO fields and other custom non-media metadata
+remain available. Use the full `posts.list()` or `posts.getByPath()` for article bodies and Blog
+cards that need covers. `createCachedBusabaseCms` caches summaries separately from full Post
+lists and point reads, with the same Posts tags and configured TTL; successful lightweight index
+reads do not replace or seed the full-content cache. No upstream field-projection API is required:
+the projection happens before the SDK returns or caches the result, not before the network read.
+
+The Next adapter warns when a serialized summary entry reaches a conservative 1.9 MiB budget,
+before Next's default 2 MiB limit. The estimate includes the escaped JSON cache body and counts
+UTF-8 bytes. Logs contain only the content kind, record count, estimated size and budget; the
+adapter continues returning complete records and preserves custom metadata. Growth-sized Post
+and Page regression fixtures enforce this budget in tests. Arbitrarily large custom metadata or
+an unbounded catalog can still exceed Next's limit and needs a further projection or cache design;
+this warning does not create an unlimited cache.
 
 `folderId` is the preferred setup. The first read discovers direct child Bases and stores their
 stable IDs in the Folder's `metadata.busabaseCms` namespace. Base display names and slugs may then

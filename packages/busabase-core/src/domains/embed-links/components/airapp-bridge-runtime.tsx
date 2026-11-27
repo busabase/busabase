@@ -1,9 +1,9 @@
 "use client";
 
 import { NodepodRunner } from "busabase-core/domains/airapp/nodepod-runner";
-import { AIRAPP_PREVIEW_IFRAME_SANDBOX } from "busabase-core/domains/airapp/preview-sandbox";
 import type { AirAppHostedRuntime } from "busabase-core/domains/airapp/runtime-env";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AirAppPreviewViewport } from "../../airapp/components/AirAppPreviewViewport";
 
 /**
  * Runs an AirApp in a Nodepod pod whose `/api/v1` calls are RELAYED through the
@@ -358,34 +358,35 @@ export function AirAppBridgeRuntime({
     };
   }, [expiresAt, headers]);
 
-  if (state === "unavailable" || state === "expired") {
-    return (
-      <div
-        className={
-          layout === "fullscreen"
-            ? "grid min-h-dvh place-items-center bg-background text-foreground"
-            : "grid h-full place-items-center bg-background text-foreground"
-        }
-      >
-        {state === "expired" ? (labels.expired ?? labels.unavailable) : labels.unavailable}
-      </div>
-    );
-  }
+  const unavailable = state === "unavailable" || state === "expired";
+  const frameClass =
+    layout === "fullscreen" ? "fixed inset-0 bg-background" : "h-full bg-background";
   return (
-    <div
-      className={layout === "fullscreen" ? "fixed inset-0 bg-background" : "h-full bg-background"}
-    >
-      {previewUrl ? (
-        <iframe
-          className="h-full w-full border-0 bg-white"
-          ref={iframeRef}
-          sandbox={AIRAPP_PREVIEW_IFRAME_SANDBOX}
-          src={previewUrl}
-          title={title}
-        />
-      ) : (
-        <div className="grid h-full place-items-center text-muted-foreground">{labels.loading}</div>
-      )}
-    </div>
+    <AirAppPreviewViewport
+      className="h-full w-full border-0 bg-white"
+      fallback={
+        unavailable ? (
+          <div
+            className={
+              layout === "fullscreen"
+                ? "grid min-h-dvh place-items-center bg-background text-foreground"
+                : "grid h-full place-items-center bg-background text-foreground"
+            }
+          >
+            {state === "expired" ? (labels.expired ?? labels.unavailable) : labels.unavailable}
+          </div>
+        ) : (
+          <div className={frameClass}>
+            <div className="grid h-full place-items-center text-muted-foreground">
+              {labels.loading}
+            </div>
+          </div>
+        )
+      }
+      ref={iframeRef}
+      src={unavailable ? null : previewUrl}
+      title={title}
+      wrapFrame={(frame) => <div className={frameClass}>{frame}</div>}
+    />
   );
 }

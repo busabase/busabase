@@ -11,6 +11,7 @@ import {
   BusabaseDashboardShell as CoreDashboardShell,
 } from "busabase-core/dashboard/dashboard-shell";
 import type { MoveNodePayload } from "busabase-core/dashboard/use-move-node";
+import { useAppBranding } from "busabase-core/domains/settings/hooks/use-app-branding";
 import { useCoreI18n } from "busabase-core/i18n";
 import { DropdownMenuItem, DropdownMenuSeparator } from "kui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
@@ -35,7 +36,6 @@ import { useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useSPA } from "~/components/spa/spa-context";
 import { SettingsDialog } from "~/domains/settings/components/settings-dialog";
-import { useAppBranding } from "~/domains/settings/hooks/use-app-branding";
 import { getLanguageOptions } from "~/i18n/config";
 import { useBusabaseAppLL } from "~/i18n/use-app-ll";
 

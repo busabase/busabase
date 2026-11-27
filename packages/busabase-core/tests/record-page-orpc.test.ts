@@ -168,7 +168,10 @@ describe("records.listPage - oRPC integration", () => {
     ).rejects.toThrow(/view not found/i);
   });
 
-  it("rejects page sizes above the contract maximum", async () => {
-    await expect(client.records.listPage({ baseId, page: 1, pageSize: 101 })).rejects.toThrow();
+  it("accepts the largest Base page and rejects anything past it", async () => {
+    const accepted = await client.records.listPage({ baseId, page: 1, pageSize: 1000 });
+    expect(accepted.pageSize).toBe(1000);
+    expect(accepted.records.length).toBeLessThanOrEqual(1000);
+    await expect(client.records.listPage({ baseId, page: 1, pageSize: 1001 })).rejects.toThrow();
   });
 });

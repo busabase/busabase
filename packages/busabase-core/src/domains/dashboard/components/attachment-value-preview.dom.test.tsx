@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
+import { AssetContentUrlProvider } from "../../assets/hooks/asset-content-url-context";
 import { AttachmentValuePreview } from "./attachment-value-preview";
 
 const file = (id: string, mimeType = "image/png") => ({
@@ -21,9 +22,43 @@ function show(value: unknown, compact = true) {
   );
 }
 
-afterEach(cleanup);
+beforeEach(() => {
+  vi.stubGlobal("matchMedia", (media: string) => ({
+    matches: false,
+    media,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("attachment field previews", () => {
+  it("uses the Embed host's resource route for private attachment thumbnails and previews", () => {
+    render(
+      <CoreI18nProvider locale="en">
+        <AssetContentUrlProvider
+          value={(assetId) => `/embed/emb_example/assets/${assetId}/raw?token=link-secret`}
+        >
+          <AttachmentValuePreview value={[{ ...file("private"), assetId: "ast_private" }]} />
+        </AssetContentUrlProvider>
+      </CoreI18nProvider>,
+    );
+    const image = screen.getByRole("img", { name: "private.png" });
+    expect(image.getAttribute("src")).toBe(
+      "/embed/emb_example/assets/ast_private/raw?token=link-secret",
+    );
+    expect(screen.getByRole("link", { name: "private.png" }).getAttribute("href")).toBe(
+      "/embed/emb_example/assets/ast_private/raw?token=link-secret",
+    );
+  });
   it("keeps compact grid thumbnails labelled without rendering their file text", () => {
     const bounds = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(220);
     try {
@@ -165,7 +200,8 @@ describe("attachment field previews", () => {
     const opener = screen.getByText("+1");
     fireEvent.click(opener);
     const dialog = screen.getByRole("dialog");
-    const choices = within(dialog).getAllByRole("button", { name: "same.png" });
+    const panel = screen.getByTestId("attachment-preview-panel");
+    const choices = within(panel).getAllByRole("button", { name: "same.png" });
     expect(choices).toHaveLength(3);
     expect(choices.map((button) => button.getAttribute("aria-pressed"))).toEqual([
       "false",
@@ -173,11 +209,12 @@ describe("attachment field previews", () => {
       "true",
     ]);
     fireEvent.click(choices[1] as HTMLElement);
-    expect(choices.map((button) => button.getAttribute("aria-pressed"))).toEqual([
-      "false",
-      "true",
-      "false",
-    ]);
+    expect(dialog.querySelector("[data-attachment-position]")?.textContent).toBe("3 / 4");
+    expect(
+      within(panel)
+        .getAllByRole("button", { name: "same.png" })
+        .map((button) => button.getAttribute("aria-pressed")),
+    ).toEqual(["false", "true", "false"]);
     expect(
       within(dialog).getByRole("link", { name: "Download file" }).getAttribute("href"),
     ).toContain("/api/assets/ast_same/raw");
@@ -241,10 +278,11 @@ describe("attachment field previews", () => {
     fireEvent.click(screen.getByText("+1"));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading", { name: "last.png" })).toBeTruthy();
+    const panel = screen.getByTestId("attachment-preview-panel");
     for (const item of files) {
-      expect(within(dialog).getByRole("button", { name: item.fileName })).toBeTruthy();
+      expect(within(panel).getByRole("button", { name: item.fileName })).toBeTruthy();
     }
-    fireEvent.click(within(dialog).getByRole("button", { name: "report.pdf" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "report.pdf" }));
     expect(dialog.querySelector('[data-previewfile-type="pdf"]')).toBeTruthy();
     expect(within(dialog).getByRole("link", { name: "Open in new tab" }).getAttribute("href")).toBe(
       files[0]?.url,
@@ -315,15 +353,14 @@ describe("attachment field previews", () => {
     expect(screen.getByText("-")).toBeTruthy();
   });
 
-  it("keeps the subtitle and single-file switcher row by default", () => {
+  it("gives a single attachment the full content area without duplicate title or switcher", () => {
     show([file("photo")]);
     fireEvent.click(screen.getByRole("link", { name: "photo.png" }));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByText("File preview")).toBeTruthy();
-    expect(within(dialog).getByRole("button", { name: "photo.png" })).toBeTruthy();
-    // Radix wires aria-describedby to the rendered DialogDescription by
-    // default; minimalChrome must not touch this path when it is false.
-    expect(dialog.hasAttribute("aria-describedby")).toBe(true);
+    expect(within(dialog).queryByText("File preview")).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "photo.png" })).toBeNull();
+    expect(within(dialog).getByRole("heading", { name: "photo.png" })).toBeTruthy();
+    expect(dialog.hasAttribute("aria-describedby")).toBe(false);
   });
 
   it("drops the subtitle and single-file switcher row when minimalChrome is set", () => {
@@ -344,7 +381,7 @@ describe("attachment field previews", () => {
     expect(dialog.hasAttribute("aria-describedby")).toBe(false);
   });
 
-  it("still shows the switcher row in minimalChrome mode when there are multiple attachments, and switching updates the heading", () => {
+  it("shows the ordered file list by default and updates the heading and selection", () => {
     render(
       <CoreI18nProvider locale="en">
         <AttachmentValuePreview minimalChrome value={[file("one"), file("two")]} />
@@ -352,18 +389,21 @@ describe("attachment field previews", () => {
     );
     fireEvent.click(screen.getAllByRole("link")[0] as HTMLElement);
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("button", { name: "one.png" })).toBeTruthy();
-    expect(within(dialog).getByRole("button", { name: "two.png" })).toBeTruthy();
+    const panel = screen.getByTestId("attachment-preview-panel");
+    expect(
+      within(panel)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["one.png", "two.png"]);
     expect(within(dialog).getByRole("heading", { name: "one.png" })).toBeTruthy();
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "two.png" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "two.png" }));
     expect(within(dialog).getByRole("heading", { name: "two.png" })).toBeTruthy();
     expect(within(dialog).queryByRole("heading", { name: "one.png" })).toBeNull();
     expect(
-      within(dialog).getByRole("button", { name: "two.png" }).getAttribute("aria-pressed"),
+      within(panel).getByRole("button", { name: "two.png" }).getAttribute("aria-pressed"),
     ).toBe("true");
     expect(
-      within(dialog).getByRole("button", { name: "one.png" }).getAttribute("aria-pressed"),
+      within(panel).getByRole("button", { name: "one.png" }).getAttribute("aria-pressed"),
     ).toBe("false");
   });
 });

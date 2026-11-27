@@ -119,6 +119,152 @@ describe("field-values projection layer", () => {
     expect(links[0]).toMatchObject({ fieldSlug: "ref", targetRecordId: target.id });
   });
 
+  it.each(["plain", "encoded"] as const)(
+    "preserves archive tombstones across a full source rewrite (%s)",
+    async (encoding) => {
+      const target = await client.bases.createChangeRequest({
+        baseId,
+        fields: { title: `Archive rewrite target ${encoding}` },
+        autoMerge: true,
+      });
+      const ref = encoding === "plain" ? [target.id] : [JSON.stringify([target.id])];
+      const source = await client.bases.createChangeRequest({
+        baseId,
+        fields: { title: `Archive rewrite source ${encoding}`, ref },
+        autoMerge: true,
+      });
+      const db = await getDb();
+      const { busabaseRecordLinks, busabaseRecords } = await getSchema();
+      const readLinks = () =>
+        db
+          .select()
+          .from(busabaseRecordLinks)
+          .where(eq(busabaseRecordLinks.sourceRecordId, source.id));
+      await client.records.changeRequest({
+        recordId: target.id,
+        operation: "delete",
+        autoMerge: true,
+      });
+      const [archivedTarget] = await db
+        .select()
+        .from(busabaseRecords)
+        .where(eq(busabaseRecords.id, target.id));
+      const [tombstone] = await readLinks();
+      expect(tombstone.deletedAt).toEqual(archivedTarget.archivedAt);
+      await client.records.changeRequest({
+        recordId: source.id,
+        operation: "update",
+        fields: { title: "Edited while target archived", ref },
+        autoMerge: true,
+      });
+      // Keeping the original row and timestamp is what makes target restore
+      // work; merely filtering new live links would lose this signal.
+      const rewritten = await client.records.get({ recordId: source.id });
+      expect(await readLinks()).toMatchObject([
+        {
+          id: tombstone.id,
+          deletedAt: tombstone.deletedAt,
+          createdAt: tombstone.createdAt,
+          commitId: rewritten.headCommitId,
+        },
+      ]);
+      await client.records.changeRequest({
+        recordId: target.id,
+        operation: "restore",
+        autoMerge: true,
+      });
+      expect(await readLinks()).toMatchObject([{ id: tombstone.id, deletedAt: null }]);
+      await client.records.changeRequest({
+        recordId: target.id,
+        operation: "delete",
+        autoMerge: true,
+      });
+      await client.records.changeRequest({
+        recordId: source.id,
+        operation: "update",
+        fields: { ref: [] },
+        autoMerge: true,
+      });
+      await client.records.changeRequest({
+        recordId: target.id,
+        operation: "restore",
+        autoMerge: true,
+      });
+      expect(await readLinks()).toEqual([]);
+    },
+  );
+
+  it.each(["plain", "encoded"] as const)(
+    "restores targets in the order edited during archive (%s)",
+    async (encoding) => {
+      const base = await client.bases.create({
+        slug: `archive-order-${encoding}`,
+        name: "Archive order",
+        autoMerge: true,
+        fields: [
+          { slug: "title", name: "Title", type: "text" },
+          { slug: "ref", name: "Ref", type: "relation", options: { targetBaseId: baseId } },
+          {
+            slug: "ref_titles",
+            name: "Ref titles",
+            type: "lookup",
+            options: { lookup: { relationFieldSlug: "ref", targetFieldSlug: "title" } },
+          },
+        ],
+      });
+      const first = await client.bases.createChangeRequest({
+        baseId,
+        fields: { title: "First" },
+        autoMerge: true,
+      });
+      const second = await client.bases.createChangeRequest({
+        baseId,
+        fields: { title: "Second" },
+        autoMerge: true,
+      });
+      const encode = (ids: string[]) => (encoding === "plain" ? ids : [JSON.stringify(ids)]);
+      const source = await client.bases.createChangeRequest({
+        baseId: base.id,
+        fields: { title: "Source", ref: encode([first.id, second.id]) },
+        autoMerge: true,
+      });
+      const db = await getDb();
+      const { busabaseRecordLinks } = await getSchema();
+      const filter = and(
+        eq(busabaseRecordLinks.sourceRecordId, source.id),
+        eq(busabaseRecordLinks.targetRecordId, first.id),
+      );
+      await client.records.changeRequest({
+        recordId: first.id,
+        operation: "delete",
+        autoMerge: true,
+      });
+      const [before] = await db.select().from(busabaseRecordLinks).where(filter);
+      await client.records.changeRequest({
+        recordId: source.id,
+        operation: "update",
+        fields: { ref: encode([second.id, first.id]) },
+        autoMerge: true,
+      });
+      const head = await client.records.get({ recordId: source.id });
+      const [after] = await db.select().from(busabaseRecordLinks).where(filter);
+      expect(after).toMatchObject({
+        id: before.id,
+        deletedAt: before.deletedAt,
+        position: 1,
+        commitId: head.headCommitId,
+      });
+      await client.records.changeRequest({
+        recordId: first.id,
+        operation: "restore",
+        autoMerge: true,
+      });
+      expect(
+        (await client.records.get({ recordId: source.id })).headCommit.payload.ref_titles,
+      ).toEqual(["Second", "First"]);
+    },
+  );
+
   // ── archived/deleted listing queries ───────────────────────────────────────
 
   it("listDeletedFields returns soft-deleted fields; unknown base → []", async () => {

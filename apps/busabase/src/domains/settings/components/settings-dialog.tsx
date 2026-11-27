@@ -1,6 +1,8 @@
 "use client";
 
 import { createBusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type { AppBrandingSettingsLabels } from "busabase-core/domains/settings/components/app-branding-settings-tab";
+import { AppBrandingSettingsTab } from "busabase-core/domains/settings/components/app-branding-settings-tab";
 import { SpaceInstructionsSettings } from "busabase-core/domains/space-instructions/components/space-instructions-settings";
 import { SpaceWelcomeSettings } from "busabase-core/domains/space-welcome/components/space-welcome-settings";
 import { useCoreI18n } from "busabase-core/i18n";
@@ -25,8 +27,6 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { AppBrandingSettingsLabels } from "~/domains/settings/components/app-branding-settings-tab";
-import { AppBrandingSettingsTab } from "~/domains/settings/components/app-branding-settings-tab";
 import type { CloudConnectSettingsLabels } from "~/domains/settings/components/cloud-connect-settings-tab";
 import { CloudConnectSettingsTab } from "~/domains/settings/components/cloud-connect-settings-tab";
 import type { FilePreviewSettingsLabels } from "~/domains/settings/components/file-preview-settings-tab";

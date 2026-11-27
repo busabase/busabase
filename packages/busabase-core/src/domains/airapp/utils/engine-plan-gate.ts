@@ -38,6 +38,8 @@ export interface AirAppEnginePlanLock {
   lockedEngines: readonly AirAppRunnerKind[];
   /** The host's own name for the plan that unlocks them (Cloud: "Plus"). */
   planLabel: string;
+  /** Publishing is paid separately from members-only Website previews. Omitted: no separate gate. */
+  sitePublishingLocked?: boolean;
 }
 
 /**

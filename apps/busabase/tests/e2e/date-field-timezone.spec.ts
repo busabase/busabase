@@ -432,7 +432,10 @@ test("a review-first date change stays on its old day and opens the pending requ
   await expect(source.getByRole("link", { name: "Review schedule" })).toBeVisible();
   await expect(target).not.toContainText("Review schedule");
   const reviewLink = notice.getByRole("link", { name: "Reviews" });
-  const reviewId = (await reviewLink.getAttribute("href"))?.split("/").pop();
+  const reviewHref = await reviewLink.getAttribute("href");
+  if (!reviewHref) throw new Error("Review request link is missing its destination");
+  const reviewUrl = new URL(reviewHref, page.url());
+  const reviewId = reviewUrl.pathname.split("/").pop();
   if (!reviewId) throw new Error("Review request link is missing its ID");
   const detail = await json<{ status: string }>(
     await request.get(`/api/v1/change-requests/${reviewId}`),
@@ -440,7 +443,8 @@ test("a review-first date change stays on its old day and opens the pending requ
   expect(detail.status).toBe("in_review");
   await page.screenshot({ path: test.info().outputPath("10-calendar-review-pending.png") });
   await reviewLink.click();
-  await expect(page).toHaveURL(new RegExp(`/inbox/${reviewId}$`));
+  await expect(page).toHaveURL(reviewUrl.href);
+  await expect(page.getByRole("heading", { name: /Review schedule/ })).toBeVisible();
   await page.context().close();
   await page.video()?.saveAs(test.info().outputPath("calendar-review-pending.webm"));
 });

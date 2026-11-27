@@ -36,6 +36,8 @@ export const APP_USERS_ERROR_CODES = {
   userDisabled: "APP_USER_DISABLED",
   sessionInvalid: "APP_USER_SESSION_INVALID",
   invalidOwnerField: "INVALID_OWNER_FIELD",
+  /** The space's plan does not include app user sign-in (Busabase Cloud: Plus and above). */
+  planRequired: "APP_USERS_PLAN_REQUIRED",
 } as const;
 
 /** In the order the limits are checked. */
@@ -204,6 +206,8 @@ export type AppUserIdInput = z.infer<typeof AppUserIdInputSchema>;
 // ── Routes ─────────────────────────────────────────────────────────────────
 
 const ErrorBodySchema = z.object({ error: z.string() });
+/** `APP_USERS_PLAN_REQUIRED`: `requiredPlan` is the cheapest plan that includes sign-in. */
+const PlanRequiredErrorBodySchema = ErrorBodySchema.extend({ requiredPlan: z.string() });
 
 const authErrors = {
   UNAUTHORIZED: { status: 401, message: "Unauthorized", data: ErrorBodySchema },
@@ -250,13 +254,18 @@ export const cloudAppUsersRoutes = {
       tags: ["App Users"],
       summary: "Turn app user sign-in on or off",
       description:
-        "`appName` is the name sign-in emails use (defaults to the app node's name); leave it out to keep the current name, send an empty string to clear it. Which rows belong to which app user is decided by the app's own server when it calls `records/query`. Requires `manage` on the app node (space owners and admins have it).",
+        "`appName` is the name sign-in emails use (defaults to the app node's name); leave it out to keep the current name, send an empty string to clear it. Which rows belong to which app user is decided by the app's own server when it calls `records/query`. Requires `manage` on the app node (space owners and admins have it). On Busabase Cloud, turning sign-in on requires a paid plan (Plus or above); otherwise `APP_USERS_PLAN_REQUIRED`. Turning it off is always allowed.",
       successDescription: "The saved settings.",
       spec: securedOperation,
     })
     .errors({
       ...authErrors,
       BAD_REQUEST: { status: 400, message: "Bad Request", data: ErrorBodySchema },
+      APP_USERS_PLAN_REQUIRED: {
+        status: 403,
+        message: "App user sign-in requires a paid plan",
+        data: PlanRequiredErrorBodySchema,
+      },
     })
     .input(PutAppUsersSettingsInputSchema)
     .output(AppUsersSettingsVOSchema),
@@ -266,7 +275,7 @@ export const cloudAppUsersRoutes = {
       path: "/app-users/send-code",
       tags: ["App Users"],
       summary: "Email a 6-digit sign-in code to an app user",
-      description: `Same response whether or not the address already has an account. The code is valid for 10 minutes and 5 attempts; sending a new one invalidates the older ones. The email is written in \`locale\` when supported (en, zh-CN, zh-TW, ja, ko, de, fr, es, pt, vi), else English. Limits, checked in this order: one code per email per 60 s (\`cooldown\`); with the end user's IP in \`${APP_USER_IP_HEADER}\`, 5 per IP per app per hour (\`ip_hourly_limit\`) and 20 per day (\`ip_daily_limit\`); 10 per email per day (\`email_daily_limit\`); 1000 per space per day for addresses that are not yet active app users (\`space_daily_limit\`) — returning users are exempt. ${CALLER_NOTE}`,
+      description: `Same response whether or not the address already has an account. The code is valid for 10 minutes and 5 attempts; sending a new one invalidates the older ones. The email is written in \`locale\` when supported (en, zh-CN, zh-TW, ja, ko, de, fr, es, pt, vi), else English. Limits, checked in this order: one code per email per 60 s (\`cooldown\`); with the end user's IP in \`${APP_USER_IP_HEADER}\`, 5 per IP per app per hour (\`ip_hourly_limit\`) and 20 per day (\`ip_daily_limit\`); 10 per email per day (\`email_daily_limit\`); 1000 per space per day for addresses that are not yet active app users (\`space_daily_limit\`) — returning users are exempt. On Busabase Cloud the space needs a paid plan (Plus or above); otherwise \`APP_USERS_PLAN_REQUIRED\` and no email is sent. ${CALLER_NOTE}`,
       successDescription: "The code was sent.",
       inputStructure: "detailed",
       spec: securedOperation,
@@ -277,6 +286,11 @@ export const cloudAppUsersRoutes = {
         status: 403,
         message: "Sign-in is not enabled for this app",
         data: ErrorBodySchema,
+      },
+      APP_USERS_PLAN_REQUIRED: {
+        status: 403,
+        message: "App user sign-in requires a paid plan",
+        data: PlanRequiredErrorBodySchema,
       },
       INVALID_EMAIL: {
         status: 400,
@@ -325,6 +339,11 @@ export const cloudAppUsersRoutes = {
         status: 403,
         message: "Sign-in is not enabled for this app",
         data: ErrorBodySchema,
+      },
+      APP_USERS_PLAN_REQUIRED: {
+        status: 403,
+        message: "App user sign-in requires a paid plan",
+        data: PlanRequiredErrorBodySchema,
       },
     })
     .input(VerifyAppUserCodeInputSchema)

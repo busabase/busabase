@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { BaseFieldVO, BaseVO, ViewVO } from "busabase-contract/types";
@@ -86,7 +86,7 @@ const client = {
   groupRecords: vi.fn(async () => ({ groups: [] })),
 } as unknown as BusabaseDashboardApiClient;
 
-const renderView = (activeView: ViewVO | null) => {
+const renderView = (activeView: ViewVO | null, pageState: RecordsPagination = pagination) => {
   const location = memoryLocation({ path: `/base/tasks/${activeView?.slug ?? ""}` });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -104,7 +104,7 @@ const renderView = (activeView: ViewVO | null) => {
             onReorderView={vi.fn()}
             onUpdateView={vi.fn()}
             orpc={{} as BusabaseQueryUtils}
-            pagination={pagination}
+            pagination={pageState}
             records={[]}
             views={activeView ? [activeView] : []}
           />
@@ -136,5 +136,16 @@ describe("Base view pagination", () => {
   ])("shows no pager in a %s view", (_label, activeView) => {
     renderView(activeView);
     expect(screen.queryByRole("navigation", { name: "Record pages" })).toBeNull();
+  });
+
+  it("lets a table choose a much larger page, up to 1000 rows", () => {
+    const onPageSizeChange = vi.fn();
+    renderView(view("table"), { ...pagination, total: 2400, totalPages: 48, onPageSizeChange });
+    fireEvent.click(screen.getByRole("combobox", { name: "Rows per page" }));
+    for (const size of ["25", "50", "100", "200", "500", "1000"]) {
+      expect(screen.getByRole("option", { name: size })).toBeTruthy();
+    }
+    fireEvent.click(screen.getByRole("option", { name: "1000" }));
+    expect(onPageSizeChange).toHaveBeenCalledWith(1000);
   });
 });

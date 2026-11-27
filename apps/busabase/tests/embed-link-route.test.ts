@@ -20,7 +20,7 @@ const resolved = {
   targetName: "Runbook",
   expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
   framePolicy: { mode: "origins" as const, allowedOrigins: ["https://viewer.example"] },
-  detail: { type: "doc", doc: { body: "# Runbook", node: { id: "nod_1" } } },
+  node: { id: "nod_1", type: "doc" as const, slug: "runbook", name: "Runbook" },
 };
 
 describe("Desktop embed capability route", () => {
@@ -86,25 +86,37 @@ describe("Desktop embed capability route", () => {
     expect(mocks.resolveEmbedLink).not.toHaveBeenCalled();
   });
 
-  it("renders iframe requests directly with no-store and no-referrer headers", async () => {
+  it("hands an ordinary node to the Node Detail page, keeping the iframe token", async () => {
     const response = await GET(
       new NextRequest(`http://localhost:15419/embed/${publicId}?token=${secret}&view=iframe`),
       { params: Promise.resolve({ publicId }) },
     );
-    const html = await response.text();
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      `http://localhost:15419/embed/${publicId}/node?token=${secret}&view=iframe`,
+    );
     expect(response.headers.get("cache-control")).toContain("no-store");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(response.headers.get("set-cookie")).toBeNull();
-    expect(html).toContain("<title>Runbook</title>");
-    expect(html).toContain("<h1>Runbook</h1>");
+  });
+
+  it("hands a top-level visit to the Node Detail page without a token in the URL", async () => {
+    const response = await GET(
+      new NextRequest(`http://localhost:15419/embed/${publicId}`, {
+        headers: { cookie: `busabase_embed_${publicId}=${publicId}.${secret}` },
+      }),
+      { params: Promise.resolve({ publicId }) },
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`http://localhost:15419/embed/${publicId}/node`);
   });
 
   it("dispatches AirApp embeds to the shared runtime route", async () => {
     mocks.resolveEmbedLink.mockResolvedValue({
       ...resolved,
-      detail: { type: "airapp", airapp: { node: { id: "nod_1", name: "Runbook" } } },
+      node: { ...resolved.node, type: "airapp" },
     });
     const response = await GET(
       new NextRequest(`http://localhost:15419/embed/${publicId}?token=${secret}&view=iframe`),

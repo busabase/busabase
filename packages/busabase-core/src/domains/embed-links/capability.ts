@@ -10,6 +10,13 @@ export const EMBED_BASE_SECURITY_HEADERS = {
   "cache-control": "private, no-store, max-age=0",
   "referrer-policy": "no-referrer",
   "x-content-type-options": "nosniff",
+  // A host with COEP enabled requires both COEP and CORP on cross-origin
+  // iframe documents. Keep the redirect/bootstrap and every typed content
+  // route compatible, rather than making only the final AirApp URL loadable.
+  // CSP frame-ancestors still decides which sites may actually frame a link.
+  "cross-origin-embedder-policy": "credentialless",
+  "cross-origin-opener-policy": "same-origin",
+  "cross-origin-resource-policy": "cross-origin",
 } as const;
 
 /** Structural mirror of `EmbedFramePolicyVO`, kept here so this module stays
@@ -43,7 +50,7 @@ export const EMBED_SECURITY_HEADERS = embedSecurityHeaders({
 });
 
 /**
- * Cross-origin isolation for the public AirApp embed.
+ * Legacy AirApp isolation export, now shared by every Embed document above.
  *
  * Nodepod (the in-browser Node runtime the embed boots) needs
  * `SharedArrayBuffer` for its threaded WASI modules, lean worker snapshots and
@@ -52,17 +59,17 @@ export const EMBED_SECURITY_HEADERS = embedSecurityHeaders({
  * the console shows `SharedArrayBuffer unavailable` and the virtual preview
  * origin 503s. Nothing about that failure points at a missing header.
  *
- * Both hosts already send this pair on their authenticated dashboard AirApp
- * routes (`next.config.mjs`). The public embed route is served through the
- * proxy instead, because its CSP is per-link
- * (`framePolicy`) and a static `next.config` rule would flatten that.
+ * Both hosts already send this pair on their authenticated dashboard routes.
+ * The public Embed routes compose their frame policy separately. Ordinary
+ * nodes, typed detail pages and the entry redirect need the same base headers
+ * too, or an isolated publisher blocks them before the content can render.
  *
  * `credentialless` rather than `require-corp`, matching the dashboard routes:
  * Nodepod pulls tool WASM from esm.sh / jsdelivr, which do not send CORP.
  */
 export const EMBED_AIRAPP_ISOLATION_HEADERS = {
-  "cross-origin-opener-policy": "same-origin",
-  "cross-origin-embedder-policy": "credentialless",
+  "cross-origin-opener-policy": EMBED_BASE_SECURITY_HEADERS["cross-origin-opener-policy"],
+  "cross-origin-embedder-policy": EMBED_BASE_SECURITY_HEADERS["cross-origin-embedder-policy"],
 } as const;
 
 /** True for the public AirApp embed route, which needs the isolation pair above. */
@@ -71,7 +78,8 @@ export const isEmbedAirAppPath = (pathname: string): boolean =>
 
 /**
  * The complete response header set for an embed request: the per-link frame
- * policy, plus cross-origin isolation when this is the AirApp route.
+ * policy and document isolation. The AirApp branch retains its legacy export;
+ * the same values now belong to every Embed response, including redirects.
  *
  * Both hosts need exactly this pair of decisions and were making them
  * separately — one building a plain object, one setting fields on a
@@ -94,8 +102,11 @@ export const embedCapabilityCookieName = (id: string): string =>
 
 export const encodeEmbedCapability = (id: string, secret: string): string => `${id}.${secret}`;
 
+/** The embed page paths: the entry point and each typed subroute it hands off to. */
 export const embedPublicIdFromPath = (pathname: string): string | null => {
-  const match = pathname.match(/^\/embed\/([^/]+)(?:\/(?:airapp|change-request|record-detail))?$/);
+  const match = pathname.match(
+    /^\/embed\/([^/]+)(?:\/(?:airapp|change-request|record-detail|node))?$/,
+  );
   const id = match?.[1] ?? "";
   return isValidEmbedPublicId(id) ? id : null;
 };

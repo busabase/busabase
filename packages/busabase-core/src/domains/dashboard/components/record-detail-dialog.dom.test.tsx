@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { RecordVO } from "busabase-contract/types";
 import { useState } from "react";
@@ -63,8 +63,13 @@ const client = {
 
 const triggers: HTMLButtonElement[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   for (const trigger of triggers.splice(0)) trigger.remove();
 });
 
@@ -73,9 +78,11 @@ function renderDialog(
   visitorKind: "member" | "anonymous" = "member",
   state: {
     record?: RecordVO | null;
+    records?: RecordVO[];
     isLoading?: boolean;
     path?: string;
     sourceView?: string | null;
+    onClose?: () => void;
   } = {},
 ) {
   const location = memoryLocation({
@@ -90,15 +97,20 @@ function renderDialog(
 
   function Preview() {
     const [open, setOpen] = useState(true);
+    const previewRecord = state.record === undefined ? record : state.record;
     const preview = (
       <RecordDetailDialog
+        key={previewRecord?.id ?? "loading"}
         baseSlug="customers"
         client={client}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          state.onClose?.();
+          setOpen(false);
+        }}
         isLoading={state.isLoading}
         onDeleteChangeRequest={async () => undefined}
-        record={state.record === undefined ? record : state.record}
-        records={[record]}
+        record={previewRecord}
+        records={state.records ?? [record]}
         returnFocusTo={trigger}
       />
     );
@@ -110,10 +122,9 @@ function renderDialog(
     );
   }
 
-  render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const show = () => (
+    <QueryClientProvider client={queryClient}>
       <Router hook={location.hook} searchHook={location.searchHook}>
         <CoreI18nProvider locale={locale}>
           <DashboardVisitorProvider visitorKind={visitorKind}>
@@ -121,10 +132,35 @@ function renderDialog(
           </DashboardVisitorProvider>
         </CoreI18nProvider>
       </Router>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return { location, trigger };
+  const view = render(show());
+  return { location, trigger, unmount: view.unmount, rerender: () => view.rerender(show()) };
 }
+
+const simulateRecordAnimation = () => {
+  vi.stubGlobal("CSS", { escape: (value: string) => value });
+  const getStyles = window.getComputedStyle.bind(window);
+  vi.spyOn(window, "getComputedStyle").mockImplementation((element, pseudoElement) => {
+    const styles = getStyles(element, pseudoElement);
+    if (element.getAttribute("data-testid") === "record-detail-dialog") {
+      Object.defineProperty(styles, "animationName", {
+        configurable: true,
+        get: () =>
+          element.getAttribute("data-state") === "closed"
+            ? "busabase-dialog-out"
+            : "busabase-dialog-in",
+      });
+    }
+    return styles;
+  });
+};
+
+const finishRecordAnimation = (dialog: HTMLElement) => {
+  const event = new Event("animationend", { bubbles: true });
+  Object.defineProperty(event, "animationName", { value: "busabase-dialog-out" });
+  fireEvent(dialog, event);
+};
 
 describe("record detail dialog", () => {
   it("preserves the URL source on record links when no view provider is mounted", () => {
@@ -150,6 +186,216 @@ describe("record detail dialog", () => {
       demo: "1",
       view: "review",
     });
+  });
+
+  it.each(["relation", "lookup"] as const)(
+    "shows all 21 %s values and opens all 22 from a list icon",
+    (kind) => {
+      const linked = Array.from(
+        { length: 22 },
+        (_, index): RecordVO => ({
+          ...record,
+          id: `rec_many_${index}`,
+          headCommit: { ...record.headCommit, payload: { name: `Customer ${index + 1}` } },
+        }),
+      );
+      const makeRecord = (count: number): RecordVO => {
+        const field = {
+          ...record.base.fields[0],
+          id: "fld_many",
+          slug: "many",
+          name: "Many values",
+          type: kind,
+          options:
+            kind === "lookup"
+              ? {
+                  lookup: {
+                    relationFieldSlug: "customers",
+                    targetFieldSlug: "name",
+                    rollup: "values" as const,
+                  },
+                }
+              : {},
+        };
+        return {
+          ...record,
+          base: { ...record.base, fields: [...record.base.fields, field] },
+          headCommit: {
+            ...record.headCommit,
+            payload: {
+              ...record.headCommit.payload,
+              many: kind === "relation" ? linked.slice(0, count).map((item) => item.id) : [],
+            },
+          },
+          ...(kind === "lookup"
+            ? {
+                computedFields: {
+                  many: {
+                    status: "ready",
+                    value: linked.slice(0, count).map((item) => item.headCommit.payload.name),
+                    targetField: record.base.fields[0],
+                    sources: [],
+                    dependencyVersion: "v1",
+                  },
+                },
+              }
+            : {}),
+        } as RecordVO;
+      };
+      renderDialog("en", "member", { record: makeRecord(21), records: linked });
+      expect(screen.queryByTestId("record-collection-count-many")).toBeNull();
+      expect(document.querySelector('[data-record-field-slug="many"]')?.textContent).toContain(
+        "Customer 21",
+      );
+      cleanup();
+      renderDialog("en", "member", { record: makeRecord(22), records: linked });
+      const count = screen.getByTestId("record-collection-count-many");
+      expect(count.getAttribute("aria-label")).toContain("22");
+      expect(count.textContent).toBe("");
+      expect(count.parentElement?.textContent).toContain("Customer 20");
+      expect(screen.queryByTestId("lookup-sources-many")).toBeNull();
+      expect(document.querySelector('[data-record-field-slug="many"]')?.textContent).toContain(
+        "Customer 20",
+      );
+      expect(document.querySelector('[data-record-field-slug="many"]')?.textContent).not.toContain(
+        "Customer 21",
+      );
+      fireEvent.click(count);
+      const dialog = screen.getByTestId("record-collection-dialog");
+      expect(dialog.textContent).toContain("Customer 22");
+      expect(dialog.textContent).toContain("Customer 1");
+      if (kind === "lookup") {
+        expect(within(dialog).getByTestId("lookup-sources-many")).toBeTruthy();
+      }
+    },
+  );
+
+  it.each(["sum", "values"] as const)(
+    "keeps lookup provenance reachable for a small %s result",
+    (rollup) => {
+      const targetField = {
+        ...record.base.fields[0],
+        type: "number" as const,
+        slug: "fee",
+        name: "Fee",
+      };
+      const field = {
+        ...record.base.fields[0],
+        slug: "course_fees",
+        name: "Course fees",
+        type: "lookup" as const,
+        options: {
+          lookup: { relationFieldSlug: "courses", targetFieldSlug: "fee", rollup },
+        },
+      };
+      renderDialog("en", "member", {
+        record: {
+          ...record,
+          base: { ...record.base, fields: [record.base.fields[0], field] },
+          computedFields: {
+            course_fees: {
+              status: "ready",
+              value: rollup === "sum" ? 30 : [10, 20],
+              targetField,
+              sourceBaseId: "bas_courses",
+              sourceBaseSlug: "courses",
+              sources: [
+                {
+                  recordId: "rec_biology",
+                  title: "Biology",
+                  value: 10,
+                  headCommitId: "cmt_biology",
+                },
+                { recordId: "rec_math", title: "Math", value: 20, headCommitId: "cmt_math" },
+              ],
+              dependencyVersion: "v1",
+            },
+          },
+        },
+      });
+      expect(screen.queryByTestId("record-collection-count-course_fees")).toBeNull();
+      fireEvent.click(screen.getByTestId("lookup-sources-course_fees"));
+      const dialog = screen.getByTestId("lookup-source-dialog");
+      const biology = within(dialog).getByRole("link", { name: "Biology" });
+      expect(biology.getAttribute("href")).toContain("/base/courses/rec_biology");
+      expect(within(dialog).getByRole("link", { name: "Math" })).toBeTruthy();
+      expect(dialog.textContent).toContain("10");
+      expect(dialog.textContent).toContain("20");
+    },
+  );
+
+  it("keeps unavailable lookup feedback instead of showing a stale count", () => {
+    const field = { ...record.base.fields[0], slug: "unavailable", type: "lookup", options: {} };
+    renderDialog("en", "member", {
+      record: {
+        ...record,
+        base: { ...record.base, fields: [record.base.fields[0], field] },
+        computedFields: {
+          unavailable: {
+            status: "inaccessible",
+            value: Array.from({ length: 21 }, () => "Hidden"),
+            sources: [],
+            dependencyVersion: "v1",
+          },
+        },
+      } as RecordVO,
+    });
+    expect(screen.queryByTestId("record-collection-count-unavailable")).toBeNull();
+    expect(screen.queryByText("Hidden")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Source unavailable or access denied");
+  });
+
+  it("keeps every linked record readable in a wrapping detail field", () => {
+    const linkedRecords = Array.from(
+      { length: 19 },
+      (_, index): RecordVO => ({
+        ...record,
+        id: `rec_related_${index}`,
+        headCommit: { ...record.headCommit, payload: { name: `Customer ${index + 1}` } },
+      }),
+    );
+    renderDialog("en", "member", {
+      records: linkedRecords,
+      record: {
+        ...record,
+        base: {
+          ...record.base,
+          fields: [
+            ...record.base.fields,
+            {
+              id: "fld_related",
+              baseId: record.baseId,
+              required: false,
+              position: 2,
+              slug: "related",
+              name: "Related",
+              type: "relation",
+              options: { targetBaseId: record.baseId, multiple: true },
+            },
+          ],
+        },
+        headCommit: {
+          ...record.headCommit,
+          payload: {
+            ...record.headCommit.payload,
+            related: linkedRecords.map((linked) => linked.id),
+          },
+        },
+      },
+    });
+    const section = screen
+      .getByTestId("record-detail-dialog")
+      .querySelector('[data-record-field-slug="related"]') as HTMLElement;
+    for (const linked of linkedRecords) {
+      expect(
+        within(section).getByRole("link", { name: linked.headCommit.payload.name as string }),
+      ).toBeTruthy();
+    }
+    const chip = within(section).getByRole("link", { name: "Customer 19" });
+    const list = chip.parentElement as HTMLElement;
+    expect(list.classList.contains("flex-wrap")).toBe(true);
+    expect(list.classList.contains("inline")).toBe(false);
+    expect(list.parentElement?.classList.contains("truncate")).toBe(false);
   });
 
   it("shows every attachment in details and previews the final file", () => {
@@ -256,7 +502,7 @@ describe("record detail dialog", () => {
     fireEvent.click(within(tree).getByRole("treeitem", { name: "quote.pdf" }));
     const preview = screen.getByTestId("drive-file-preview-dialog");
     expect(within(preview).getByRole("heading", { name: "quote.pdf" })).toBeTruthy();
-    expect(within(preview).getByText("contracts/quote.pdf")).toBeTruthy();
+    expect(within(preview).getByRole("link", { name: "Download file" })).toBeTruthy();
     expect(within(preview).getByTestId("embedded-file-preview").getAttribute("data-url")).toBe(
       "https://example.com/ast_quote",
     );
@@ -380,6 +626,87 @@ describe("record detail dialog", () => {
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       await waitFor(() => expect(document.activeElement).toBe(trigger));
       expect(location.history).toEqual(["/base/customers/calendar?space=tnl_test"]);
+    },
+  );
+
+  it("waits for the record exit before notifying the parent and restoring focus", async () => {
+    simulateRecordAnimation();
+    const onClose = vi.fn();
+    const { trigger } = renderDialog("en", "member", { onClose });
+    const dialog = screen.getByTestId("record-detail-dialog");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+
+    expect(dialog.isConnected).toBe(true);
+    expect(dialog.getAttribute("data-state")).toBe("closed");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(trigger);
+
+    finishRecordAnimation(dialog);
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("record-detail-dialog")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("notifies once without an animation event when motion is disabled", async () => {
+    const onClose = vi.fn();
+    const { trigger } = renderDialog("en", "member", { onClose });
+    const dialog = screen.getByTestId("record-detail-dialog");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+
+    expect(dialog.isConnected).toBe(false);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it.each(["open", "closing", "closed"] as const)(
+    "does not notify after external unmount while %s",
+    async (phase) => {
+      simulateRecordAnimation();
+      const onClose = vi.fn();
+      const { unmount } = renderDialog("en", "member", { onClose });
+      const dialog = screen.getByTestId("record-detail-dialog");
+      if (phase !== "open") fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+      if (phase === "closed") finishRecordAnimation(dialog);
+
+      unmount();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      expect(onClose).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["open", "closing", "closed"] as const)(
+    "keeps the next record open after a key switch while %s",
+    async (phase) => {
+      simulateRecordAnimation();
+      const onClose = vi.fn();
+      const state = { record, onClose };
+      const { rerender } = renderDialog("en", "member", state);
+      const firstDialog = screen.getByTestId("record-detail-dialog");
+      if (phase !== "open")
+        fireEvent.click(within(firstDialog).getByRole("button", { name: "Close" }));
+      if (phase === "closed") finishRecordAnimation(firstDialog);
+      state.record = {
+        ...record,
+        id: "rec_next",
+        headCommit: { ...record.headCommit, payload: { name: "Next customer" } },
+      };
+
+      rerender();
+      const nextDialog = screen.getByRole("dialog", { name: "Next customer" });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      expect(firstDialog.isConnected).toBe(false);
+      expect(nextDialog.getAttribute("data-state")).toBe("open");
+      expect(nextDialog.contains(document.activeElement)).toBe(true);
+      expect(onClose).not.toHaveBeenCalled();
     },
   );
 });

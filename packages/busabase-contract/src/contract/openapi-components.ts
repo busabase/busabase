@@ -1,7 +1,14 @@
 import type { AnySchema } from "@orpc/contract";
 import { iStringRecordSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
-import { airAppSiteBlockerSchema } from "../domains/airapp/contract";
+import {
+  airAppPreviewEngineSchema,
+  airAppPreviewStateSchema,
+  airAppPreviewStatusSchema,
+  airAppSiteBlockerSchema,
+  airAppSiteEnvironmentDeploymentLockSchema,
+  airAppSitePublicationLockSchema,
+} from "../domains/airapp/contract";
 import {
   AssetDetailVOSchema,
   AssetUsageVOSchema,
@@ -371,6 +378,14 @@ export const busabaseOpenApiCommonSchemas = {
     schema: variantOf(NodeIconSchema, "type", "attachment"),
   },
   NodeShare: { strategy: "output", schema: nodeShareSchema },
+  AirAppPreviewEngine: { strategy: "output", schema: airAppPreviewEngineSchema },
+  AirAppPreviewStatus: { strategy: "output", schema: airAppPreviewStatusSchema },
+  AirAppPreviewState: { strategy: "output", schema: airAppPreviewStateSchema },
+  AirAppSitePublicationLock: { strategy: "output", schema: airAppSitePublicationLockSchema },
+  AirAppSiteEnvironmentDeploymentLock: {
+    strategy: "output",
+    schema: airAppSiteEnvironmentDeploymentLockSchema,
+  },
   // Why an AirApp's files cannot deploy as a website, one class per reason.
   AirAppSiteBlocker: { strategy: "output", schema: airAppSiteBlockerSchema },
   AirAppSiteBlockerNotASiteApp: {

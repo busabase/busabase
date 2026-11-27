@@ -82,3 +82,27 @@ export const rewriteAssetContentIds = (
     return replacement === undefined ? whole : buildAssetContentUrl(replacement);
   });
 };
+
+/**
+ * Root-relative references only: an absolute `https://host/api/assets/…` names
+ * a specific host and is left alone, as is anything that merely ends in the
+ * same path segment (`/x/api/assets/…`).
+ */
+const ROOT_RELATIVE_ASSET_CONTENT_URL_PATTERN = new RegExp(
+  `(?<![\\w.:/-])${ASSET_CONTENT_ROUTE_PREFIX}/(${ASSET_ID_IN_URL})/${ASSET_CONTENT_ROUTE_SUFFIX}`,
+  "g",
+);
+
+/**
+ * Point every root-relative asset reference in a body at `resolve(assetId)`,
+ * for rendering only. A surface whose visitor cannot use the session-backed
+ * raw route (an Embed Link page) renders the body through this; the stored body
+ * is never rewritten.
+ */
+export const rewriteAssetContentUrls = (
+  body: string,
+  resolve: (assetId: string) => string,
+): string =>
+  body.replace(ROOT_RELATIVE_ASSET_CONTENT_URL_PATTERN, (_whole, assetId: string) =>
+    resolve(assetId),
+  );

@@ -5,7 +5,8 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { NodeContentInput } from "busabase-contract/contract/node-content-schemas";
 import type { ChangeRequestStatus, NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
-import { Save } from "lucide-react";
+import { DropdownMenuItem } from "kui/dropdown-menu";
+import { Maximize, Save } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
@@ -309,6 +310,8 @@ interface RichNodeShellProps {
   onSave: () => void;
   children: ReactNode;
   actions?: ReactNode;
+  /** Phone-only "•••" menu items standing in for `actions` hidden below `sm`. */
+  menuActions?: ReactNode;
   fullscreenState: PreviewFullscreenState;
 }
 
@@ -322,6 +325,7 @@ export function RichNodeShell({
   onSave,
   children,
   actions,
+  menuActions,
   fullscreenState,
 }: RichNodeShellProps) {
   const messages = useCoreI18n();
@@ -349,7 +353,10 @@ export function RichNodeShell({
             tabType={`${nodeType}-preview`}
             title={node.name}
           />
+          {/* On a phone this moves into the "•••" menu below: with the editing
+              actions beside it, the node's name had no room left at all. */}
           <PreviewFullscreenButton
+            className="max-sm:hidden"
             fullscreenState={fullscreenState}
             label={messages.airapp.enterFullscreen}
           />
@@ -371,6 +378,20 @@ export function RichNodeShell({
           {!isAnonymous && (
             <>
               <NodeActionsMenu
+                extraActions={
+                  <>
+                    {menuActions}
+                    {fullscreenState.fullscreen ? null : (
+                      <DropdownMenuItem
+                        className="sm:hidden"
+                        onSelect={() => fullscreenState.setFullscreen(true)}
+                      >
+                        <Maximize className="mr-2 size-3.5" />
+                        {messages.airapp.enterFullscreen}
+                      </DropdownMenuItem>
+                    )}
+                  </>
+                }
                 nodeId={node.id}
                 nodeName={node.name}
                 nodeSlug={node.slug}

@@ -1,7 +1,7 @@
 import { Dialog, DialogTitle } from "kui/dialog";
 import { Maximize2, Pencil } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import type { ComponentProps } from "react";
+import { type ComponentProps, useEffect, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n } from "../../../i18n";
 import { getRecordTitle } from "../helpers/change-request";
@@ -27,6 +27,14 @@ export function RecordDetailDialog({
   error?: string | null;
   isLoading?: boolean;
 }) {
+  const [open, setOpen] = useState(true);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const messages = useCoreI18n();
   const currentSearch = useSearch();
   const sourceViewSlug = useSourceViewSlug();
@@ -40,16 +48,21 @@ export function RecordDetailDialog({
     : null;
 
   return (
-    <Dialog onOpenChange={(open) => !open && onClose()} open>
+    <Dialog onOpenChange={setOpen} open={open}>
       <DialogContent
         aria-describedby={undefined}
         className="flex h-[90dvh] w-[calc(100vw-2rem)] max-w-[1280px] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1280px]"
         data-testid="record-detail-dialog"
         onCloseAutoFocus={(event) => {
+          if (open || !mounted.current) {
+            event.preventDefault();
+            return;
+          }
           if (returnFocusTo?.isConnected) {
             event.preventDefault();
             returnFocusTo.focus({ preventScroll: true });
           }
+          onClose();
         }}
       >
         <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-border/60 border-b px-4 py-3 pr-12 sm:flex-nowrap sm:gap-3 sm:px-6 sm:py-0 sm:pr-12">

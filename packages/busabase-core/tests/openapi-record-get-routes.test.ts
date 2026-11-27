@@ -1,3 +1,4 @@
+import { resolveProcedurePermissionPolicy } from "busabase-contract/access-control/api-key-level";
 import { describe, expect, it } from "vitest";
 import { getBusabaseOpenApiSpec } from "../src/openapi/spec";
 
@@ -101,7 +102,22 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 147 operations", async () => {
+  it("publishes the Site Vault reference pair with node write permission", async () => {
+    const spec = await getBusabaseOpenApiSpec();
+    const route = spec.paths?.["/api/v1/airapps/{nodeId}/site/environment"];
+    expect(route?.get?.operationId).toBe("airapps.siteEnvironment");
+    expect(route?.put?.operationId).toBe("airapps.siteSaveEnvironment");
+    expect(JSON.stringify(route?.get?.responses)).toContain('"sourceKey"');
+    expect(JSON.stringify(route?.get?.responses)).not.toContain('"value"');
+    for (const procedure of ["siteEnvironment", "siteSaveEnvironment"]) {
+      expect(resolveProcedurePermissionPolicy(["airapps", procedure])).toEqual({
+        level: "write",
+        scope: "node",
+      });
+    }
+  });
+
+  it("keeps the compressed public API at 150 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -238,6 +254,12 @@ describe("Busabase OpenAPI record get route", () => {
     // +1 -> 147: choose which custom domain of a website is primary (the others
     // redirect to it), or clear it, so an agent can set the address people see.
     expect(spec.paths?.["/api/v1/airapps/{nodeId}/site/domains/primary"]?.post).toBeDefined();
-    expect(operationCount).toBe(147);
+    // +1 -> 148: preview a record revert before submitting its change request.
+    expect(spec.paths?.["/api/v1/records/{recordId}/revert-preview"]?.get).toBeDefined();
+    // +2 -> 150: read/save a website's Space Vault references. Both require
+    // node and workspace write access; neither transports resolved values.
+    expect(spec.paths?.["/api/v1/airapps/{nodeId}/site/environment"]?.get).toBeDefined();
+    expect(spec.paths?.["/api/v1/airapps/{nodeId}/site/environment"]?.put).toBeDefined();
+    expect(operationCount).toBe(153);
   });
 });

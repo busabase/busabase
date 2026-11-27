@@ -76,6 +76,36 @@ export const airAppStopLocalOutputSchema = z.object({
   stopped: z.boolean(),
 });
 
+/** A finite snapshot for agents that cannot hold the dashboard's runtime stream open. */
+export const airAppPreviewEngineSchema = z.enum(["local", "remote"]);
+export const airAppPreviewStatusSchema = z.enum([
+  "stopped",
+  "installing",
+  "starting",
+  "running",
+  "exited",
+  "failed",
+]);
+
+export const airAppPreviewStateSchema = z.object({
+  status: airAppPreviewStatusSchema,
+  engine: airAppPreviewEngineSchema.nullable(),
+  /** Set only once the runtime reports ready; null after it stops or fails. */
+  previewUrl: z.string().nullable(),
+  /** The bounded tail of this caller's preview output. */
+  logs: z.array(z.string()),
+  error: z.string().nullable(),
+  exitCode: z.number().nullable(),
+});
+export type AirAppPreviewStateVO = z.infer<typeof airAppPreviewStateSchema>;
+
+export const airAppPreviewStartInputSchema = z.object({
+  nodeId: z.string(),
+  /** Explicit because local runs execute the AirApp's code on this Busabase host. */
+  engine: airAppPreviewEngineSchema,
+});
+export type AirAppPreviewStartInput = z.infer<typeof airAppPreviewStartInputSchema>;
+
 // --- site engine (a deployment, not a run) -----------------------------------
 
 /** Why an app's files cannot go up as a site. The UI words each code. */
@@ -103,9 +133,22 @@ export type AirAppSiteBlocker = z.infer<typeof airAppSiteBlockerSchema>;
 export const airAppSitePublicationSchema = z.enum(["not-live", "live", "live-with-changes"]);
 export type AirAppSitePublication = z.infer<typeof airAppSitePublicationSchema>;
 
+/** Upgrade required for public publishing while private preview remains available. */
+export const airAppSitePublicationLockSchema = z.object({ planLabel: z.string() });
+export const airAppSiteEnvironmentDeploymentLockSchema = z.object({
+  reason: z.literal("SPACE_VAULT_MANAGE_REQUIRED"),
+});
+export type AirAppSiteEnvironmentDeploymentLock = z.infer<
+  typeof airAppSiteEnvironmentDeploymentLockSchema
+>;
+
 export const airAppSiteStateSchema = z.object({
   /** Asked again on every call, so a lapsed plan or removed config shows at once. */
   engine: z.enum(["available", "locked", "not-configured", "not-offered"]),
+  /** Preview can be available while public publishing requires this upgrade. Absent on older hosts. */
+  publicationLock: airAppSitePublicationLockSchema.nullable().optional(),
+  /** Consuming saved Space Vault bindings requires a manager and manage-capable credential. */
+  environmentDeploymentLock: airAppSiteEnvironmentDeploymentLockSchema.nullable().optional(),
   /** Where the site is served once live. `null` where the engine is not offered. */
   address: z.string().nullable(),
   publication: airAppSitePublicationSchema,
@@ -113,12 +156,18 @@ export const airAppSiteStateSchema = z.object({
   isPublic: z.boolean(),
   /** Same-origin, members-only. `null` until a preview exists. */
   previewUrl: z.string().nullable(),
+  /** Version-scoped sharing capability. Older/local hosts can omit it. */
+  previewShareUrl: z.string().nullable().optional(),
   previewVersion: z.string().nullable(),
   liveVersion: z.string().nullable(),
   /** What the app's files would deploy as now. `null` while `blockers` stand in the way. */
   currentVersion: z.string().nullable(),
   /** The files changed since the preview, so Go live would not publish what they say. */
   previewStale: z.boolean(),
+  /** Saved bindings or selected Vault items changed since the preview. */
+  previewEnvironmentStale: z.boolean().optional(),
+  /** The live Worker does not have the current Vault bindings and values yet. */
+  liveEnvironmentStale: z.boolean().optional(),
   previewDeployedAt: z.string().nullable(),
   liveDeployedAt: z.string().nullable(),
   blockers: z.array(airAppSiteBlockerSchema),
@@ -137,6 +186,155 @@ export const airAppSiteActionOutputSchema = z.object({
 export type AirAppSiteActionVO = z.infer<typeof airAppSiteActionOutputSchema>;
 
 export const airAppSiteInputSchema = z.object({ nodeId: z.string() });
+
+const RESERVED_SITE_ENV_NAMES = new Set([
+  "ASSETS",
+  "AGENT_KEY",
+  "BASH_ENV",
+  "ENV",
+  "LD_LIBRARY_PATH",
+  "LD_PRELOAD",
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "PATH",
+  "PNPM_HOME",
+]);
+const RESERVED_SITE_ENV_PREFIXES = ["BUSABASE_", "BUDA_", "SANDBOX_", "SANDOCK_", "CLOUDFLARE_"];
+
+/** Runtime binding names cannot replace platform credentials or execution settings. */
+export const airAppSiteEnvironmentNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .regex(
+    /^[A-Za-z_][A-Za-z0-9_]*$/,
+    "Use letters, digits, and underscores; start with a letter or underscore.",
+  )
+  .refine(
+    (name) => {
+      const upper = name.toUpperCase();
+      return (
+        !RESERVED_SITE_ENV_NAMES.has(upper) &&
+        !RESERVED_SITE_ENV_PREFIXES.some((prefix) => upper.startsWith(prefix))
+      );
+    },
+    { message: "This environment variable name is reserved by the platform." },
+  );
+
+/** Only references cross the client boundary, never resolved Vault values. */
+export const airAppSiteEnvironmentBindingSchema = z.object({
+  envName: airAppSiteEnvironmentNameSchema,
+  vaultItemId: z.string().min(1).max(256),
+});
+export type AirAppSiteEnvironmentBinding = z.infer<typeof airAppSiteEnvironmentBindingSchema>;
+
+export const airAppSiteEnvironmentBindingsSchema = z
+  .array(airAppSiteEnvironmentBindingSchema)
+  .max(100)
+  .superRefine((bindings, context) => {
+    const names = new Set<string>();
+    bindings.forEach(({ envName }, index) => {
+      if (names.has(envName)) {
+        context.addIssue({
+          code: "custom",
+          path: [index, "envName"],
+          message: "Each environment variable name must be unique.",
+        });
+      }
+      names.add(envName);
+    });
+  });
+
+export const airAppSiteDirectValueInputSchema = z
+  .object({
+    vaultItemId: z.string().min(1).max(256).optional(),
+    envName: airAppSiteEnvironmentNameSchema.refine((name) => /^[A-Z_][A-Z0-9_]*$/.test(name), {
+      message: "Direct Vault names must use uppercase letters, digits, and underscores.",
+    }),
+    kind: z.enum(["secret", "variable"]),
+    // Omission retains an exact existing reference; an explicit empty string clears it.
+    value: z.string().max(8192).optional(),
+  })
+  .strict()
+  .superRefine((entry, context) => {
+    if (!entry.vaultItemId && entry.value === undefined)
+      context.addIssue({
+        code: "custom",
+        path: ["value"],
+        message: "Enter or explicitly clear the new value.",
+      });
+  });
+export type AirAppSiteDirectValueInput = z.infer<typeof airAppSiteDirectValueInputSchema>;
+
+export const airAppSiteDirectValuesInputSchema = z.array(airAppSiteDirectValueInputSchema).max(100);
+
+export const airAppSiteSaveEnvironmentInputSchema = airAppSiteInputSchema
+  .extend({
+    bindings: airAppSiteEnvironmentBindingsSchema,
+    directValues: airAppSiteDirectValuesInputSchema.optional(),
+  })
+  .superRefine(({ bindings, directValues }, context) => {
+    const names = new Set(bindings.map((entry) => entry.envName));
+    const ids = new Set<string>();
+    for (const [index, entry] of (directValues ?? []).entries()) {
+      if (names.has(entry.envName))
+        context.addIssue({
+          code: "custom",
+          path: ["directValues", index, "envName"],
+          message: "Each environment variable name must be unique.",
+        });
+      if (entry.vaultItemId && ids.has(entry.vaultItemId))
+        context.addIssue({
+          code: "custom",
+          path: ["directValues", index, "vaultItemId"],
+          message: "Each direct value must identify a distinct Vault item.",
+        });
+      names.add(entry.envName);
+      if (entry.vaultItemId) ids.add(entry.vaultItemId);
+    }
+    if (bindings.length + (directValues?.length ?? 0) > 100)
+      context.addIssue({
+        code: "custom",
+        path: ["directValues"],
+        message: "A website supports at most 100 environment variables.",
+      });
+  });
+
+export const airAppSiteDirectValueSchema = z.object({
+  vaultItemId: z.string(),
+  // Legacy invalid names remain visible for repair; only inputs enforce deployment names.
+  envName: z.string().max(128),
+  kind: z.enum(["secret", "variable"]),
+  hasValue: z.boolean(),
+  status: z.enum(["ready", "missing", "runtime-disabled"]),
+});
+export type AirAppSiteDirectValueVO = z.infer<typeof airAppSiteDirectValueSchema>;
+
+export const airAppSiteEnvironmentSourceSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  kind: z.enum(["secret", "variable"]),
+});
+export type AirAppSiteEnvironmentSourceVO = z.infer<typeof airAppSiteEnvironmentSourceSchema>;
+
+export const airAppSiteEnvironmentSchema = z.object({
+  available: z.boolean(),
+  sources: z.array(airAppSiteEnvironmentSourceSchema),
+  bindings: z.array(
+    airAppSiteEnvironmentBindingSchema.extend({
+      sourceKey: z.string().nullable(),
+      kind: z.enum(["secret", "variable"]).nullable(),
+      status: z.enum(["ready", "missing", "runtime-disabled"]),
+    }),
+  ),
+  /** Presence signals direct-input support. Stored values are never returned. */
+  directValues: z.array(airAppSiteDirectValueSchema).optional(),
+  /** Saved in this Site's configuration Vault, but not selected for deployment. */
+  unboundDirectValues: z.array(airAppSiteDirectValueSchema).optional(),
+  vaultLinks: z.object({ space: z.string(), apiKey: z.string().optional() }).optional(),
+});
+export type AirAppSiteEnvironmentVO = z.infer<typeof airAppSiteEnvironmentSchema>;
 
 /** Display-only release metadata. Artifacts, provider details and secrets stay server-side. */
 export const airAppSiteReleaseSchema = z.object({
@@ -170,6 +368,37 @@ export type AirAppSiteReleasesVO = z.infer<typeof airAppSiteReleasesSchema>;
 export const airAppSiteRollbackInputSchema = airAppSiteInputSchema.extend({
   version: z.string().min(1).max(64),
 });
+
+/** Logs are attributed to a release's successful deployment time windows. */
+export const airAppSiteLogsInputSchema = airAppSiteRollbackInputSchema;
+export const airAppSiteLogContentHiddenReasonSchema = z.enum([
+  "VAULT_REDACTION_CONTEXT_UNAVAILABLE",
+]);
+export type AirAppSiteLogContentHiddenReason = z.infer<
+  typeof airAppSiteLogContentHiddenReasonSchema
+>;
+export const airAppSiteLogEntrySchema = z.object({
+  id: z.string(),
+  timestamp: z.string().datetime(),
+  level: z.enum(["debug", "info", "log", "warn", "error"]),
+  message: z.string().max(8_000),
+  method: z.string().nullable(),
+  path: z.string().nullable(),
+  status: z.number().int().min(100).max(599).nullable(),
+  contentHiddenReason: airAppSiteLogContentHiddenReasonSchema.optional(),
+});
+export type AirAppSiteLogEntryVO = z.infer<typeof airAppSiteLogEntrySchema>;
+export const airAppSiteLogsSchema = z.object({
+  available: z.boolean(),
+  version: z.string(),
+  from: z.string().datetime(),
+  to: z.string().datetime(),
+  entries: z.array(airAppSiteLogEntrySchema).max(100),
+  truncated: z.boolean(),
+  /** The event metadata remains available while application-authored content is withheld. */
+  contentHiddenReason: airAppSiteLogContentHiddenReasonSchema.optional(),
+});
+export type AirAppSiteLogsVO = z.infer<typeof airAppSiteLogsSchema>;
 
 /** A hostname only: schemes, paths, ports, IP addresses and wildcards cannot bind. */
 export const airAppSiteHostnameSchema = z
@@ -245,6 +474,39 @@ const SITE_TAGS = ["Websites"];
 export const airappRuntimeContract = {
   runLocal: oc.input(airAppRunLocalInputSchema).output(eventIterator(airAppRuntimeEventSchema)),
   stopLocal: oc.input(airAppStopLocalInputSchema).output(airAppStopLocalOutputSchema),
+  previewStart: oc
+    .route({
+      method: "POST",
+      path: "/airapps/{nodeId}/preview/start",
+      tags: ["AirApp Previews"],
+      summary: "Start or attach to this caller's AirApp preview",
+      successDescription:
+        "Starts the AirApp's saved files on the explicitly selected local or remote engine, or attaches to this caller's existing run. Returns a finite snapshot immediately; poll previewState until status is running and previewUrl is available. Installing or starting is not ready. Closing the request keeps the run alive until stopped or idle expiry. The browser engine runs inside a tab and cannot be started here. Needs node write access and an engine offered by this deployment and plan. Does not publish a website.",
+    })
+    .input(airAppPreviewStartInputSchema)
+    .output(airAppPreviewStateSchema),
+  previewState: oc
+    .route({
+      method: "GET",
+      path: "/airapps/{nodeId}/preview",
+      tags: ["AirApp Previews"],
+      summary: "Get this caller's AirApp preview status, address, and logs",
+      successDescription:
+        "Reads only this caller's preview without starting or restarting it. Returns stopped when no session exists, a bounded log tail, and a previewUrl only after readiness while the run remains available. On Cloud, fetch that URL with the same Bearer credential and x-busabase-space header; API-key preview inspection supports GET and HEAD only. A failed or exited run keeps its diagnostic output briefly; previewStart retries it. Needs node read access. Website previews use siteState and siteDeployPreview instead.",
+    })
+    .input(airAppStopLocalInputSchema)
+    .output(airAppPreviewStateSchema),
+  previewStop: oc
+    .route({
+      method: "POST",
+      path: "/airapps/{nodeId}/preview/stop",
+      tags: ["AirApp Previews"],
+      summary: "Stop this caller's AirApp preview",
+      successDescription:
+        "Stops only this caller's local or remote preview and releases its runtime. Returns stopped: false if no session exists, so repeating Stop is safe. Needs node write access. Does not take a published website offline; use siteUnpublish for that.",
+    })
+    .input(airAppStopLocalInputSchema)
+    .output(airAppStopLocalOutputSchema),
   siteState: oc
     .route({
       method: "GET",
@@ -252,11 +514,34 @@ export const airappRuntimeContract = {
       tags: SITE_TAGS,
       summary: "Get an AirApp website's state",
       successDescription:
-        "Whether the Website engine is available here (`engine`), the public `address`, `publication` (not live / live / live with unpublished changes), the public switch (`isPublic`), the preview and live versions, `currentVersion` (what the files would deploy as now), `previewStale` (files changed since the preview), and `blockers` that stop the files from deploying.",
+        "Whether the Website preview engine is available here (`engine`), an independent `publicationLock` naming the upgrade required to publish publicly (private preview remains available), the public `address`, `publication` (not live / live / live with unpublished changes), the public switch (`isPublic`), the preview and live versions, `currentVersion` (what the files would deploy as now), `previewStale` (files changed since the preview), and `blockers` that stop the files from deploying.",
     })
     .input(airAppSiteInputSchema)
     .output(airAppSiteStateSchema),
   siteReleases: oc.input(airAppSiteInputSchema).output(airAppSiteReleasesSchema),
+  siteEnvironment: oc
+    .route({
+      method: "GET",
+      path: "/airapps/{nodeId}/site/environment",
+      tags: SITE_TAGS,
+      summary: "List a website's Space Vault references",
+      successDescription:
+        "Returns saved environment bindings and eligible Space Vault item metadata without values. Requires node and workspace write access. Unsupported hosts return available: false.",
+    })
+    .input(airAppSiteInputSchema)
+    .output(airAppSiteEnvironmentSchema),
+  siteSaveEnvironment: oc
+    .route({
+      method: "PUT",
+      path: "/airapps/{nodeId}/site/environment",
+      tags: SITE_TAGS,
+      summary: "Save a website's Space Vault references",
+      successDescription:
+        "Replaces the website's environment binding references. Saving does not change a running Worker: preview and Go live resolve the latest Space Vault values on deployment. Never accepts or returns plaintext values.",
+    })
+    .input(airAppSiteSaveEnvironmentInputSchema)
+    .output(airAppSiteEnvironmentSchema),
+  siteLogs: oc.input(airAppSiteLogsInputSchema).output(airAppSiteLogsSchema),
   siteRollback: oc.input(airAppSiteRollbackInputSchema).output(airAppSiteActionOutputSchema),
   /** Uploads the current files as the members-only preview, unless they already are it. */
   siteDeployPreview: oc
@@ -266,11 +551,11 @@ export const airappRuntimeContract = {
       tags: SITE_TAGS,
       summary: "Deploy the website preview (Restart)",
       successDescription:
-        "Uploads the AirApp's current files as the members-only preview (the dashboard's Restart), unless the preview already is this version. `outcome: blocked` means the files cannot deploy; `state.blockers` says why. Nothing public changes.",
+        "Uploads the AirApp's current files as the members-only preview (the dashboard's Restart), unless the preview already is this version. On Cloud, Free spaces can preview privately; `state.publicationLock` applies only to public publishing. `outcome: blocked` means the files cannot deploy; `state.blockers` says why. Nothing public changes.",
     })
     .input(airAppSiteInputSchema)
     .output(airAppSiteActionOutputSchema),
-  /** Promotes the previewed version to the public address. Never publishes anything else. */
+  /** Promotes the previewed files with the latest saved Vault environment. */
   siteGoLive: oc
     .route({
       method: "POST",
@@ -278,7 +563,7 @@ export const airappRuntimeContract = {
       tags: SITE_TAGS,
       summary: "Publish the previewed version (Go live)",
       successDescription:
-        "Puts the previewed version on the public address, and only that version. `outcome: preview-stale` means the files changed after the preview, so nothing was published: deploy the preview again first. `outcome: no-preview` means there is no preview yet. Anyone with the address can use a public site.",
+        "Puts the previewed files on the public address with the latest saved Space Vault bindings and values, even if those changed after preview. `outcome: preview-stale` means the files changed after the preview, so nothing was published: deploy the preview again first. `outcome: no-preview` means there is no preview yet. Anyone with the address can use a public site.",
     })
     .input(airAppSiteInputSchema)
     .output(airAppSiteActionOutputSchema),

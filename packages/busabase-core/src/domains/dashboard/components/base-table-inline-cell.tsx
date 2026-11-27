@@ -19,6 +19,7 @@ import {
   type ChangeEvent,
   type KeyboardEvent,
   type MouseEvent,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -57,6 +58,9 @@ import {
   gridCellKey,
 } from "../hooks/use-base-grid-editing";
 import { type FieldFileUploader, useFieldFileUpload } from "../hooks/use-field-file-upload";
+import { useRecordFindHighlighter } from "../hooks/use-record-find-highlight";
+import { AppUserFieldEditor, AppUserFieldValue } from "./app-user-field";
+import { AppUserFieldHostContext } from "./app-user-field-slot";
 import { ChoiceOptionsPanel, choicePopoverClassName } from "./choice-field";
 import { DateFieldInput, DateFieldValue } from "./date-field";
 import { FieldBadge } from "./field-preview";
@@ -148,6 +152,10 @@ export function InlineEditableCellValue({
   const resolveIString = useIString();
   const kind = getInlineCellEditorKind(field);
   const textClassName = index === 0 ? "font-medium text-foreground" : "text-muted-foreground";
+  // Display only: the cell editor that replaces this while editing shows raw text.
+  const highlight = useRecordFindHighlighter(field);
+
+  if (kind === "appUser") return <AppUserFieldValue field={field} value={value} />;
 
   if (kind === "checkbox") {
     const checked = value === true || value === "true";
@@ -181,7 +189,7 @@ export function InlineEditableCellValue({
     return (
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
         {chips[0] ? (
-          <FieldBadge chip={chips[0]} />
+          <FieldBadge chip={chips[0]} highlight={highlight} />
         ) : (
           <span className="text-muted-foreground">-</span>
         )}
@@ -252,7 +260,7 @@ export function InlineEditableCellValue({
         target={external ? "_blank" : undefined}
         title={preview.text}
       >
-        <GridCellText rowHeight={rowHeight}>{preview.text}</GridCellText>
+        <GridCellText rowHeight={rowHeight}>{highlight(preview.text)}</GridCellText>
         {external ? <ExternalLink className="shrink-0" size={12} /> : null}
       </a>
     );
@@ -264,7 +272,7 @@ export function InlineEditableCellValue({
       : buildGridCellText(value).text;
   return (
     <GridCellText className={textClassName} rowHeight={rowHeight} scalar={kind === "number"}>
-      {text || "-"}
+      {text ? highlight(text) : "-"}
     </GridCellText>
   );
 }
@@ -450,6 +458,8 @@ export function InlineCellEditor({
 }) {
   const kind = getInlineCellEditorKind(field);
   if (!kind || kind === "checkbox") return null;
+  if (kind === "appUser")
+    return <InlineAppUserCellEditor field={field} grid={grid} record={record} />;
   if (kind === "member")
     return <InlineMemberCellEditor client={client} field={field} grid={grid} record={record} />;
   if (kind === "relation")
@@ -475,6 +485,116 @@ export function InlineCellEditor({
       />
     );
   return <InlineTextCellEditor field={field} grid={grid} kind={kind} record={record} />;
+}
+
+/** Reuse the record form's scoped app-user picker in the member cell's popover. */
+function InlineAppUserCellEditor({
+  field,
+  grid,
+  record,
+}: {
+  field: BaseFieldVO;
+  grid: BaseGridEditing;
+  record: RecordVO;
+}) {
+  const resolveIString = useIString();
+  const copy = useInlineCellEditMessages();
+  const host = useContext(AppUserFieldHostContext);
+  const fieldName = resolveIString(field.name);
+  const key = gridCellKey(record.id, field.slug);
+  const [draft, setDraft] = useState(() => grid.getDisplayValue(record, field));
+  const latest = useRef(draft);
+  const settled = useRef(false);
+  const error = grid.editError ? describeInlineCellError(copy, grid.editError, fieldName) : null;
+  const save = (move: GridMove = "stay", mergeImmediately?: boolean) => {
+    if (!settled.current)
+      settled.current = grid.commit(record, field, latest.current, move, mergeImmediately);
+  };
+  const cancel = () => {
+    if (settled.current) return;
+    settled.current = true;
+    grid.cancelEditing("stay");
+  };
+  return (
+    <div className="relative min-w-0 flex-1" data-inline-cell-editor={field.slug}>
+      <AppUserFieldValue field={field} value={draft} />
+      <Popover
+        open
+        onOpenChange={(open) => {
+          if (!open) save("none");
+        }}
+      >
+        <PopoverTrigger asChild>
+          <span aria-hidden className="pointer-events-none absolute inset-0" />
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          aria-label={fieldName}
+          className="w-[var(--radix-popover-trigger-width)] min-w-72 p-3"
+          data-inline-cell-editor={field.slug}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onEscapeKeyDown={(event) => {
+            event.preventDefault();
+            cancel();
+          }}
+          onKeyDown={(event) => {
+            if (isComposing(event)) return;
+            const target = event.target as HTMLElement;
+            const options = Array.from(
+              event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-app-user-option]"),
+            );
+            if (host && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+              event.preventDefault();
+              const index = options.indexOf(target as HTMLButtonElement);
+              const next =
+                index < 0
+                  ? event.key === "ArrowDown"
+                    ? 0
+                    : options.length - 1
+                  : (index + (event.key === "ArrowDown" ? 1 : -1) + options.length) %
+                    options.length;
+              options[next]?.focus();
+            } else if (event.key === "Tab") {
+              event.preventDefault();
+              save(event.shiftKey ? "previous" : "next");
+            } else if (event.key === "Enter" && target instanceof HTMLInputElement) {
+              event.preventDefault();
+              if (host) options[0]?.click();
+              else save();
+            }
+          }}
+          side="bottom"
+          sideOffset={2}
+        >
+          <AppUserFieldEditor
+            ariaDescribedBy={error ? `${key}-inline-error` : undefined}
+            field={field}
+            fieldName={fieldName}
+            focusOnMount
+            inputId={`${key}-inline-app-user`}
+            onChange={(next) => {
+              latest.current = next;
+              setDraft(next);
+              if (host) save();
+            }}
+            value={draft}
+          />
+          {error ? (
+            <p className="mt-2 text-destructive text-xs" id={`${key}-inline-error`} role="alert">
+              {error}
+            </p>
+          ) : null}
+          <div className="mt-2">
+            <InlineCellSubmitActions
+              onCancel={cancel}
+              onSubmit={(mergeImmediately) => save("stay", mergeImmediately)}
+            />
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
 }
 
 /** Upload into a table cell, then save the resulting asset refs through the normal cell write path. */

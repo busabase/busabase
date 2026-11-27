@@ -45,13 +45,16 @@ import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { AirAppDetailView } from "../../airapp/components/AirAppDetailView";
-import { AirAppSiteReleasesPanel } from "../../airapp/components/AirAppSiteReleases";
 import { AirAppSidePanelPreview } from "../../airapp/components/RunPanel";
-import { AIRAPP_SITE_RELEASES_TAB_TYPE } from "../../airapp/utils/site-release-panel";
-import { buildAssetDownloadUrl } from "../../assets/utils/asset-content-url";
+import {
+  useAssetContentUrlResolver,
+  useAssetDownloadUrlBuilder,
+  useResolvedAssetBody,
+} from "../../assets/hooks/asset-content-url-context";
 import {
   areDocOutlinesEqual,
   DocEditor,
+  type DocEditorHandle,
   type DocOutlineItem,
   DocTableOfContents,
   scrollToDocHeading,
@@ -91,7 +94,11 @@ import type { LoadedNode } from "../node-detail-registry";
 import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useSidePanelStore } from "../store/side-panel-store";
-import { useIsAnonymousVisitor } from "../visitor-context";
+import {
+  useDashboardVisitorKind,
+  useIsAnonymousVisitor,
+  useIsPublicShareVisitor,
+} from "../visitor-context";
 import { useWorkbenchLinkClickHandler } from "../workbench-link-context";
 import { AgentPromptsView } from "./agent-prompts-view";
 import { AssetMediaPreview, useAssetHostViewer } from "./assets";
@@ -269,6 +276,10 @@ export function FileTreeDetailView({
   >(null);
   const previewRequestRef = useRef(0);
   const isAnonymous = useIsAnonymousVisitor();
+  // Remote previews are on the Embed Link's surface but not a public share's.
+  const isPublicShareVisitor = useIsPublicShareVisitor();
+  const buildDownloadUrl = useAssetDownloadUrlBuilder();
+  const resolveAssetUrl = useAssetContentUrlResolver();
   const permissionLevel = useWorkspacePermissionLevel();
   const canChangeFiles =
     nodeType === "drive" &&
@@ -373,7 +384,7 @@ export function FileTreeDetailView({
   });
   const previewConfigQuery = useQuery({
     ...orpc.fileTrees.previewConfig.queryOptions({}),
-    enabled: nodeType === "drive" && Boolean(slug) && !isAnonymous,
+    enabled: nodeType === "drive" && Boolean(slug) && !isPublicShareVisitor,
   });
   const createCr = useMutation(orpc.fileTrees.createChangeRequest.mutationOptions());
   const { mutateAsync: preparePreviewAsync } = useMutation(
@@ -386,7 +397,7 @@ export function FileTreeDetailView({
   // visible in Settings > File Preview and in the server logs. The server
   // enforces the same rule for the Embed and public API surfaces.
   const remotePreviewEnabled =
-    !isAnonymous &&
+    !isPublicShareVisitor &&
     previewConfigQuery.data?.provider === "previewfile" &&
     previewConfigQuery.data.status === "ready";
   // Same predicate the server enforces, so a Markdown/code/image/PDF file never
@@ -995,7 +1006,7 @@ export function FileTreeDetailView({
       const current = filesByPath.get(path);
       if (!current?.assetId) throw new Error(messages.nodeDetail.fileDownloadFailed);
       const anchor = document.createElement("a");
-      anchor.href = buildAssetDownloadUrl(
+      anchor.href = buildDownloadUrl(
         current.assetId,
         current.displayName ?? fileTreeFileName(path),
       );
@@ -1219,15 +1230,19 @@ export function FileTreeDetailView({
     }
   };
 
+  const previewAssetUrl =
+    fileQuery.data?.assetId && resolveAssetUrl
+      ? resolveAssetUrl(fileQuery.data.assetId)
+      : fileQuery.data?.assetUrl;
   const previewMimeType = fileQuery.data
     ? inferFileTreeMimeType(openPath ?? "", fileQuery.data.mimeType)
     : "application/octet-stream";
   const previewHostViewer = useAssetHostViewer(
-    fileQuery.data?.assetUrl && openPath
+    previewAssetUrl && openPath
       ? {
           mimeType: previewMimeType,
-          name: fileQuery.data.displayName ?? openPath,
-          url: fileQuery.data.assetUrl,
+          name: fileQuery.data?.displayName ?? openPath,
+          url: previewAssetUrl,
         }
       : null,
   );
@@ -1525,7 +1540,7 @@ export function FileTreeDetailView({
                     <a
                       aria-label={messages.nodeDetail.downloadFile}
                       download={fileQuery.data.displayName ?? fileTreeFileName(openPath)}
-                      href={buildAssetDownloadUrl(
+                      href={buildDownloadUrl(
                         fileQuery.data.assetId,
                         fileQuery.data.displayName ?? fileTreeFileName(openPath),
                       )}
@@ -1534,8 +1549,7 @@ export function FileTreeDetailView({
                     </a>
                   </Button>
                 ) : null}
-                {isBrowserNativeNewTabPreviewMimeType(previewMimeType) &&
-                fileQuery.data.assetUrl ? (
+                {isBrowserNativeNewTabPreviewMimeType(previewMimeType) && previewAssetUrl ? (
                   <TooltipProvider delayDuration={250}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -1547,7 +1561,7 @@ export function FileTreeDetailView({
                         >
                           <a
                             aria-label={messages.nodeDetail.openFileInNewTab}
-                            href={fileQuery.data.assetUrl}
+                            href={previewAssetUrl}
                             rel="noopener noreferrer"
                             target="_blank"
                           >
@@ -1687,7 +1701,7 @@ export function FileTreeDetailView({
             ) : fileQuery.data && fileQuery.data.encoding !== "utf8" ? (
               // Media kinds render built in; any other binary (EPUB, Office…) only
               // when a host viewer claims it, else it stays "preview unavailable".
-              fileQuery.data.assetUrl && (previewKind !== "code" || previewHostViewer) ? (
+              previewAssetUrl && (previewKind !== "code" || previewHostViewer) ? (
                 <div className={previewFillsFrame ? "h-full min-h-0" : "p-5"}>
                   <div
                     className={cn(
@@ -1706,7 +1720,12 @@ export function FileTreeDetailView({
                       }
                       mimeType={previewMimeType}
                       name={fileQuery.data.displayName ?? openPath}
-                      url={fileQuery.data.assetUrl}
+                      url={previewAssetUrl}
+                      viewerOptions={
+                        nodeType === "drive" && previewMimeType === "application/pdf"
+                          ? { fitToContainer: true, pdfScrollMode: "continuous" }
+                          : undefined
+                      }
                     />
                   </div>
                 </div>
@@ -1715,7 +1734,7 @@ export function FileTreeDetailView({
                   {messages.nodeDetail.filePreviewUnavailable}
                 </div>
               )
-            ) : previewKind === "image" && fileQuery.data?.assetUrl ? (
+            ) : previewKind === "image" && previewAssetUrl ? (
               // An SVG is both text and an image: it arrives with
               // `encoding: "utf8"`, so it never reaches the binary branch above
               // and used to render as source. Preview it as an image here; the
@@ -1725,8 +1744,8 @@ export function FileTreeDetailView({
                   <AssetMediaPreview
                     mediaClassName="max-h-[70vh] w-full object-contain"
                     mimeType={previewMimeType}
-                    name={fileQuery.data.displayName ?? openPath}
-                    url={fileQuery.data.assetUrl}
+                    name={fileQuery.data?.displayName ?? openPath}
+                    url={previewAssetUrl}
                   />
                 </div>
               </div>
@@ -1981,7 +2000,6 @@ registerNodeDetail("skill", SkillDetailView);
 registerNodeDetail("drive", DriveDetailView);
 registerNodeDetail("airapp", AirAppDetailView);
 registerSidePanelTab("airapp-preview", AirAppSidePanelPreview);
-registerSidePanelTab(AIRAPP_SITE_RELEASES_TAB_TYPE, AirAppSiteReleasesPanel);
 
 function SkillSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
   const { nodeId } = payload as { nodeId: string };
@@ -2155,6 +2173,8 @@ export function DocDetailView({
   });
   const doc = asNodeDetail(docQuery.isError ? undefined : docQuery.data, "doc");
   useReportLoadedNode(doc?.node, onNodeLoaded);
+  // Reading only: the editor starts from the stored body, never from this.
+  const readingBody = useResolvedAssetBody(doc?.body ?? "");
   const [isEditing, setIsEditing] = useState(false);
   // Reading mode only: while editing, a click on a link places the caret, and
   // the browser never follows links inside contenteditable anyway.
@@ -2164,6 +2184,7 @@ export function DocDetailView({
   const [error, setError] = useState<string | null>(null);
   const [outline, setOutline] = useState<DocOutlineItem[]>([]);
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
+  const editorRef = useRef<DocEditorHandle>(null);
   const activeHeadingIdRef = useRef<string | null>(null);
   const docScrollRef = useRef<HTMLDivElement>(null);
   const tocItems = useMemo(() => selectDocTocItems(outline), [outline]);
@@ -2351,7 +2372,7 @@ export function DocDetailView({
     try {
       await createCr.mutateAsync({
         nodeId: doc.node.id,
-        content: { kind: "doc", body: draft },
+        content: { kind: "doc", body: editorRef.current?.getMarkdown() ?? draft },
         autoMerge: true,
       });
       await docQuery.refetch();
@@ -2373,7 +2394,7 @@ export function DocDetailView({
     try {
       const changeRequest = await createCr.mutateAsync({
         nodeId: doc.node.id,
-        content: { kind: "doc", body: draft },
+        content: { kind: "doc", body: editorRef.current?.getMarkdown() ?? draft },
         autoMerge: false,
       });
       setLocation(`/inbox/${changeRequest.id}`);
@@ -2424,8 +2445,9 @@ export function DocDetailView({
           <DocEditor
             key={`${doc.node.id}:${isEditing}`}
             className="min-h-[60vh] flex-1"
-            content={isEditing ? draft : doc.body}
+            content={isEditing ? draft : readingBody}
             editable={isEditing}
+            editorRef={editorRef}
             onChange={setDraft}
             onImageUpload={uploadImage}
             onOutlineChange={handleOutlineChange}
@@ -2455,6 +2477,9 @@ export function FolderDetailView({
   const messages = useCoreI18n();
   const currentSearch = useSearch();
   const [location] = useLocation();
+  // An Embed Link shares this folder's page, not the nodes under it: the list
+  // reads as a list there rather than as links that lead nowhere.
+  const childrenAreLinks = useDashboardVisitorKind() !== "embed";
   const folderQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "folder" } }),
     enabled: Boolean(slug),
@@ -2547,15 +2572,8 @@ export function FolderDetailView({
             {folder.children.map((child) => {
               const Icon = FOLDER_CHILD_ICONS[child.type] ?? FileText;
               const isActive = location === `/${child.type}/${child.slug}`;
-              return (
-                <Link
-                  key={child.id}
-                  className={cn(
-                    "group flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-muted/50",
-                    isActive && "bg-muted hover:bg-muted",
-                  )}
-                  href={mergeSearchIntoHref(`/${child.type}/${child.slug}`, currentSearch)}
-                >
+              const content = (
+                <>
                   <Icon
                     className={cn(
                       "size-4 shrink-0 text-muted-foreground",
@@ -2571,7 +2589,23 @@ export function FolderDetailView({
                     {child.name}
                   </span>
                   <span className="text-[11px] text-muted-foreground/70">{child.type}</span>
+                </>
+              );
+              return childrenAreLinks ? (
+                <Link
+                  key={child.id}
+                  className={cn(
+                    "group flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-muted/50",
+                    isActive && "bg-muted hover:bg-muted",
+                  )}
+                  href={mergeSearchIntoHref(`/${child.type}/${child.slug}`, currentSearch)}
+                >
+                  {content}
                 </Link>
+              ) : (
+                <div key={child.id} className="flex items-center gap-3 rounded-md px-2 py-2">
+                  {content}
+                </div>
               );
             })}
           </div>

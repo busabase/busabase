@@ -1,4 +1,5 @@
 import type { CoreI18nMessages } from "./messages";
+import { siteEnvironmentMessages } from "./site-environment";
 
 export const dashboardDe: CoreI18nMessages = {
   lookup: lookupDe,
@@ -507,11 +508,17 @@ export const dashboardDe: CoreI18nMessages = {
     requireSignInHint:
       "Jeder mit dem Link kann das Formular weiterhin öffnen; nur angemeldete Besucher können es einsenden.",
     passwordLabel: "Passwort",
-    passwordHint: "Leer lassen für kein Passwort",
-    passwordPlaceholder: "Passwort festlegen",
-    passwordSet:
-      "Ein Passwort ist festgelegt – geben Sie ein neues ein, um es zu ändern, oder entfernen Sie es",
-    passwordClear: "Passwort entfernen",
+    passwordProtectionLabel: "Passwortschutz",
+    passwordProtectionHint: "Besucher müssen das Passwort eingeben, um diesen Link zu öffnen.",
+    passwordChange: "Ändern",
+    passwordSave: "Speichern",
+    passwordCancel: "Abbrechen",
+    passwordLengthHint: "Verwenden Sie 4 bis 64 Zeichen.",
+    passwordLegacy:
+      "Ein Passwort ist festgelegt, kann hier aber nicht angezeigt werden. Ändern Sie es in ein neues, um es zu sehen und zu kopieren.",
+    copyLinkAndPassword: "Link und Passwort kopieren",
+    linkAndPasswordCopied: "Link und Passwort kopiert",
+    linkAndPasswordClipboard: "Link: {url}\nPasswort: {password}",
     expiryLabel: "Läuft ab",
     expiryHint: "Der Link funktioniert zum gewählten Zeitpunkt automatisch nicht mehr.",
     expiryNever: "Nie",
@@ -794,6 +801,8 @@ export const dashboardDe: CoreI18nMessages = {
       phone: "Vorschau auf dem Smartphone",
       signIn:
         "Scannen Sie die private Vorschau. Melden Sie sich auf dem Smartphone mit demselben Konto an. Dies ist nicht die veröffentlichte Site.",
+      sharedLink:
+        "Jeder mit diesem Link kann diese Version bis zu 24 Stunden lang ansehen. Bewahre den Link vertraulich auf. Dies ist eine Vorschau, nicht die veröffentlichte Site.",
       browserOnly:
         "Diese Vorschau läuft in diesem Browser. Erstellen Sie über „Site veröffentlichen“ eine Site-Vorschau für Ihr Smartphone.",
       loopback:
@@ -804,7 +813,38 @@ export const dashboardDe: CoreI18nMessages = {
       openLink: "Vorschau öffnen",
     },
     site: {
+      environment: siteEnvironmentMessages.de,
       publishUpdate: "Update veröffentlichen",
+      logs: {
+        contentHiddenTitle: "Loginhalte ausgeblendet",
+        contentHiddenDescription:
+          "Die bei einigen Logs verwendeten Secret-Einstellungen lassen sich nicht bestätigen. Betroffene Meldungen und Anfragepfade bleiben zum Schutz vertraulicher Daten verborgen. Zeiten, Methoden und Statuscodes sind weiterhin sichtbar.",
+
+        button: "Logs",
+        versionButton: "Logs für {version} anzeigen",
+        title: "Logs · {version}",
+        description:
+          "Produktionslogs aus den Bereitstellungszeiträumen dieser Version in den letzten 24 Stunden. Anfragen während eines Versionswechsels können sich überschneiden.",
+        collectionHint:
+          "Neue Bereitstellungen erfassen Logs. Für ältere Versionen sind eventuell keine vorhanden. Veröffentlichen Sie ein Update und warten Sie, bis die Logs erscheinen.",
+        loading: "Produktionslogs werden geladen…",
+        loadFailed: "Logs konnten nicht geladen werden. Erneut versuchen.",
+        unavailable: "Produktionslogs sind in dieser Bereitstellung nicht verfügbar.",
+        empty:
+          "Keine Logs für die Bereitstellungszeiträume dieser Version in den letzten 24 Stunden gefunden.",
+        refresh: "Logs aktualisieren",
+        close: "Logs schließen",
+        checkedAt: "Abgefragt um {time}",
+        truncated:
+          "Die neuesten verfügbaren Logs werden angezeigt. Weitere Ereignisse oder Bereitstellungszeiträume können fehlen.",
+        levels: {
+          debug: "Debug",
+          info: "Info",
+          log: "Log",
+          warn: "Warnung",
+          error: "Fehler",
+        },
+      },
       releases: {
         busy: "Eine Veröffentlichung wird angewendet. Die Liste aktualisiert sich automatisch.",
         manage: "Veröffentlichungen",
@@ -837,6 +877,9 @@ export const dashboardDe: CoreI18nMessages = {
           "Scannen, um die veröffentlichte Site zu öffnen. Unveröffentlichte Entwürfe sind nicht enthalten.",
       },
       publish: {
+        alreadyLive:
+          "Diese Version ist bereits veröffentlicht. Ändere die App und erstelle eine neue Vorschau, um ein Update zu veröffentlichen.",
+        readyToPublish: "Vorschau geprüft. Diese Version kann veröffentlicht werden.",
         previewStale:
           "Die Dateien wurden seit dieser Vorschau geändert. Erstelle oder aktualisiere die Website-Vorschau und veröffentliche sie dann.",
         noPreview: "Erstelle vor der Veröffentlichung eine Website-Vorschau.",
@@ -848,11 +891,11 @@ export const dashboardDe: CoreI18nMessages = {
         preserveBrowser: "Die Browser-Vorschau läuft weiter, während du die Website vorbereitest.",
         checking: "Website wird geprüft…",
         checkFailed: "Die Website konnte nicht geprüft werden. Versuche es erneut.",
-        planRequired: "Website-Hosting ist ab {plan} enthalten.",
+        planRequired: "Websites können ab {plan} öffentlich veröffentlicht werden.",
         paidPlanRequired:
-          "Dieser Bereich benötigt einen kostenpflichtigen Tarif für Website-Hosting.",
+          "Dieser Bereich benötigt einen kostenpflichtigen Tarif, um eine Website öffentlich zu veröffentlichen.",
         upgradeHint:
-          "Bereite die App vor und upgrade dann diesen Bereich, um sie zu prüfen und zu veröffentlichen. Ein Browser-Vorschaulink ist keine ständig verfügbare Website.",
+          "Du kannst jetzt eine private Vorschau ansehen. Upgrade diesen Bereich, wenn du eine ständig verfügbare öffentliche Website veröffentlichen möchtest.",
         prepareTitle: "Webversion vorbereiten",
         prepareHint:
           "Bitte deinen Agenten, eine Webversion vorzubereiten. Vor der Veröffentlichung können Codeänderungen nötig sein.",
@@ -867,7 +910,7 @@ export const dashboardDe: CoreI18nMessages = {
         refreshPreview: "Website-Vorschau aktualisieren",
         previewTitle: "Private Website-Vorschau",
         publishConsent:
-          "Die geprüfte Version wird veröffentlicht. Jeder mit der Adresse kann die Website nutzen, einschließlich der Daten und Aktionen, die ihr Code zugänglich macht.",
+          "Jeder mit der Site-Adresse kann auf diese Version und die darin freigegebenen Daten und Aktionen zugreifen.",
       },
       statusNotLive: "Nicht online",
       statusLive: "Online",
@@ -904,7 +947,7 @@ export const dashboardDe: CoreI18nMessages = {
         guideNameHint:
           "Trage den Teil vor deiner Hauptdomain ein, z. B. shop für shop.company.com. Manche Anbieter verlangen den vollständigen Namen.",
         guideStepCheck:
-          "Komm hierher zurück und klicke auf „{check}“. DNS-Änderungen können einige Minuten bis Stunden dauern; danach wird HTTPS automatisch eingerichtet. Wird zusätzlich ein TXT-Eintrag zur Verifizierung benötigt, erscheint er hier, sobald du die Domain hinzugefügt hast.",
+          "Sobald der Routing-CNAME aufgelöst wird, verifiziert Cloudflare den Hostnamen automatisch und bereitet HTTPS vor. Klicke auf „{check}“, um den Status zu sehen. DNS-Änderungen brauchen mitunter Zeit.",
         guideRootDomain:
           "Du willst eine Hauptdomain wie company.com nutzen? Das klappt nur, wenn dein DNS-Anbieter einen CNAME auf der Hauptdomain unterstützt (CNAME-Flattening, ALIAS oder ANAME; Cloudflare kann das). Sonst nimm eine Subdomain wie www oder shop.",
         guideLink: "Einrichtungsanleitung öffnen",
@@ -921,7 +964,7 @@ export const dashboardDe: CoreI18nMessages = {
         adding: "Wird hinzugefügt…",
         pending: "Einrichtung ausstehend",
         pendingDnsHint:
-          "Füge die folgenden Einträge bei deinem DNS-Anbieter hinzu und prüfe erneut. DNS-Änderungen können etwas Zeit benötigen.",
+          "Füge den Routing-CNAME bei deinem DNS-Anbieter hinzu und prüfe erneut. DNS-Änderungen können etwas Zeit benötigen.",
         pendingHttpsHint:
           "Die Domaininhaberschaft ist bestätigt. HTTPS wird eingerichtet. Prüfe in Kürze erneut.",
         active: "Verbunden",
@@ -938,8 +981,11 @@ export const dashboardDe: CoreI18nMessages = {
         },
         offlineHint:
           "Die Website ist offline. Alle Website-Adressen zeigen eine Nicht-gefunden-Seite.",
+        advancedVerification: "Erweiterte Verifizierung",
+        advancedHint:
+          "Diese optionalen Eigentums- und Zertifikatsprüfungen sind für Migrationen oder die Prüfung vor einer Traffic-Umstellung gedacht. Normale Subdomains beginnen mit dem Routing-CNAME oben.",
         dnsInstructions:
-          "Füge diese Einträge bei deinem DNS-Anbieter hinzu. Behalte alle anderen für deine Domain benötigten Einträge. Der Cloudflare-Proxy wird unterstützt, sobald die Weiterleitung zur Website bestätigt ist.",
+          "Füge diesen CNAME bei deinem DNS-Anbieter hinzu und prüfe erneut. Cloudflare-Proxying wird unterstützt, sobald die Website-Route verifiziert ist.",
         dnsName: "Name",
         dnsValue: "Wert / Ziel",
         httpInstructions:
@@ -1752,6 +1798,7 @@ export const dashboardDe: CoreI18nMessages = {
       "Geben Sie ein paar Zeichen ein, um Datensatz- und Dateiinhalte in diesem Tab zu durchsuchen.",
   },
   trash: {
+    deletedAt: "Gelöscht",
     title: "Papierkorb",
     body: "Archivierte Elemente werden in der Seitenleiste ausgeblendet. Stellen Sie sie wieder her, um sie wieder zu aktivieren.",
     bases: "Bases",
@@ -1759,7 +1806,7 @@ export const dashboardDe: CoreI18nMessages = {
     noArchivedBasesBody: "Bases, die Sie archivieren, erscheinen hier.",
     foldersDocsSkills: "Ordner, Dokumente und Skills",
     noArchivedItemsTitle: "Keine archivierten Elemente",
-    noArchivedItemsBody: "Ordner, Dokumente und Skills, die Sie löschen, erscheinen hier.",
+    noArchivedItemsBody: "Gelöschte Elemente werden hier angezeigt.",
     deleteForever: "Endgültig löschen",
     deletePermanentlyTitle: "Dauerhaft löschen?",
     deletePermanentlyBody: "„{name}“ dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.",
@@ -1802,6 +1849,8 @@ export const dashboardDe: CoreI18nMessages = {
     changeIcon: "Symbol ändern",
     iconUploadLabel: "Bild hochladen",
     iconUploadFormatHint: "PNG, JPG, GIF oder WebP, bis zu 2 MB",
+    restoreDefaultIcon: "Standardsymbol wiederherstellen",
+    restoreDefaultIconHint: "Eigenes Bild oder Emoji entfernen",
     cropDialogTitle: "Symbol bearbeiten",
     confirmCrop: "Übernehmen",
     iconFileMustBeImage: "Bitte wählen Sie eine Bilddatei aus",
@@ -2445,6 +2494,8 @@ export const dashboardDe: CoreI18nMessages = {
       "Dadurch wird ein Change Request zum Löschen von „{title}“ geöffnet. Der kanonische Datensatz bleibt sichtbar, bis die Anfrage geprüft und gemergt wurde.",
     editRecord: "Datensatz bearbeiten",
     newRecordTitle: "Neuer Datensatz in {base}",
+    newRecordHelp:
+      "Brauchen Sie ein Beispiel? Öffnen Sie Agent-Prompts → Übungsdatensatz erstellen. Prüfen Sie das ausdrücklich fiktive Beispiel vor dem Speichern. Verwenden Sie für echte Datensätze Ihre eigenen Angaben und Dateien.",
     failedSaveChangeRequest: "Change Request konnte nicht gespeichert werden",
     invalidFields: "Prüfen Sie die folgenden Felder: {fields}.",
     submitRequest: "Anfrage senden",
@@ -2891,6 +2942,8 @@ export const dashboardDe: CoreI18nMessages = {
     untitledStep: "Schritt ohne Titel",
     completed: "Abgeschlossen",
     previewFrame: "Vorschau von {name}",
+    htmlSourcePlainText:
+      "Großer Quelltext wird als Klartext angezeigt, damit die Vorschau flüssig bleibt. Der Inhalt ist vollständig.",
     save: "Speichern",
     saved: "Gespeichert",
     unsaved: "Nicht gespeicherte Änderungen",

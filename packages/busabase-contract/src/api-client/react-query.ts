@@ -47,6 +47,11 @@ const createDemoFetch =
 const UNBATCHABLE_PROCEDURES = new Set([
   // A superseded search must abort independently of unrelated dashboard reads.
   "search",
+  // One Base page can be 1000 records, around 10 MB on a wide Base. Compression
+  // happens in front of the app (Next leaves API JSON raw), and it applies to a
+  // plain JSON response only. A batched response is an event stream, which the
+  // proxy must not compress or it holds events back. So the page travels alone.
+  "records.listPage",
   "agents.sessions.subscribe",
   "airapps.runLocal",
   // These read a whole app's files and, for two of them, upload it. Seconds of

@@ -10,6 +10,7 @@ interface ImageViewerProps {
   fileName: string;
   watermark?: string | null;
   noDownload?: boolean;
+  fitToContainer?: boolean;
 }
 
 export default function ImageViewer({
@@ -17,6 +18,7 @@ export default function ImageViewer({
   fileName,
   watermark,
   noDownload,
+  fitToContainer = false,
 }: ImageViewerProps) {
   const { LL } = useI18n();
   const minHeightClass = useViewerMinHeightClass();
@@ -39,7 +41,9 @@ export default function ImageViewer({
   };
 
   return (
-    <div className={`w-full ${minHeightClass} flex items-center justify-center relative`}>
+    <div
+      className={`w-full ${fitToContainer ? "h-full min-h-0 overflow-hidden" : minHeightClass} flex items-center justify-center relative`}
+    >
       {watermark && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rotate-[-45deg] text-6xl font-bold text-black/10 select-none pointer-events-none whitespace-nowrap z-999">
           {watermark}
@@ -86,7 +90,7 @@ export default function ImageViewer({
       <img
         src={fileUrl}
         alt={fileName}
-        className={`max-w-full max-h-full object-contain ${isLoading ? "opacity-0" : "opacity-100"} transition-opacity duration-300`}
+        className={`max-w-full max-h-full object-contain${fitToContainer ? " w-auto h-auto shrink-0" : ""} ${isLoading ? "opacity-0" : "opacity-100"} transition-opacity duration-300`}
         onContextMenu={noDownload ? (e) => e.preventDefault() : undefined}
         onLoad={handleImageLoad}
         onError={handleImageError}

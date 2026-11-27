@@ -33,8 +33,13 @@ import {
 } from "../helpers/record-collection-status";
 import { useSourceViewSlug } from "../helpers/source-view-context";
 import { withSourceView } from "../helpers/source-view-url";
+import type { FieldChip } from "../helpers/view-types";
 import { useLinkedRecords } from "../hooks/use-linked-records";
 import type { RecordFindControl } from "../hooks/use-record-find";
+import {
+  RecordFindHighlightedText,
+  useRecordFindHighlighter,
+} from "../hooks/use-record-find-highlight";
 import { useDashboardOrpc } from "../orpc-context";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { AttachmentValuePreview } from "./attachment-value-preview";
@@ -91,6 +96,12 @@ function KanbanCardField({
       <dd className="min-w-0">{children}</dd>
     </div>
   );
+}
+
+/** Choice/tag chips on a card, with a record find's query marked in their labels. */
+function KanbanCardChips({ chips, field }: { chips: FieldChip[]; field: BaseFieldVO }) {
+  const highlight = useRecordFindHighlighter(field);
+  return <FieldBadgeList chips={chips} highlight={highlight} />;
 }
 
 /**
@@ -194,7 +205,9 @@ function KanbanCard({
   const sourceViewSlug = useSourceViewSlug();
   const suppressDragClick = useRef(false);
   const title = getRecordTitle(record, messages);
-  const primaryFieldSlug = getPrimaryField(record.base)?.slug;
+  const primaryField = getPrimaryField(record.base);
+  const primaryFieldSlug = primaryField?.slug;
+  const highlightTitle = useRecordFindHighlighter(primaryField);
   const bodyFields = fields.filter(
     (field) => field.slug !== primaryFieldSlug && field.slug !== stackFieldSlug,
   );
@@ -289,7 +302,7 @@ function KanbanCard({
         onClick={openRecord}
         title={title}
       >
-        {title}
+        {highlightTitle(title)}
       </Link>
       <dl>
         {bodyFields.map((field) => {
@@ -305,7 +318,7 @@ function KanbanCard({
             const chips = getFieldChipEntries(field, rawValue);
             return chips.length === 0 ? null : (
               <KanbanCardField field={field} key={field.id} showFieldLabels={showFieldLabels}>
-                <FieldBadgeList chips={chips} />
+                <KanbanCardChips chips={chips} field={field} />
               </KanbanCardField>
             );
           }
@@ -351,7 +364,7 @@ function KanbanCard({
                 className="truncate text-muted-foreground"
                 title={`${resolveIString(field.name)}: ${preview}`}
               >
-                {preview}
+                <RecordFindHighlightedText field={field} text={preview} />
               </div>
             </KanbanCardField>
           );

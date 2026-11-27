@@ -64,6 +64,11 @@ export async function getBusabaseOpenApiSpec(): Promise<OpenAPI.Document> {
           "Skills, Drives, and AirApps — node types whose content is an Asset-backed file tree. One surface for all three, discriminated by `type`; they differ only in their seed files and entry file. This tag covers creating them and working with the files INSIDE one; listing them and reading one node's detail is under the Nodes tag (`GET /nodes?types=skill`, `GET /nodes/{nodeId}`).",
       },
       {
+        name: "AirApp Previews",
+        description:
+          "Start, inspect, and stop this caller's runtime preview from merged AirApp files. Choose local or remote explicitly, poll until running, and use the returned same-origin preview URL. These operations never publish a website.",
+      },
+      {
         name: "Assets",
         description:
           "Logical Busabase files backed by deduped Attachments, including AI-readable metadata and where-used references.",
